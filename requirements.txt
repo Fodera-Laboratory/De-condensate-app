@@ -1,0 +1,11 @@
+streamlit
+numpy
+pandas
+plotly
+kaleido
+scikit-learn
+scipy
+matplotlib
+pymcr
+openpyxl
+Pillow
