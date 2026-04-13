@@ -294,6 +294,65 @@ def snv_normalization(data):
         raise ValueError("Input must be a 1-D or 2-D array.")
 
 
+def area_normalization(data, wn=None):
+    """
+    Area (unit-area) normalisation: divide each spectrum by its integral.
+
+    Eliminates intensity scaling differences between spectra while preserving
+    relative peak heights. Recommended for MCR-ALS as it ensures concentration
+    differences drive intensity variation rather than instrument artifacts.
+
+    Parameters
+    ----------
+    data : array_like
+        1-D (single spectrum) or 2-D array (samples × features).
+    wn : array_like, optional
+        Wavenumber axis for trapezoidal integration. If None, uses index spacing.
+
+    Returns
+    -------
+    ndarray, same shape as input.
+    """
+    data = np.asarray(data, dtype=float)
+    if wn is None:
+        x = np.arange(data.shape[-1])
+    else:
+        x = np.asarray(wn, dtype=float)
+    if data.ndim == 1:
+        area = np.trapezoid(data, x)
+        return data / area if area != 0 else data
+    else:
+        areas = np.trapezoid(data, x, axis=1)[:, np.newaxis]
+        areas[areas == 0] = 1.0
+        return data / areas
+
+
+def vector_normalization(data):
+    """
+    Vector (Euclidean norm) normalisation: divide each spectrum by its L2 norm.
+
+    Ensures all spectra have equal Euclidean norm, removing differences in
+    absolute intensity between spectra.
+
+    Parameters
+    ----------
+    data : array_like
+        1-D (single spectrum) or 2-D array (samples × features).
+
+    Returns
+    -------
+    ndarray, same shape as input.
+    """
+    data = np.asarray(data, dtype=float)
+    if data.ndim == 1:
+        norm = np.linalg.norm(data)
+        return data / norm if norm != 0 else data
+    else:
+        norms = np.linalg.norm(data, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return data / norms
+
+
 # ── Smoothing ──────────────────────────────────────────────────────────────
 
 def Savgol_filter(y, window_length, polyorder):

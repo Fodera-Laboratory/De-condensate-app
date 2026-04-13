@@ -21,6 +21,8 @@ from raman_preprocessing import (
     als_baseline_correction,
     rolling_ball_baseline,
     Min_max_normalisation,
+    area_normalization,
+    vector_normalization,
     spike_removal_scp,
 )
 from raman_io import load_line_scan_from_txt
@@ -72,6 +74,10 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = Min_max_normalisation(I)
     elif normalize == "snv":
         I = snv_normalization(I)
+    elif normalize == "area":
+        I = area_normalization(I, wn)
+    elif normalize == "vector":
+        I = vector_normalization(I)
     # normalize == "none": skip
 
     return I

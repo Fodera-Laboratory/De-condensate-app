@@ -197,14 +197,15 @@ def _goto_mcr():     st.session_state["active_tab"] = "🔬  MCR decomposition"
 def _goto_further(): st.session_state["active_tab"] = "🔍  Further analysis"
 
 
-def _std_spectra_plot(df, title, conc_unit, color, height=300, is_salt=False):
+def _std_spectra_plot(df, title, conc_unit, color, height=300, is_salt=False, use_pls_settings=False):
     """Plot preprocessed spectra from a standard CSV coloured by concentration."""
     try:
         wn_raw = pd.to_numeric(df.columns[1:], errors="coerce").values
         X_raw  = df.iloc[:, 1:].values.astype(float)
         c      = df.iloc[:, 0].values.astype(float)
+        _s = pls_settings if use_pls_settings else settings
         with st.spinner("Preprocessing…"):
-            X_proc, wn_proc, _ = an.preprocess_matrix(X_raw, wn_raw, settings,
+            X_proc, wn_proc, _ = an.preprocess_matrix(X_raw, wn_raw, _s,
                                                        is_salt=is_salt)
         fig = go.Figure()
         for i in range(X_proc.shape[0]):
@@ -295,19 +296,44 @@ with tab_files:
             als_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8, format="%.0e")
             als_p   = st.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5, format="%.3f")
 
-        normalize = st.selectbox(
-            "PLS / MCR normalization",
-            ["minmax", "snv", "none"],
-            format_func=lambda x: {"minmax": "Min-max [0, 1]", "snv": "SNV", "none": "None"}[x],
+        _norm_opts = ["snv", "area", "vector", "minmax", "none"]
+        _norm_fmt  = lambda x: {
+            "snv":    "SNV",
+            "area":   "Area (unit area)",
+            "vector": "Vector (unit norm)",
+            "minmax": "Min-max [0, 1]",
+            "none":   "None",
+        }[x]
+        normalize_pls = st.selectbox(
+            "PLS normalization",
+            _norm_opts,
+            index=0,
+            format_func=_norm_fmt,
             help=(
-                "Scales spectra before multivariate modelling to remove intensity offsets caused "
-                "by differences in focus depth, sample thickness, or laser power. "
-                "**Min-max [0, 1]** (default) stretches each spectrum so the minimum is 0 and "
-                "the maximum is 1. **SNV** centres and scales each spectrum to zero mean and unit "
-                "variance. Choose **None** only if spectra are already on a comparable intensity scale."
+                "Normalization applied to spectra before PLS modelling. "
+                "**SNV** (default) — centres and scales to zero mean and unit variance; "
+                "the standard choice for PLS. "
+                "**Area** — divides by spectral integral; removes intensity differences while "
+                "preserving relative peak ratios. "
+                "**Vector** — divides by Euclidean norm; ensures all spectra have equal L2 norm. "
+                "**Min-max** — not recommended for PLS as a single spike can compress all features."
             ),
         )
-        _norm_fmt = lambda x: {"minmax": "Min-max [0, 1]", "snv": "SNV", "none": "None"}[x]
+        normalize_mcr = st.selectbox(
+            "MCR normalization",
+            _norm_opts,
+            index=1,
+            format_func=_norm_fmt,
+            help=(
+                "Normalization applied to spectra before MCR-ALS decomposition. "
+                "**Area** (default) — recommended for MCR as it preserves non-negativity and "
+                "ensures intensity differences reflect concentration rather than instrument artifacts. "
+                "**SNV** can cause MCR to converge in 1 iteration because it centres spectra around "
+                "zero, conflicting with non-negativity constraints. "
+                "**Vector** — normalises to unit Euclidean norm."
+            ),
+        )
+        normalize = normalize_mcr  # used by salt and further-analysis paths
         salt_normalize = st.selectbox(
             "Salt normalization",
             ["none", "minmax", "snv"],
@@ -505,7 +531,9 @@ settings = dict(
     ball_radius=ball_radius,
     als_lam=als_lam,
     als_p=als_p,
-    normalize=normalize,
+    normalize=normalize_mcr,
+    normalize_pls=normalize_pls,
+    normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
     spike_remove=spike_remove,
     wn_min=wn_min,
@@ -516,6 +544,8 @@ settings = dict(
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
+# Settings override for PLS standard preprocessing
+pls_settings = dict(settings, normalize=normalize_pls)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -538,7 +568,7 @@ if build_btn:
                     df_prot = _read_csv_src(protein_std_src)
                     y_prot = df_prot.iloc[:, 0].to_numpy(dtype=float) * conv
                     X_prot_raw = df_prot.iloc[:, 1:].to_numpy()
-                    X_prot_proc, wn_prot, _ = an.preprocess_matrix(X_prot_raw, wn_ref, settings)
+                    X_prot_proc, wn_prot, _ = an.preprocess_matrix(X_prot_raw, wn_ref, pls_settings)
 
                 # ── Dual PLS (protein + PEG) or single-output protein PLS ───
                 if peg_std_src:
@@ -546,7 +576,7 @@ if build_btn:
                         df_peg = _read_csv_src(peg_std_src)
                         y_peg = df_peg.iloc[:, 0].to_numpy(dtype=float)
                         X_peg_raw = df_peg.iloc[:, 1:].to_numpy()
-                        X_peg_proc, _, _ = an.preprocess_matrix(X_peg_raw, wn_ref, settings)
+                        X_peg_proc, _, _ = an.preprocess_matrix(X_peg_raw, wn_ref, pls_settings)
 
                     with st.spinner("Training dual protein+molecular crowder PLS model…"):
                         pls_protein = an.build_dual_pls_model(
