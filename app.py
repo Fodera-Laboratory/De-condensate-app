@@ -272,28 +272,31 @@ with tab_files:
         st.subheader("Preprocessing")
         baseline = st.selectbox(
             "Baseline correction",
-            ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls", "imodpoly", "modpoly", "poly", "none"],
+            ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls", "imodpoly", "modpoly", "poly", "endpoint", "linear", "none"],
             format_func=lambda x: {
-                "rubberband": "Rubberband (convex hull)",
-                "rolling_ball": "Rolling ball",
-                "als":      "ALS (Asymmetric Least Squares)",
-                "arpls":    "ARPLS (Asymmetrically Reweighted PLS)",
-                "airpls":   "AIRPLS (Adaptive Iterative Reweighted PLS)",
-                "iasls":    "IASLS (Improved ALS)",
-                "drpls":    "DRPLS (Doubly Reweighted PLS)",
-                "imodpoly": "IModPoly (Improved Modified Polynomial)",
-                "modpoly":  "ModPoly (Modified Polynomial)",
-                "poly":     "Poly (Polynomial)",
-                "none":     "None",
+                "rubberband":  "Rubberband (convex hull)",
+                "rolling_ball":"Rolling ball",
+                "als":         "ALS (Asymmetric Least Squares)",
+                "arpls":       "ARPLS (Asymmetrically Reweighted PLS)",
+                "airpls":      "AIRPLS (Adaptive Iterative Reweighted PLS)",
+                "iasls":       "IASLS (Improved ALS)",
+                "drpls":       "DRPLS (Doubly Reweighted PLS)",
+                "imodpoly":    "IModPoly (Improved Modified Polynomial)",
+                "modpoly":     "ModPoly (Modified Polynomial)",
+                "poly":        "Poly (Polynomial)",
+                "endpoint":    "Endpoint (anchors ends to zero)",
+                "linear":      "Linear (fit to spectral edges)",
+                "none":        "None",
             }[x],
             help=(
                 "Removes fluorescence background. "
                 "**Rubberband** (default) — fast convex hull, robust for most Raman data. "
-                "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants from RamanSPy, "
-                "good for irregular or strongly curved baselines. "
-                "**IModPoly / ModPoly / Poly** — polynomial fits, useful when the baseline is smooth. "
+                "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants from RamanSPy. "
+                "**IModPoly / ModPoly / Poly** — polynomial fits. "
                 "**Rolling ball** — morphological, tunable radius. "
-                "**ALS** — classic asymmetric least squares."
+                "**ALS** — classic asymmetric least squares. "
+                "**Endpoint** — straight line between first and last point. "
+                "**Linear** — straight line fitted to outermost 5 % of points."
             ),
         )
         ball_radius, als_lam, als_p = 50, 1e5, 0.01
@@ -1718,6 +1721,109 @@ with tab_further:
         from sklearn.decomposition import PCA as _SklearnPCA
         from scipy.optimize import curve_fit as _curve_fit
 
+        # ── Shared preprocessing helpers for Further analysis ─────────────
+        _FA_BL_OPTS = ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls",
+                       "drpls", "imodpoly", "modpoly", "poly", "endpoint", "linear", "none"]
+        _FA_BL_FMT  = {
+            "rubberband":  "Rubberband (convex hull)",
+            "rolling_ball":"Rolling ball",
+            "als":         "ALS",
+            "arpls":       "ARPLS",
+            "airpls":      "AIRPLS",
+            "iasls":       "IASLS",
+            "drpls":       "DRPLS",
+            "imodpoly":    "IModPoly",
+            "modpoly":     "ModPoly",
+            "poly":        "Poly",
+            "endpoint":    "Endpoint (anchors ends to zero)",
+            "linear":      "Linear (fit to spectral edges)",
+            "none":        "None",
+        }
+        _FA_SM_OPTS = ["none", "savgol", "gaussian", "fft_lowpass"]
+        _FA_SM_FMT  = {"none": "None", "savgol": "Savitzky-Golay",
+                       "gaussian": "Gaussian", "fft_lowpass": "FFT low-pass"}
+        _FA_NM_OPTS = ["snv", "area", "vector", "minmax", "none"]
+        _FA_NM_FMT  = {"snv": "SNV", "area": "Area (unit area)",
+                       "vector": "Vector (unit norm)", "minmax": "Min-max [0, 1]", "none": "None"}
+
+        def _further_pp_ui(key_prefix, default_baseline="none", default_smooth="none",
+                           default_norm="snv", expanded=True):
+            """Render preprocessing controls and return a settings dict."""
+            with st.expander("⚙ Preprocessing", expanded=expanded):
+                _fa1, _fa2, _fa3 = st.columns(3)
+                _fa_bl = _fa1.selectbox(
+                    "Baseline", _FA_BL_OPTS,
+                    index=_FA_BL_OPTS.index(default_baseline),
+                    format_func=lambda x: _FA_BL_FMT[x],
+                    key=f"{key_prefix}_bl",
+                )
+                _fa_sm = _fa2.selectbox(
+                    "Smoothing", _FA_SM_OPTS,
+                    index=_FA_SM_OPTS.index(default_smooth),
+                    format_func=lambda x: _FA_SM_FMT[x],
+                    key=f"{key_prefix}_sm",
+                )
+                _fa_nm = _fa3.selectbox(
+                    "Normalisation", _FA_NM_OPTS,
+                    index=_FA_NM_OPTS.index(default_norm),
+                    format_func=lambda x: _FA_NM_FMT[x],
+                    key=f"{key_prefix}_nm",
+                )
+                _fa_ball = 50; _fa_alsl = 1e5; _fa_alsp = 0.01
+                _fa_rsl = 1e5; _fa_rsp = 2
+                _fa_sgw = 11; _fa_sgp = 3; _fa_gss = 1.0; _fa_fftc = 0.1
+                if _fa_bl == "rolling_ball":
+                    _fa_ball = st.slider("Ball radius", 10, 300, 50, key=f"{key_prefix}_ball")
+                elif _fa_bl == "als":
+                    _fp1, _fp2 = st.columns(2)
+                    _fa_alsl = _fp1.number_input("λ (smoothness)", value=1e5, min_value=1e2,
+                                                  max_value=1e8, format="%.0e", key=f"{key_prefix}_alsl")
+                    _fa_alsp = _fp2.number_input("p (asymmetry)", value=0.01, min_value=0.001,
+                                                  max_value=0.5, format="%.3f", key=f"{key_prefix}_alsp")
+                elif _fa_bl in ("arpls", "airpls", "iasls", "drpls"):
+                    _fa_rsl = st.number_input("λ (smoothness)", value=1e5, min_value=1e2,
+                                               max_value=1e9, format="%.0e", key=f"{key_prefix}_rsl")
+                elif _fa_bl in ("imodpoly", "modpoly", "poly"):
+                    _fa_rsp = st.slider("Polynomial order", 1, 8, 2, key=f"{key_prefix}_rsp")
+                if _fa_sm == "savgol":
+                    _fs1, _fs2 = st.columns(2)
+                    _fa_sgw = _fs1.slider("Window (odd)", 5, 51, 11, step=2, key=f"{key_prefix}_sgw")
+                    _fa_sgp = _fs2.slider("Poly order",   1,  9,  3,        key=f"{key_prefix}_sgp")
+                elif _fa_sm == "gaussian":
+                    _fa_gss = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key=f"{key_prefix}_gss")
+                elif _fa_sm == "fft_lowpass":
+                    _fa_fftc = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
+                                          key=f"{key_prefix}_fftc")
+            return dict(
+                baseline=_fa_bl, ball_radius=_fa_ball,
+                als_lam=_fa_alsl, als_p=_fa_alsp,
+                rs_lam=_fa_rsl, rs_poly_order=_fa_rsp,
+                smooth=_fa_sm, sg_window=_fa_sgw, sg_poly=_fa_sgp,
+                gaussian_sigma=_fa_gss, fft_cutoff=_fa_fftc,
+                normalize=_fa_nm, spike_remove=False,
+            )
+
+        def _apply_further_pp(X_raw, wn_raw, pp, wn_lo=None, wn_hi=None):
+            """Preprocess raw spectra with analysis-specific settings.
+
+            Parameters
+            ----------
+            X_raw   : raw spectral matrix (n_spectra × n_raw_wn)
+            wn_raw  : raw wavenumber axis
+            pp      : settings dict from _further_pp_ui
+            wn_lo, wn_hi : optional wavenumber range (defaults to full raw range)
+
+            Returns (X_proc, wn_proc)
+            """
+            _s = dict(
+                pp,
+                wn_min=wn_lo if wn_lo is not None else float(wn_raw.min()),
+                wn_max=wn_hi if wn_hi is not None else float(wn_raw.max()),
+                use_cut=False,
+            )
+            _Xp, _wn_out, _ = an.preprocess_matrix(X_raw, wn_raw, _s)
+            return _Xp, _wn_out
+
         results_all = st.session_state.get("results", {})
         models      = st.session_state.get("models", {})
         unit        = st.session_state.get("unit", "mg/mL")
@@ -1740,14 +1846,11 @@ with tab_further:
             st.info("Select at least one dataset above.")
             st.stop()
 
-        # ── Re-read and preprocess raw files using current Files tab settings ─
-        st.info(
-            "Preprocessing uses the settings from the **📂 Files & preprocessing** tab "
-            "(baseline, smoothing, normalisation, spectral range)."
-        )
-        _X_list, _dist_list, _fname_list = [], [], []
+        # ── Load raw files; also retain raw spectra for per-analysis preprocessing ─
+        _X_list, _X_raw_list, _dist_list, _fname_list = [], [], [], []
         _prot_list, _peg_list, _salt_list, _mcr_list = [], [], [], []
         _wn = None
+        _wn_raw_shared = None  # raw wavenumber axis for fresh preprocessing
         for _f in linescan_files:
             if _f.name not in _sel_fnames:
                 continue
@@ -1758,10 +1861,13 @@ with tab_further:
             _dist_f = an.compute_cumulative_distance(_pos, an.detect_scan_mode(_pos))
             _n = _X_proc_f.shape[0]
             _X_list.append(_X_proc_f)
+            _X_raw_list.append(_X_raw)
             _dist_list.extend(_dist_f.tolist())
             _fname_list.extend([_f.name] * _n)
             if _wn is None:
                 _wn = _wn_proc_f
+            if _wn_raw_shared is None:
+                _wn_raw_shared = _wn_raw
             # PLS/MCR scores from cached results (for colouring), if available
             _r = results_all.get(_f.name, {})
             if _r.get("pls_protein") is not None:
@@ -1779,6 +1885,7 @@ with tab_further:
             st.error("No spectra could be loaded. Check that linescan files are valid.")
             st.stop()
         _X_all    = np.vstack(_X_list)
+        _X_raw_all = np.vstack(_X_raw_list)  # raw spectra for per-analysis preprocessing
         _prot_raw = np.array(_prot_list)
         _has_pls_results = not np.all(np.isnan(_prot_raw))
         _prot   = _prot_raw if _has_pls_results else None
@@ -1807,6 +1914,7 @@ with tab_further:
             _gmask      = (_prot >= _global_conc_lo) & (_prot <= _global_conc_hi)
             _gidx       = np.where(_gmask)[0]
             _X_all      = _X_all[_gmask]
+            _X_raw_all  = _X_raw_all[_gmask]
             _prot       = _prot[_gmask]
             _peg        = _peg[_gmask]    if _peg   is not None else None
             _salt       = _salt[_gmask]   if _salt  is not None else None
@@ -1842,6 +1950,7 @@ with tab_further:
             _mmask      = (_mcr_col >= _mcr_range[0]) & (_mcr_col <= _mcr_range[1])
             _midx       = np.where(_mmask)[0]
             _X_all      = _X_all[_mmask]
+            _X_raw_all  = _X_raw_all[_mmask]
             _prot       = _prot[_mmask]  if _prot  is not None else None
             _peg        = _peg[_mmask]   if _peg   is not None else None
             _salt       = _salt[_mmask]  if _salt  is not None else None
@@ -1875,50 +1984,44 @@ with tab_further:
 
         # ── a. PCA ────────────────────────────────────────────────────────
         st.markdown("### a. PCA of a selected spectral region")
-        _fig_caption("Preprocessing: analysis cut → optional normalisation → PCA. Broad cut and baseline correction are applied globally above.")
         _pcc3, _pcc4, _, _ = st.columns(4)
         _pca_cut2_min = _pcc3.number_input("Analysis cut min (cm⁻¹)", value=max(1580, int(_wn.min())), step=10)
         _pca_cut2_max = _pcc4.number_input("Analysis cut max (cm⁻¹)", value=min(1720, int(_wn.max())), step=10)
-        _pca3, _pca4, _pca5 = st.columns(3)
+        _pca3, _pca4 = st.columns(2)
         _pca_n_comp  = _pca3.slider("Number of PCs", 2, 10, 3, key="pca_n_comp")
-        _pca_norm    = _pca4.selectbox(
-            "Normalisation", ["SNV", "Min-max", "None"], key="pca_norm",
-            help="SNV: zero mean, unit variance per spectrum. Min-max: scale each spectrum to [0, 1]. None: use spectra as-is after baseline correction.",
-        )
-        _pca_lbl_key = _pca5.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
-        _run_pca     = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
+        _pca_lbl_key = _pca4.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
+        _pp_pca  = _further_pp_ui("pca", default_norm="snv")
+        _run_pca = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
 
         if _run_pca:
-            # Analysis cut (broad cut + rubberband already applied globally above)
-            _mask2 = (_wn >= _pca_cut2_min) & (_wn <= _pca_cut2_max)
-            if _mask2.sum() < 2:
+            _wn_lo_check = (_wn_raw_shared >= _pca_cut2_min).sum()
+            _wn_hi_check = (_wn_raw_shared <= _pca_cut2_max).sum()
+            if _wn_lo_check == 0 or _wn_hi_check == 0:
                 st.error(
-                    f"Analysis cut {_pca_cut2_min}–{_pca_cut2_max} cm⁻¹ contains fewer than 2 points. "
-                    f"The available range after the broad cut is "
-                    f"{_wn.min():.0f}–{_wn.max():.0f} cm⁻¹. "
-                    f"Adjust the Analysis cut min/max above to fall within this range."
+                    f"Analysis cut {_pca_cut2_min}–{_pca_cut2_max} cm⁻¹ lies outside the "
+                    f"raw wavenumber range {_wn_raw_shared.min():.0f}–{_wn_raw_shared.max():.0f} cm⁻¹."
                 )
             else:
-                _wn2    = _wn[_mask2]
-                _X_cut  = _X_all[:, _mask2]
-                if _pca_norm == "SNV":
-                    _X_proc = rms.snv_normalization(_X_cut)
-                elif _pca_norm == "Min-max":
-                    _X_proc = rms.Min_max_normalisation(_X_cut)
+                with st.spinner("Preprocessing spectra for PCA…"):
+                    _X_proc, _wn2 = _apply_further_pp(
+                        _X_raw_all, _wn_raw_shared, _pp_pca,
+                        wn_lo=_pca_cut2_min, wn_hi=_pca_cut2_max,
+                    )
+                if _X_proc.shape[1] < 2:
+                    st.error("Analysis cut contains fewer than 2 wavenumber points after preprocessing.")
                 else:
-                    _X_proc = _X_cut
-                _pca_model = _SklearnPCA(
-                    n_components=min(_pca_n_comp, _mask2.sum(), _X_proc.shape[0])
-                )
-                _scores = _pca_model.fit_transform(_X_proc)
-                st.session_state["pca_result"] = dict(
-                    scores=_scores,
-                    loadings=_pca_model.components_,
-                    var_exp=_pca_model.explained_variance_ratio_ * 100,
-                    wn=_wn2,
-                    label_key=_pca_lbl_key,
-                    label_vals={k: v.tolist() for k, v in _label_opts.items()},
-                )
+                    _pca_model = _SklearnPCA(
+                        n_components=min(_pca_n_comp, _X_proc.shape[1], _X_proc.shape[0])
+                    )
+                    _scores = _pca_model.fit_transform(_X_proc)
+                    st.session_state["pca_result"] = dict(
+                        scores=_scores,
+                        loadings=_pca_model.components_,
+                        var_exp=_pca_model.explained_variance_ratio_ * 100,
+                        wn=_wn2,
+                        label_key=_pca_lbl_key,
+                        label_vals={k: v.tolist() for k, v in _label_opts.items()},
+                    )
 
         if "pca_result" in st.session_state:
             _pr      = st.session_state["pca_result"]
@@ -1988,7 +2091,7 @@ with tab_further:
             st.plotly_chart(_fig_pca, use_container_width=True)
             st.caption(
                 f"PCA of {_pr['scores'].shape[0]} spectra over {_pr['wn'][0]:.0f}–{_pr['wn'][-1]:.0f} cm⁻¹ "
-                f"after SNV normalisation. "
+                f"after selected preprocessing. "
                 f"**a)** Score plot with {_x_lbl} on x and {_y_lbl} on y, coloured by {_c_lbl}. "
                 f"**b)** PC loadings ({_n_pc} components) — peaks indicate spectral regions driving variance. "
                 f"**c)** Individual (bars) and cumulative (line) explained variance per PC; "
@@ -2000,7 +2103,7 @@ with tab_further:
         st.markdown("### b. Amide I band decomposition")
         _fig_caption(
             "Gaussians are fitted to each individual spectrum in the amide I region. "
-            "Configure the preprocessing pipeline below — set the order (1 = first) and toggle steps on/off. "
+            "Configure the preprocessing below, then click Run. "
             "The resulting Gaussian areas represent the fractional contribution of each secondary structure element."
         )
         _cb1, _cb2, _cb3 = st.columns(3)
@@ -2008,73 +2111,8 @@ with tab_further:
         _amide_max = _cb2.number_input("Amide max (cm⁻¹)", value=1700, step=10, key="amide_max")
         _n_gauss   = _cb3.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
-        # ── Preprocessing pipeline table ──────────────────────────────────
-        st.caption("Set the order (1 = first) and toggle steps on/off. Hover (?) for details.")
-        _ph = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ph[0].markdown("**Order**"); _ph[1].markdown("**Step**")
-        _ph[2].markdown("**On**");    _ph[3].markdown("**Param 1**"); _ph[4].markdown("**Param 2**")
-
-        def _step_label(col, text, tip):
-            _icon = (
-                '<abbr title="{tip}" style="cursor:help;text-decoration:none;">'
-                '<span style="display:inline-flex;align-items:center;justify-content:center;'
-                'width:14px;height:14px;border-radius:50%;border:1.5px solid #888;'
-                'font-size:9px;color:#888;font-weight:bold;vertical-align:middle;">?</span>'
-                '</abbr>'
-            ).format(tip=tip)
-            col.markdown(f'{text} {_icon}', unsafe_allow_html=True)
-
-        _br = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_bl = _br[0].number_input("##bl_ord", 1, 4, 1, key="bl_ord", label_visibility="collapsed")
-        _step_label(_br[1], "Linear baseline subtraction",
-                    "Subtracts a straight line between the first and last spectral point of the "
-                    "amide region. Simple and fast, but sensitive to noise at the boundaries.")
-        _en_bl  = _br[2].checkbox("##bl_en", False, key="bl_en", label_visibility="collapsed")
-
-        _sr = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_sg  = _sr[0].number_input("##sg_ord", 1, 4, 2, key="sg_ord2", label_visibility="collapsed")
-        _step_label(_sr[1], "Savitzky-Golay smoothing",
-                    "Polynomial smoothing filter that reduces high-frequency noise while preserving "
-                    "peak shape and position. Window must be odd and larger than the polynomial order. "
-                    "Recommended for noisy spectra before Gaussian fitting.")
-        _en_sg   = _sr[2].checkbox("##sg_en", True, key="sg_en3", label_visibility="collapsed")
-        _sg_win  = _sr[3].number_input("Window", 3, 101, 11, 2, key="sg_win2",
-                                        help="Must be odd and greater than poly order.")
-        _sg_poly = _sr[4].number_input("Poly order", 1, 9, 3, 1, key="sg_poly2")
-
-        _fr = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_fft = _fr[0].number_input("##fft_ord", 1, 5, 2, key="fft_ord", label_visibility="collapsed")
-        _step_label(_fr[1], "FFT low-pass filter",
-                    "Zeroes Fourier coefficients corresponding to features narrower than the set "
-                    "minimum width, suppressing high-frequency noise while keeping broad amide bands "
-                    "(≥ 40 cm⁻¹). An alternative to SG smoothing — use one or the other, not both.")
-        _en_fft  = _fr[2].checkbox("##fft_en", False, key="fft_en2", label_visibility="collapsed")
-        _fft_width = _fr[3].number_input("Min. feature (cm⁻¹)", value=10, min_value=1, step=1,
-                                          key="fft_width",
-                                          help="Remove spectral features narrower than this width.")
-
-        _er = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_ep = _er[0].number_input("##ep_ord", 1, 4, 3, key="ep_ord2", label_visibility="collapsed")
-        _step_label(_er[1], "Endpoint baseline (anchors ends to 0)",
-                    "Subtracts a straight line that forces both endpoints of the amide region to zero. "
-                    "This is the conventional baseline correction used implicitly in most literature "
-                    "before Gaussian deconvolution of the amide I band.")
-        _en_ep  = _er[2].checkbox("##ep_en", True, key="ep_en2", label_visibility="collapsed")
-
-        _mr = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_mm = _mr[0].number_input("##mm_ord", 1, 4, 4, key="mm_ord", label_visibility="collapsed")
-        _step_label(_mr[1], "Min-max normalisation [0–1]",
-                    "Scales the spectrum so its minimum is 0 and maximum is 1. Makes peak heights "
-                    "comparable across spectra but does not normalise total area.")
-        _en_mm  = _mr[2].checkbox("##mm_en", False, key="mm_en", label_visibility="collapsed")
-
-        _ar2 = st.columns([0.7, 3, 0.6, 1.4, 1.4])
-        _ord_an = _ar2[0].number_input("##an_ord", 1, 4, 4, key="an_ord", label_visibility="collapsed")
-        _step_label(_ar2[1], "Area normalisation (integral = 1)",
-                    "Divides the spectrum by its integral so the total area equals 1. Recommended "
-                    "for Gaussian fitting: fitted component areas then represent secondary-structure "
-                    "fractions directly comparable across spectra.")
-        _en_an  = _ar2[2].checkbox("##an_en", True, key="an_en", label_visibility="collapsed")
+        _pp_amide = _further_pp_ui("amide", default_baseline="endpoint",
+                                    default_smooth="savgol", default_norm="area")
 
         # ── Gaussian centre constraints ───────────────────────────────────
         st.markdown("**Gaussian components**")
@@ -2133,56 +2171,14 @@ with tab_further:
         _run_amide = st.button("▶ Run decomposition", key="btn_amide", on_click=_goto_further)
 
         if _run_amide:
-            _mask_am = (_wn >= _amide_min) & (_wn <= _amide_max)
-            if _mask_am.sum() < _n_gauss * 3:
+            with st.spinner("Preprocessing spectra for amide decomposition…"):
+                _X_am, _wn_am = _apply_further_pp(
+                    _X_raw_all, _wn_raw_shared, _pp_amide,
+                    wn_lo=_amide_min, wn_hi=_amide_max,
+                )
+            if _X_am.shape[1] < _n_gauss * 3:
                 st.error("Too few wavenumber points for the requested number of Gaussians.")
             else:
-                _wn_am = _wn[_mask_am]
-                _X_am  = _X_all[:, _mask_am].copy()
-
-                # Build sorted pipeline and apply each enabled step
-                _pipeline = sorted([
-                    (_ord_bl,  "baseline", _en_bl,  {}),
-                    (_ord_sg,  "savgol",   _en_sg,  {"win": int(_sg_win), "poly": int(_sg_poly)}),
-                    (_ord_fft, "fft",      _en_fft, {"min_width": float(_fft_width)}),
-                    (_ord_ep,  "endpoint", _en_ep,  {}),
-                    (_ord_mm,  "minmax",   _en_mm,  {}),
-                    (_ord_an,  "area",     _en_an,  {}),
-                ], key=lambda _t: _t[0])
-
-                for _, _pname, _pen, _ppar in _pipeline:
-                    if not _pen:
-                        continue
-                    if _pname == "baseline":
-                        for _si in range(_X_am.shape[0]):
-                            _X_am[_si], _ = rms.linear_background_subtraction(_wn_am, _X_am[_si])
-                    elif _pname == "endpoint":
-                        # Subtract straight line between first and last spectral points
-                        _ep_bl = (_X_am[:, -1:] - _X_am[:, :1]) / (len(_wn_am) - 1)
-                        _X_am -= _X_am[:, :1] + _ep_bl * np.arange(len(_wn_am))
-                    elif _pname == "savgol":
-                        if _ppar["win"] > _ppar["poly"]:
-                            for _si in range(_X_am.shape[0]):
-                                _X_am[_si] = rms.Savgol_filter(_X_am[_si], _ppar["win"], _ppar["poly"])
-                        else:
-                            st.warning("SG: window must be > poly order — smoothing skipped.")
-                    elif _pname == "fft":
-                        _N   = _X_am.shape[1]
-                        _dnu = (_wn_am[-1] - _wn_am[0]) / max(_N - 1, 1)
-                        # Number of FFT coefficients to keep (period > min_width)
-                        _n_keep = max(1, int(round(_N * _dnu / _ppar["min_width"])))
-                        for _si in range(_X_am.shape[0]):
-                            _coeffs = np.fft.rfft(_X_am[_si])
-                            _coeffs[_n_keep:] = 0
-                            _X_am[_si] = np.fft.irfft(_coeffs, n=_N)
-                    elif _pname == "minmax":
-                        _sp_min = _X_am.min(axis=1, keepdims=True)
-                        _sp_max = _X_am.max(axis=1, keepdims=True)
-                        _X_am   = (_X_am - _sp_min) / np.where(_sp_max - _sp_min > 0, _sp_max - _sp_min, 1)
-                    elif _pname == "area":
-                        _areas = np.trapezoid(_X_am, _wn_am, axis=1)[:, np.newaxis]
-                        _X_am  = _X_am / np.where(np.abs(_areas) > 0, _areas, 1)
-
                 _mean_sp = _X_am.mean(axis=0)
 
                 def _multi_gauss(x, *p):
@@ -2535,62 +2531,71 @@ with tab_further:
                                    step=5, key="pk_hw",
                                    help="Intensity summed over [centre ± half-window]")
         _pr_lbl = st.selectbox("Plot ratio vs", list(_label_opts.keys()), key="pr_label")
+        _pp_peak = _further_pp_ui("peak", default_norm="none", expanded=False)
+        _run_peak = st.button("▶ Compute ratio", key="btn_peak", on_click=_goto_further)
 
-        def _integrate(X, wn, centre, hw):
-            _m = (wn >= centre - hw) & (wn <= centre + hw)
-            return X[:, _m].sum(axis=1) if _m.any() else np.zeros(X.shape[0])
+        if _run_peak:
+            with st.spinner("Preprocessing spectra for peak ratio…"):
+                _X_peak, _wn_peak = _apply_further_pp(_X_raw_all, _wn_raw_shared, _pp_peak)
 
-        _a1    = _integrate(_X_all, _wn, _pk1, _hw)
-        _a2    = _integrate(_X_all, _wn, _pk2, _hw)
-        _ratio = np.where(_a2 > 0, _a1 / _a2, np.nan)
-        _pr_col = _label_opts[_pr_lbl]
+            def _integrate(X, wn, centre, hw):
+                _m = (wn >= centre - hw) & (wn <= centre + hw)
+                return X[:, _m].sum(axis=1) if _m.any() else np.zeros(X.shape[0])
 
-        _fig_pr = make_subplots(
-            rows=1, cols=2,
-            subplot_titles=[
-                "a)  Ratio profile along linescan",
-                f"b)  Ratio vs {_pr_lbl}",
-            ],
-        )
-        _offset = 0
-        for _fi, (_fn, _r) in enumerate(results_all.items()):
-            _n_r   = _r["X_proc"].shape[0]
+            _a1    = _integrate(_X_peak, _wn_peak, _pk1, _hw)
+            _a2    = _integrate(_X_peak, _wn_peak, _pk2, _hw)
+            _ratio = np.where(_a2 > 0, _a1 / _a2, np.nan)
+            st.session_state["ratio_result"] = dict(
+                ratio=_ratio,
+                fnames=_fname_list,
+                distances=_dist_list,
+                pk1=_pk1, pk2=_pk2, hw=_hw,
+            )
+
+        if "ratio_result" in st.session_state:
+            _rr     = st.session_state["ratio_result"]
+            _ratio  = _rr["ratio"]
+            _pr_col = _label_opts[_pr_lbl]
+
+            _fig_pr = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=[
+                    "a)  Ratio profile along linescan",
+                    f"b)  Ratio vs {_pr_lbl}",
+                ],
+            )
+            _offset = 0
+            for _fi, (_fn, _r) in enumerate(results_all.items()):
+                _n_r   = _r["X_proc"].shape[0]
+                _fig_pr.add_trace(go.Scatter(
+                    x=_r["distance"], y=_ratio[_offset:_offset + _n_r],
+                    mode="lines", name=_fn,
+                    line=dict(color=COLORS[_fi % len(COLORS)], width=1.5),
+                ), row=1, col=1)
+                _offset += _n_r
+
             _fig_pr.add_trace(go.Scatter(
-                x=_r["distance"], y=_ratio[_offset:_offset + _n_r],
-                mode="lines", name=_fn,
-                line=dict(color=COLORS[_fi % len(COLORS)], width=1.5),
-            ), row=1, col=1)
-            _offset += _n_r
-
-        _fig_pr.add_trace(go.Scatter(
-            x=_pr_col, y=_ratio, mode="markers",
-            marker=dict(color=COLORS[0], size=5, opacity=0.5,
-                        line=dict(color="black", width=0.3)),
-            showlegend=False,
-        ), row=1, col=2)
-        _yr = f"I({_pk1}) / I({_pk2})"
-        _fig_pr.update_xaxes(title_text=dist_label, row=1, col=1)
-        _fig_pr.update_xaxes(title_text=_pr_lbl,    row=1, col=2)
-        _fig_pr.update_yaxes(title_text=_yr,         row=1, col=1)
-        _fig_pr.update_yaxes(title_text=_yr,         row=1, col=2)
-        _fig_pr.update_layout(height=360, legend=dict(orientation="h", y=-0.2))
-        st.plotly_chart(_fig_pr, use_container_width=True)
-        st.caption(
-            f"Band intensity ratio I({_pk1} cm⁻¹) / I({_pk2} cm⁻¹) "
-            f"integrated over ±{_hw} cm⁻¹ windows, computed from {_X_all.shape[0]} spectra "
-            f"across {len(results_all)} linescan(s). "
-            f"**a)** Ratio as a function of position along the linescan — "
-            f"spatial variation reflects local changes in the relative intensities of the two bands. "
-            f"**b)** Ratio plotted against {_pr_lbl} — "
-            f"a systematic trend here indicates that the two bands change in proportion to each other."
-        )
-        # Store peak ratio for download
-        st.session_state["ratio_result"] = dict(
-            ratio=_ratio,
-            fnames=_fname_list,
-            distances=_dist_list,
-            pk1=_pk1, pk2=_pk2, hw=_hw,
-        )
+                x=_pr_col, y=_ratio, mode="markers",
+                marker=dict(color=COLORS[0], size=5, opacity=0.5,
+                            line=dict(color="black", width=0.3)),
+                showlegend=False,
+            ), row=1, col=2)
+            _yr = f"I({_rr['pk1']}) / I({_rr['pk2']})"
+            _fig_pr.update_xaxes(title_text=dist_label, row=1, col=1)
+            _fig_pr.update_xaxes(title_text=_pr_lbl,    row=1, col=2)
+            _fig_pr.update_yaxes(title_text=_yr,         row=1, col=1)
+            _fig_pr.update_yaxes(title_text=_yr,         row=1, col=2)
+            _fig_pr.update_layout(height=360, legend=dict(orientation="h", y=-0.2))
+            st.plotly_chart(_fig_pr, use_container_width=True)
+            st.caption(
+                f"Band intensity ratio I({_rr['pk1']} cm⁻¹) / I({_rr['pk2']} cm⁻¹) "
+                f"integrated over ±{_rr['hw']} cm⁻¹ windows, computed from {len(_ratio)} spectra "
+                f"across {len(results_all)} linescan(s). "
+                f"**a)** Ratio as a function of position along the linescan — "
+                f"spatial variation reflects local changes in the relative intensities of the two bands. "
+                f"**b)** Ratio plotted against {_pr_lbl} — "
+                f"a systematic trend here indicates that the two bands change in proportion to each other."
+            )
 
 
 # ── Image overlay ─────────────────────────────────────────────────────────────

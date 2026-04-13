@@ -137,6 +137,44 @@ def spike_removal_scp(data, kernel_size=3, threshold=8):
 
 # ── Baseline correction ────────────────────────────────────────────────────
 
+def endpoint_baseline(y):
+    """
+    Subtract a straight line connecting the first and last point of the spectrum.
+
+    This is the conventional baseline correction used before Gaussian
+    deconvolution of amide bands in the literature.
+
+    Parameters
+    ----------
+    y : array_like
+        Intensity values.
+
+    Returns
+    -------
+    baseline : ndarray
+    """
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    return np.linspace(y[0], y[-1], n)
+
+
+def linear_baseline(y):
+    """
+    Subtract a linear baseline fitted to the first and last 5 % of spectral points.
+
+    Parameters
+    ----------
+    y : array_like
+        Intensity values.
+
+    Returns
+    -------
+    baseline : ndarray
+    """
+    y = np.asarray(y, dtype=float)
+    _, baseline = linear_background_subtraction(np.arange(len(y)), y)
+    return baseline
+
 def linear_background_subtraction(x, y, fit_region=None):
     """
     Subtract a linear baseline fitted to the spectral edges.

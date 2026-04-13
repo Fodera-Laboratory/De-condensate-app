@@ -20,6 +20,8 @@ from raman_preprocessing import (
     rubberband_correction,
     als_baseline_correction,
     rolling_ball_baseline,
+    endpoint_baseline,
+    linear_baseline,
     Min_max_normalisation,
     area_normalization,
     vector_normalization,
@@ -82,6 +84,10 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
             lam=settings.get("als_lam", 1e5),
             p=settings.get("als_p", 0.01),
         )
+    elif baseline == "endpoint":
+        I = I - endpoint_baseline(I)
+    elif baseline == "linear":
+        I = I - linear_baseline(I)
     elif baseline in _RS_BASELINE_MAP:
         import ramanspy.preprocessing.baseline as _rsb
         _fn_map = {
