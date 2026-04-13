@@ -7,6 +7,5 @@ scikit-learn
 scipy
 matplotlib
 pymcr
-spectrochempy
 openpyxl
 Pillow

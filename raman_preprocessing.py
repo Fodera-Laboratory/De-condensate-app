@@ -8,14 +8,6 @@ Spectral preprocessing routines for Raman data:
   - Savitzky-Golay smoothing
 """
 
-import os
-import tempfile
-
-# SpectroChemPy tries to copy matplotlib config files on startup, which fails
-# on read-only filesystems (e.g. Streamlit Cloud). Redirect to a writable
-# temp directory before any spectrochempy import occurs.
-os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp())
-
 import numpy as np
 from scipy.signal import find_peaks, peak_widths, savgol_filter
 from scipy import sparse
@@ -88,31 +80,58 @@ def spike_removal(y,
 
 def spike_removal_scp(data, size=11, delta=4):
     """
-    Remove spikes using the SpectroChemPy despike algorithm.
+    Remove cosmic spikes using the Whitaker-Hayes second-difference Z-score method.
 
-    Reference: Travert & Fernandez, J. Open Source Softw. 2023, 8(83), 5338.
-    https://doi.org/10.21105/joss.05338
+    The second difference of a smooth spectrum is near zero everywhere, while
+    a narrow cosmic spike produces a large localised excursion. The modified
+    Z-score is therefore computed on the second difference, not the raw spectrum,
+    so broad real Raman peaks are invisible to the detector. This matches the
+    algorithm used internally by SpectroChemPy's despike function.
+
+    Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman
+    spectra. Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
+    https://doi.org/10.1016/j.chemolab.2018.06.009
 
     Parameters
     ----------
     data : array_like, shape (n_wavenumbers,)
         Single spectrum.
     size : int
-        Window size for median replacement (default: 11).
+        Half-width of the replacement window (default: 11).
     delta : float
-        Modified Z-score threshold (default: 4).
+        Modified Z-score threshold above which a point is a spike (default: 4).
 
     Returns
     -------
     ndarray, shape (n_wavenumbers,)
         Despiked spectrum.
     """
-    import spectrochempy as scp
-    from spectrochempy import NDDataset
+    y = np.asarray(data, dtype=float)
+    n = len(y)
 
-    ds = NDDataset(np.asarray(data).reshape(1, -1))
-    ds_despiked = scp.despike(ds, size=size, delta=delta)
-    return ds_despiked.data.squeeze()
+    # Second difference: d[i] = y[i-1] - 2*y[i] + y[i+1]  for i in 1..n-2
+    d = np.empty(n)
+    d[1:-1] = y[:-2] - 2 * y[1:-1] + y[2:]
+    d[0]    = d[1]
+    d[-1]   = d[-2]
+
+    # Modified Z-score on the second difference
+    m   = np.median(d)
+    mad = np.median(np.abs(d - m))
+    if mad == 0:
+        return y
+    z      = 0.6745 * (d - m) / mad
+    spikes = np.abs(z) > delta
+
+    # Replace spikes with median of nearby non-spike points
+    y_out = y.copy()
+    half  = size // 2
+    for i in np.where(spikes)[0]:
+        w_start = max(0, i - half)
+        w_end   = min(n, i + half + 1)
+        mask    = ~spikes[w_start:w_end]
+        y_out[i] = np.median(y[w_start:w_end][mask]) if mask.any() else np.median(y[w_start:w_end])
+    return y_out
 
 
 # ── Baseline correction ────────────────────────────────────────────────────
