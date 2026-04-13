@@ -126,8 +126,8 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
     elif smooth == "whittaker":
         from ramanspy.preprocessing.denoise import _whittaker
         result, _ = _whittaker(I.reshape(1, -1), wn,
-                                lam=settings.get("whittaker_lam", 1e3),
-                                d=settings.get("whittaker_d", 2))
+                                settings.get("whittaker_lam", 1e3),
+                                settings.get("whittaker_d", 2))
         I = result.squeeze()
     elif smooth == "gaussian":
         from ramanspy.preprocessing.denoise import _gauss

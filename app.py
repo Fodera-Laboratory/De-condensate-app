@@ -866,28 +866,48 @@ with tab_preview:
                 first = linescan_files[0]
                 wn, X, _ = an.load_linescan_bytes(first.read(), first.name)
                 first.seek(0)
+                n_show = min(X.shape[0], 60)
+
+                def _prev_plot(X_p, wn_p, title, color):
+                    fig = go.Figure()
+                    for i in range(min(X_p.shape[0], n_show)):
+                        fig.add_trace(go.Scatter(
+                            x=wn_p, y=X_p[i], mode="lines",
+                            line=dict(color=color, width=0.8),
+                            opacity=0.4, showlegend=False,
+                        ))
+                    fig.update_layout(
+                        title=title,
+                        xaxis_title="Wavenumber (cm⁻¹)",
+                        yaxis_title="Intensity (a.u.)",
+                        height=320, margin=dict(t=40, b=40),
+                    )
+                    return fig
+
                 with st.spinner("Preprocessing…"):
-                    X_prev, wn_prev, _ = an.preprocess_matrix(X, wn, settings)
-                n_show = min(X_prev.shape[0], 60)
-                fig = go.Figure()
-                for i in range(n_show):
-                    fig.add_trace(go.Scatter(
-                        x=wn_prev, y=X_prev[i], mode="lines",
-                        line=dict(color=COLORS[0], width=0.8),
-                        opacity=0.4, showlegend=False,
-                    ))
-                fig.update_layout(
-                    title=f"{first.name}  ({n_show} spectra shown, preprocessed)",
-                    xaxis_title="Wavenumber (cm⁻¹)",
-                    yaxis_title="Intensity (a.u.)",
-                    height=380,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                st.caption(
-                    f"Preprocessed linescan: {first.name}. "
-                    f"Showing {n_show} of {X_prev.shape[0]} spectra. "
-                    f"Preprocessing applied: current settings."
-                )
+                    X_mcr,  wn_mcr,  _ = an.preprocess_matrix(X, wn, settings)
+                    X_pls,  wn_pls,  _ = an.preprocess_matrix(X, wn, pls_settings)
+                    X_salt, wn_salt, _ = an.preprocess_matrix(X, wn,
+                        dict(settings, normalize=settings.get("salt_normalize", "none")),
+                        is_salt=True)
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.plotly_chart(_prev_plot(X_pls,  wn_pls,
+                        f"PLS regression normalization ({normalize_pls})", COLORS[0]),
+                        use_container_width=True)
+                    st.caption(f"{X_pls.shape[0]} spectra, {wn_pls[0]:.0f}–{wn_pls[-1]:.0f} cm⁻¹")
+                with c2:
+                    st.plotly_chart(_prev_plot(X_mcr,  wn_mcr,
+                        f"MCR-ALS normalization ({normalize_mcr})", COLORS[1]),
+                        use_container_width=True)
+                    st.caption(f"{X_mcr.shape[0]} spectra, {wn_mcr[0]:.0f}–{wn_mcr[-1]:.0f} cm⁻¹")
+                with c3:
+                    st.plotly_chart(_prev_plot(X_salt, wn_salt,
+                        f"Salt PLS normalization ({salt_normalize})", COLORS[3]),
+                        use_container_width=True)
+                    st.caption(f"{X_salt.shape[0]} spectra, {wn_salt[0]:.0f}–{wn_salt[-1]:.0f} cm⁻¹")
+
             except Exception as exc:
                 st.error(f"Preview failed: {exc}")
 
