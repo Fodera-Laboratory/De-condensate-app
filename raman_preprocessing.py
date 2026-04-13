@@ -78,13 +78,12 @@ def spike_removal(y,
     return y_out
 
 
-def spike_removal_scp(data, size=11, delta=4):
+def spike_removal_scp(data, kernel_size=3, threshold=8):
     """
-    Remove cosmic spikes using the Whitaker-Hayes second-difference Z-score method.
+    Remove cosmic spikes using the Whitaker-Hayes algorithm as implemented in RamanSPy.
 
-    The second difference of a smooth spectrum is near zero everywhere; a
-    narrow cosmic spike produces a large localised excursion. This makes the
-    detector insensitive to broad real Raman peaks.
+    Detects spikes via modified Z-score on the first difference of the spectrum,
+    then iteratively replaces each spike with the mean of its non-spike neighbours.
 
     Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman
     spectra. Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
@@ -94,42 +93,46 @@ def spike_removal_scp(data, size=11, delta=4):
     ----------
     data : array_like, shape (n_wavenumbers,)
         Single spectrum.
-    size : int
-        Half-width of the replacement window (default: 11).
-    delta : float
-        Modified Z-score threshold (default: 4).
+    kernel_size : int
+        Half-width of the neighbourhood window for replacement (default: 3).
+    threshold : float
+        Modified Z-score threshold for spike detection (default: 8).
 
     Returns
     -------
     ndarray, shape (n_wavenumbers,)
         Despiked spectrum.
     """
-    y = np.asarray(data, dtype=float)
+    y = np.asarray(data, dtype=float).copy()
     n = len(y)
-    half = size // 2
 
-    # Second difference
-    d = np.empty(n)
-    d[1:-1] = y[:-2] - 2 * y[1:-1] + y[2:]
-    d[0]    = d[1]
-    d[-1]   = d[-2]
-
-    # Modified Z-score on second difference
-    m   = np.median(d)
-    mad = np.median(np.abs(d - m))
+    # Modified Z-score on first difference
+    d   = np.diff(y)
+    med = np.median(d)
+    mad = np.median(np.abs(d - med))
     if mad == 0:
         return y
-    z      = 0.6745 * (d - m) / mad
-    spikes = np.abs(z) > delta
+    z      = np.abs(0.6745 * (d - med) / mad)
+    # first diff has n-1 points; pad to n by repeating last value
+    z      = np.append(z, z[-1])
+    spikes = z > threshold
 
-    # Replace each flagged point with median of surrounding non-flagged points
-    y_out = y.copy()
-    for i in np.where(spikes)[0]:
-        w0   = max(0, i - half)
-        w1   = min(n, i + half + 1)
-        good = ~spikes[w0:w1]
-        y_out[i] = np.median(y[w0:w1][good]) if good.any() else np.median(y[w0:w1])
-    return y_out
+    # Iteratively replace spikes with mean of non-spike neighbours
+    while spikes.any():
+        changed = False
+        for i in np.where(spikes)[0]:
+            neighbours = np.arange(max(0, i - kernel_size),
+                                   min(n, i + kernel_size + 1))
+            good = neighbours[~spikes[neighbours]]
+            if len(good) == 0:
+                continue
+            y[i]      = np.mean(y[good])
+            spikes[i] = False
+            changed   = True
+        if not changed:
+            break
+
+    return y
 
 
 # ── Baseline correction ────────────────────────────────────────────────────
