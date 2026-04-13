@@ -82,10 +82,9 @@ def spike_removal_scp(data, size=11, delta=4):
     """
     Remove cosmic spikes using the Whitaker-Hayes second-difference Z-score method.
 
-    A cosmic spike at index k causes large second-difference values at k-1, k,
-    and k+1. Naively replacing all three destroys real neighbouring data. This
-    implementation groups consecutive flagged points into clusters and replaces
-    only the single most deviant point per cluster (the true spike centre).
+    The second difference of a smooth spectrum is near zero everywhere; a
+    narrow cosmic spike produces a large localised excursion. This makes the
+    detector insensitive to broad real Raman peaks.
 
     Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman
     spectra. Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
@@ -96,9 +95,9 @@ def spike_removal_scp(data, size=11, delta=4):
     data : array_like, shape (n_wavenumbers,)
         Single spectrum.
     size : int
-        Full width of the replacement window (default: 11).
+        Half-width of the replacement window (default: 11).
     delta : float
-        Modified Z-score threshold above which a point is a spike (default: 4).
+        Modified Z-score threshold (default: 4).
 
     Returns
     -------
@@ -109,52 +108,27 @@ def spike_removal_scp(data, size=11, delta=4):
     n = len(y)
     half = size // 2
 
-    # Second difference: large for narrow spikes, near-zero for broad real peaks
+    # Second difference
     d = np.empty(n)
     d[1:-1] = y[:-2] - 2 * y[1:-1] + y[2:]
     d[0]    = d[1]
     d[-1]   = d[-2]
 
-    # Modified Z-score — use MAD around zero (second differences of smooth
-    # spectra are centred at zero; subtracting the median can bias the estimate
-    # when real peaks are present)
-    mad = np.median(np.abs(d))
+    # Modified Z-score on second difference
+    m   = np.median(d)
+    mad = np.median(np.abs(d - m))
     if mad == 0:
         return y
-    z      = 0.6745 * d / mad
-    flagged = np.abs(z) > delta
+    z      = 0.6745 * (d - m) / mad
+    spikes = np.abs(z) > delta
 
+    # Replace each flagged point with median of surrounding non-flagged points
     y_out = y.copy()
-
-    # Group consecutive flagged indices into clusters; replace only the spike
-    # centre of each cluster (the point most deviant from its local median)
-    i = 0
-    while i < n:
-        if not flagged[i]:
-            i += 1
-            continue
-        # Find extent of this cluster
-        j = i
-        while j < n and flagged[j]:
-            j += 1
-        # Within cluster i..j-1 find the true spike: largest deviation from
-        # local median in the ORIGINAL spectrum
-        best, best_dev = i, -1.0
-        for k in range(i, j):
-            w0 = max(0, k - half)
-            w1 = min(n, k + half + 1)
-            local_med = np.median(y[w0:w1])
-            dev = abs(y[k] - local_med)
-            if dev > best_dev:
-                best_dev = dev
-                best = k
-        # Replace only the spike centre
-        w0 = max(0, best - half)
-        w1 = min(n, best + half + 1)
-        non_spike = ~flagged[w0:w1]
-        y_out[best] = (np.median(y[w0:w1][non_spike]) if non_spike.any()
-                       else np.median(y[w0:w1]))
-        i = j
+    for i in np.where(spikes)[0]:
+        w0   = max(0, i - half)
+        w1   = min(n, i + half + 1)
+        good = ~spikes[w0:w1]
+        y_out[i] = np.median(y[w0:w1][good]) if good.any() else np.median(y[w0:w1])
     return y_out
 
 
