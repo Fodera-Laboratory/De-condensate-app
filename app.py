@@ -272,29 +272,68 @@ with tab_files:
         st.subheader("Preprocessing")
         baseline = st.selectbox(
             "Baseline correction",
-            ["rubberband", "rolling_ball", "als", "none"],
+            ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls", "imodpoly", "modpoly", "poly", "none"],
             format_func=lambda x: {
-                "rubberband": "Rubberband",
+                "rubberband": "Rubberband (convex hull)",
                 "rolling_ball": "Rolling ball",
-                "als": "ALS (Asymmetric Least Squares)",
-                "none": "None",
+                "als":      "ALS (Asymmetric Least Squares)",
+                "arpls":    "ARPLS (Asymmetrically Reweighted PLS)",
+                "airpls":   "AIRPLS (Adaptive Iterative Reweighted PLS)",
+                "iasls":    "IASLS (Improved ALS)",
+                "drpls":    "DRPLS (Doubly Reweighted PLS)",
+                "imodpoly": "IModPoly (Improved Modified Polynomial)",
+                "modpoly":  "ModPoly (Modified Polynomial)",
+                "poly":     "Poly (Polynomial)",
+                "none":     "None",
             }[x],
             help=(
-                "Removes the broad fluorescence or glass background beneath the Raman signal. "
-                "**Rubberband** (default) fits a convex hull to the spectrum baseline — fast and "
-                "robust for most Raman data. "
-                "**Rolling ball** uses a morphological algorithm with a tunable radius. "
-                "**ALS** (Asymmetric Least Squares) gives a smooth, penalised baseline and is "
-                "useful when bands are broad or strongly asymmetric. "
-                "Choose **None** only if the raw spectra are already baseline-corrected."
+                "Removes fluorescence background. "
+                "**Rubberband** (default) — fast convex hull, robust for most Raman data. "
+                "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants from RamanSPy, "
+                "good for irregular or strongly curved baselines. "
+                "**IModPoly / ModPoly / Poly** — polynomial fits, useful when the baseline is smooth. "
+                "**Rolling ball** — morphological, tunable radius. "
+                "**ALS** — classic asymmetric least squares."
             ),
         )
         ball_radius, als_lam, als_p = 50, 1e5, 0.01
+        rs_lam, rs_poly_order = 1e5, 2
         if baseline == "rolling_ball":
             ball_radius = st.slider("Ball radius", 10, 300, 50)
         elif baseline == "als":
             als_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8, format="%.0e")
             als_p   = st.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5, format="%.3f")
+        elif baseline in ("arpls", "airpls", "iasls", "drpls"):
+            rs_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9, format="%.0e",
+                                     key="rs_lam")
+        elif baseline in ("imodpoly", "modpoly", "poly"):
+            rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key="rs_poly")
+
+        smooth = st.selectbox(
+            "Smoothing",
+            ["none", "savgol", "whittaker", "gaussian"],
+            format_func=lambda x: {
+                "none":      "None",
+                "savgol":    "Savitzky-Golay",
+                "whittaker": "Whittaker",
+                "gaussian":  "Gaussian",
+            }[x],
+            help=(
+                "Optional smoothing applied after baseline correction. "
+                "**Savitzky-Golay** — polynomial smoothing, preserves peak shapes well. "
+                "**Whittaker** — penalised least-squares smoother, tunable via λ. "
+                "**Gaussian** — convolves with a Gaussian kernel."
+            ),
+        )
+        sg_window, sg_poly, whittaker_lam, whittaker_d, gaussian_sigma = 11, 3, 1e3, 2, 1
+        if smooth == "savgol":
+            sg_window = st.slider("Window length (odd)", 5, 51, 11, step=2, key="sg_win_main")
+            sg_poly   = st.slider("Polynomial order",    1,  9,  3,        key="sg_poly_main")
+        elif smooth == "whittaker":
+            whittaker_lam = st.number_input("λ (smoothness)", value=1e3, min_value=1.0, max_value=1e7, format="%.0e", key="wh_lam")
+            whittaker_d   = st.slider("Difference order", 1, 3, 2, key="wh_d")
+        elif smooth == "gaussian":
+            gaussian_sigma = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key="gauss_sigma")
 
         _norm_opts = ["snv", "area", "vector", "minmax", "none"]
         _norm_fmt  = lambda x: {
@@ -531,6 +570,14 @@ settings = dict(
     ball_radius=ball_radius,
     als_lam=als_lam,
     als_p=als_p,
+    rs_lam=rs_lam,
+    rs_poly_order=rs_poly_order,
+    smooth=smooth,
+    sg_window=sg_window,
+    sg_poly=sg_poly,
+    whittaker_lam=whittaker_lam,
+    whittaker_d=whittaker_d,
+    gaussian_sigma=gaussian_sigma,
     normalize=normalize_mcr,
     normalize_pls=normalize_pls,
     normalize_mcr=normalize_mcr,

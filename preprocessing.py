@@ -49,15 +49,42 @@ def load_linescan_bytes(file_bytes: bytes, filename: str = "scan.txt"):
 # Per-spectrum preprocessing
 # ─────────────────────────────────────────────────────────────────────────────
 
+_RS_BASELINE_MAP = {
+    "arpls":    ("ramanspy.preprocessing.baseline", "ARPLS"),
+    "airpls":   ("ramanspy.preprocessing.baseline", "AIRPLS"),
+    "iasls":    ("ramanspy.preprocessing.baseline", "IASLS"),
+    "drpls":    ("ramanspy.preprocessing.baseline", "DRPLS"),
+    "imodpoly": ("ramanspy.preprocessing.baseline", "IModPoly"),
+    "modpoly":  ("ramanspy.preprocessing.baseline", "ModPoly"),
+    "poly":     ("ramanspy.preprocessing.baseline", "Poly"),
+}
+
+_RS_SMOOTH_MAP = {
+    "whittaker": ("ramanspy.preprocessing.denoise", "Whittaker"),
+    "gaussian":  ("ramanspy.preprocessing.denoise", "Gaussian"),
+}
+
+
+def _apply_rs_step(module_path, class_name, I, wn, **kwargs):
+    """Instantiate a RamanSPy preprocessing step and apply it to a 1-D spectrum."""
+    import importlib
+    mod   = importlib.import_module(module_path)
+    step  = getattr(mod, class_name)(**kwargs)
+    result, _ = step(I.reshape(1, -1), wn)
+    return result.squeeze()
+
+
 def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
-    """Apply spike removal → baseline → normalisation to one spectrum."""
+    """Apply spike removal → baseline → smoothing → normalisation to one spectrum."""
     baseline     = settings.get("baseline",     "rubberband")
+    smooth       = settings.get("smooth",       "none")
     normalize    = settings.get("normalize",    "minmax")
     spike_remove = settings.get("spike_remove", True)
 
     if spike_remove:
         I = spike_removal_scp(I)
 
+    # ── Baseline correction ───────────────────────────────────────────────
     if baseline == "rubberband":
         I = I - rubberband_correction(wn, I)
     elif baseline == "rolling_ball":
@@ -68,8 +95,34 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
             lam=settings.get("als_lam", 1e5),
             p=settings.get("als_p", 0.01),
         )
+    elif baseline in _RS_BASELINE_MAP:
+        mod_path, cls = _RS_BASELINE_MAP[baseline]
+        kwargs = {}
+        if baseline in ("arpls", "airpls", "iasls", "drpls"):
+            kwargs["lam"] = settings.get("rs_lam", 1e5)
+        elif baseline in ("imodpoly", "modpoly", "poly"):
+            kwargs["poly_order"] = settings.get("rs_poly_order", 2)
+        I = _apply_rs_step(mod_path, cls, I, wn, **kwargs)
     # baseline == "none": skip
 
+    # ── Smoothing (optional) ──────────────────────────────────────────────
+    if smooth == "savgol":
+        from raman_preprocessing import Savgol_filter
+        I = Savgol_filter(I,
+                          window_length=settings.get("sg_window", 11),
+                          polyorder=settings.get("sg_poly", 3))
+    elif smooth in _RS_SMOOTH_MAP:
+        mod_path, cls = _RS_SMOOTH_MAP[smooth]
+        kwargs = {}
+        if smooth == "whittaker":
+            kwargs = {"lam": settings.get("whittaker_lam", 1e3),
+                      "d":   settings.get("whittaker_d",   2)}
+        elif smooth == "gaussian":
+            kwargs = {"sigma": settings.get("gaussian_sigma", 1)}
+        I = _apply_rs_step(mod_path, cls, I, wn, **kwargs)
+    # smooth == "none": skip
+
+    # ── Normalisation ─────────────────────────────────────────────────────
     if normalize == "minmax":
         I = Min_max_normalisation(I)
     elif normalize == "snv":
