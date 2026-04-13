@@ -311,29 +311,24 @@ with tab_files:
 
         smooth = st.selectbox(
             "Smoothing",
-            ["none", "savgol", "whittaker", "gaussian", "fft_lowpass"],
+            ["none", "savgol", "gaussian", "fft_lowpass"],
             format_func=lambda x: {
                 "none":        "None",
                 "savgol":      "Savitzky-Golay",
-                "whittaker":   "Whittaker (penalised LS)",
                 "gaussian":    "Gaussian",
                 "fft_lowpass": "FFT low-pass filter",
             }[x],
             help=(
                 "Optional smoothing applied after baseline correction. "
                 "**Savitzky-Golay** — polynomial smoothing, preserves peak shapes well. "
-                "**Whittaker** — penalised least-squares smoother, tunable via λ. "
                 "**Gaussian** — convolves with a Gaussian kernel. "
                 "**FFT low-pass** — removes high-frequency noise by zeroing Fourier components above a cutoff fraction."
             ),
         )
-        sg_window, sg_poly, whittaker_lam, whittaker_d, gaussian_sigma, fft_cutoff = 11, 3, 1e3, 2, 1, 0.1
+        sg_window, sg_poly, gaussian_sigma, fft_cutoff = 11, 3, 1, 0.1
         if smooth == "savgol":
             sg_window = st.slider("Window length (odd)", 5, 51, 11, step=2, key="sg_win_main")
             sg_poly   = st.slider("Polynomial order",    1,  9,  3,        key="sg_poly_main")
-        elif smooth == "whittaker":
-            whittaker_lam = st.number_input("λ (smoothness)", value=1e3, min_value=1.0, max_value=1e7, format="%.0e", key="wh_lam")
-            whittaker_d   = st.slider("Difference order", 1, 3, 2, key="wh_d")
         elif smooth == "gaussian":
             gaussian_sigma = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key="gauss_sigma")
         elif smooth == "fft_lowpass":
@@ -580,8 +575,6 @@ settings = dict(
     smooth=smooth,
     sg_window=sg_window,
     sg_poly=sg_poly,
-    whittaker_lam=whittaker_lam,
-    whittaker_d=whittaker_d,
     gaussian_sigma=gaussian_sigma,
     fft_cutoff=fft_cutoff,
     normalize=normalize_mcr,

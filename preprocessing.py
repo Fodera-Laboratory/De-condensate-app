@@ -59,22 +59,6 @@ _RS_BASELINE_MAP = {
     "poly":     ("ramanspy.preprocessing.baseline", "Poly"),
 }
 
-_RS_SMOOTH_MAP = {
-    "whittaker": ("ramanspy.preprocessing.denoise", "Whittaker"),
-    "gaussian":  ("ramanspy.preprocessing.denoise", "Gaussian"),
-}
-
-
-def _apply_rs_step(module_path, class_name, I, wn, **kwargs):
-    """Instantiate a RamanSPy preprocessing step and apply it to a 1-D spectrum."""
-    import importlib
-    mod  = importlib.import_module(module_path)
-    # Instantiate with kwargs (sets defaults); also pass at call time because
-    # RamanSPy's PreprocessingStep.__call__ forwards *args/**kwargs directly
-    # to the underlying function rather than using the stored init kwargs.
-    step = getattr(mod, class_name)(**kwargs)
-    result, _ = step(I.reshape(1, -1), wn, **kwargs)
-    return result.squeeze()
 
 
 def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
@@ -123,13 +107,6 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = Savgol_filter(I,
                           window_length=settings.get("sg_window", 11),
                           polyorder=settings.get("sg_poly", 3))
-    elif smooth == "whittaker":
-        lam = settings.get("whittaker_lam", 1e3)
-        d   = int(settings.get("whittaker_d", 2))
-        n   = len(I)
-        E   = sparse.eye(n, format="csc")
-        D   = sparse.csc_matrix(np.diff(np.eye(n), d))
-        I   = spsolve(E + lam * D.T @ D, I)
     elif smooth == "gaussian":
         from scipy.ndimage import gaussian_filter
         I = gaussian_filter(I.astype(float), sigma=settings.get("gaussian_sigma", 1))
