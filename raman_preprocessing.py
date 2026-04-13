@@ -8,6 +8,14 @@ Spectral preprocessing routines for Raman data:
   - Savitzky-Golay smoothing
 """
 
+import os
+import tempfile
+
+# SpectroChemPy tries to copy matplotlib config files on startup, which fails
+# on read-only filesystems (e.g. Streamlit Cloud). Redirect to a writable
+# temp directory before any spectrochempy import occurs.
+os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp())
+
 import numpy as np
 from scipy.signal import find_peaks, peak_widths, savgol_filter
 from scipy import sparse
@@ -80,61 +88,31 @@ def spike_removal(y,
 
 def spike_removal_scp(data, size=11, delta=4):
     """
-    Remove cosmic spikes using a local rolling-median modified Z-score method.
+    Remove spikes using the SpectroChemPy despike algorithm.
 
-    Each point is compared to the median of its local neighbourhood. Points
-    that deviate by more than `delta` × the local MAD are classified as spikes
-    and replaced by the local median — identical in spirit to SpectroChemPy's
-    despike algorithm.
-
-    Using a local (rolling) reference rather than a global one prevents broad
-    real Raman peaks from inflating the threshold and masking actual spikes.
-
-    Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman
-    spectra. Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
-    https://doi.org/10.1016/j.chemolab.2018.06.009
+    Reference: Travert & Fernandez, J. Open Source Softw. 2023, 8(83), 5338.
+    https://doi.org/10.21105/joss.05338
 
     Parameters
     ----------
     data : array_like, shape (n_wavenumbers,)
         Single spectrum.
     size : int
-        Half-width of the rolling window (default: 11, matching SpectroChemPy).
+        Window size for median replacement (default: 11).
     delta : float
-        Modified Z-score threshold; points above this are classified as spikes
-        (default: 4, matching SpectroChemPy).
+        Modified Z-score threshold (default: 4).
 
     Returns
     -------
     ndarray, shape (n_wavenumbers,)
         Despiked spectrum.
     """
-    y    = np.asarray(data, dtype=float)
-    n    = len(y)
-    half = size // 2
+    import spectrochempy as scp
+    from spectrochempy import NDDataset
 
-    # Compute rolling median for every point
-    roll_med = np.empty(n)
-    for i in range(n):
-        w_start = max(0, i - half)
-        w_end   = min(n, i + half + 1)
-        roll_med[i] = np.median(y[w_start:w_end])
-
-    # Deviation from local median
-    diff = y - roll_med
-
-    # Global MAD of deviations (captures typical noise level)
-    mad = np.median(np.abs(diff - np.median(diff)))
-    if mad == 0:
-        return y
-
-    z      = 0.6745 * diff / mad
-    spikes = np.abs(z) > delta
-
-    y_out = y.copy()
-    for i in np.where(spikes)[0]:
-        y_out[i] = roll_med[i]   # replace with local median
-    return y_out
+    ds = NDDataset(np.asarray(data).reshape(1, -1))
+    ds_despiked = scp.despike(ds, size=size, delta=delta)
+    return ds_despiked.data.squeeze()
 
 
 # ── Baseline correction ────────────────────────────────────────────────────
