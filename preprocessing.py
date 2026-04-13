@@ -68,9 +68,12 @@ _RS_SMOOTH_MAP = {
 def _apply_rs_step(module_path, class_name, I, wn, **kwargs):
     """Instantiate a RamanSPy preprocessing step and apply it to a 1-D spectrum."""
     import importlib
-    mod   = importlib.import_module(module_path)
-    step  = getattr(mod, class_name)(**kwargs)
-    result, _ = step(I.reshape(1, -1), wn)
+    mod  = importlib.import_module(module_path)
+    # Instantiate with kwargs (sets defaults); also pass at call time because
+    # RamanSPy's PreprocessingStep.__call__ forwards *args/**kwargs directly
+    # to the underlying function rather than using the stored init kwargs.
+    step = getattr(mod, class_name)(**kwargs)
+    result, _ = step(I.reshape(1, -1), wn, **kwargs)
     return result.squeeze()
 
 
