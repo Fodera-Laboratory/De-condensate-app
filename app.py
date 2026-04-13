@@ -2116,7 +2116,7 @@ with tab_further:
                         _sp_max = _X_am.max(axis=1, keepdims=True)
                         _X_am   = (_X_am - _sp_min) / np.where(_sp_max - _sp_min > 0, _sp_max - _sp_min, 1)
                     elif _pname == "area":
-                        _areas = np.trapz(_X_am, _wn_am, axis=1)[:, np.newaxis]
+                        _areas = np.trapezoid(_X_am, _wn_am, axis=1)[:, np.newaxis]
                         _X_am  = _X_am / np.where(np.abs(_areas) > 0, _areas, 1)
 
                 _mean_sp = _X_am.mean(axis=0)
