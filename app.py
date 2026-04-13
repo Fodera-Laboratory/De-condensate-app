@@ -235,7 +235,7 @@ def _std_spectra_plot(df, title, conc_unit, color, height=300, is_salt=False, us
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 tab_tutorial, tab_files, tab_pls, tab_mcr, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
-    ["📖  Tutorial", "📂  Files", "📊  PLS regression", "🔬  MCR decomposition",
+    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression", "🔬  MCR decomposition",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
     default=st.session_state.get("active_tab", "📖  Tutorial"),
@@ -311,21 +311,23 @@ with tab_files:
 
         smooth = st.selectbox(
             "Smoothing",
-            ["none", "savgol", "whittaker", "gaussian"],
+            ["none", "savgol", "whittaker", "gaussian", "fft_lowpass"],
             format_func=lambda x: {
-                "none":      "None",
-                "savgol":    "Savitzky-Golay",
-                "whittaker": "Whittaker",
-                "gaussian":  "Gaussian",
+                "none":        "None",
+                "savgol":      "Savitzky-Golay",
+                "whittaker":   "Whittaker (penalised LS)",
+                "gaussian":    "Gaussian",
+                "fft_lowpass": "FFT low-pass filter",
             }[x],
             help=(
                 "Optional smoothing applied after baseline correction. "
                 "**Savitzky-Golay** — polynomial smoothing, preserves peak shapes well. "
                 "**Whittaker** — penalised least-squares smoother, tunable via λ. "
-                "**Gaussian** — convolves with a Gaussian kernel."
+                "**Gaussian** — convolves with a Gaussian kernel. "
+                "**FFT low-pass** — removes high-frequency noise by zeroing Fourier components above a cutoff fraction."
             ),
         )
-        sg_window, sg_poly, whittaker_lam, whittaker_d, gaussian_sigma = 11, 3, 1e3, 2, 1
+        sg_window, sg_poly, whittaker_lam, whittaker_d, gaussian_sigma, fft_cutoff = 11, 3, 1e3, 2, 1, 0.1
         if smooth == "savgol":
             sg_window = st.slider("Window length (odd)", 5, 51, 11, step=2, key="sg_win_main")
             sg_poly   = st.slider("Polynomial order",    1,  9,  3,        key="sg_poly_main")
@@ -334,6 +336,9 @@ with tab_files:
             whittaker_d   = st.slider("Difference order", 1, 3, 2, key="wh_d")
         elif smooth == "gaussian":
             gaussian_sigma = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key="gauss_sigma")
+        elif smooth == "fft_lowpass":
+            fft_cutoff = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01, key="fft_cut",
+                                   help="Fraction of Fourier components to keep (0.1 = keep lowest 10%).")
 
         _norm_opts = ["snv", "area", "vector", "minmax", "none"]
         _norm_fmt  = lambda x: {
@@ -578,6 +583,7 @@ settings = dict(
     whittaker_lam=whittaker_lam,
     whittaker_d=whittaker_d,
     gaussian_sigma=gaussian_sigma,
+    fft_cutoff=fft_cutoff,
     normalize=normalize_mcr,
     normalize_pls=normalize_pls,
     normalize_mcr=normalize_mcr,
@@ -1741,9 +1747,11 @@ with tab_further:
             st.info("Select at least one dataset above.")
             st.stop()
 
-        # ── Re-read and preprocess raw files with current settings ─────────
-        # This ensures the spectral range always reflects the current Files tab
-        # settings, independent of when PLS/MCR analysis was last run.
+        # ── Re-read and preprocess raw files using current Files tab settings ─
+        st.info(
+            "Preprocessing uses the settings from the **📂 Files & preprocessing** tab "
+            "(baseline, smoothing, normalisation, spectral range)."
+        )
         _X_list, _dist_list, _fname_list = [], [], []
         _prot_list, _peg_list, _salt_list, _mcr_list = [], [], [], []
         _wn = None
@@ -1753,9 +1761,7 @@ with tab_further:
             _f.seek(0)
             _wn_raw, _X_raw, _pos = an.load_linescan_bytes(_f.read(), _f.name)
             _f.seek(0)
-            # Use full raw range — the broad cut below controls spectral range here
-            _further_settings = dict(settings, wn_min=float(_wn_raw.min()), wn_max=float(_wn_raw.max()), use_cut=False)
-            _X_proc_f, _wn_proc_f, _ = an.preprocess_matrix(_X_raw, _wn_raw, _further_settings)
+            _X_proc_f, _wn_proc_f, _ = an.preprocess_matrix(_X_raw, _wn_raw, settings)
             _dist_f = an.compute_cumulative_distance(_pos, an.detect_scan_mode(_pos))
             _n = _X_proc_f.shape[0]
             _X_list.append(_X_proc_f)
@@ -1786,40 +1792,6 @@ with tab_further:
         _peg    = np.array(_peg_list)   if _peg_list   else None
         _salt   = np.array(_salt_list)  if _salt_list  else None
         _mcr_C  = np.vstack(_mcr_list)  if _mcr_list   else None
-
-        # ── Global further-analysis preprocessing ─────────────────────────
-        st.markdown("#### Global preprocessing")
-        _fig_caption(
-            "Applied to all analyses below. Use the broad cut to isolate the spectral "
-            "region of interest (e.g. exclude anti-Stokes or LFR bands). "
-            "Rubberband baseline removes broad fluorescence backgrounds. "
-            "Spike removal detects and interpolates cosmic-ray artefacts."
-        )
-        _gp1, _gp2 = st.columns(2)
-        _wn_data_min = int(_wn.min())
-        _wn_data_max = int(_wn.max())
-        _gp_min = _gp1.number_input("Broad cut min (cm⁻¹)", value=_wn_data_min, step=50,
-                                    help=f"Data spans {_wn_data_min}–{_wn_data_max} cm⁻¹.")
-        _gp_max = _gp2.number_input("Broad cut max (cm⁻¹)", value=_wn_data_max, step=50,
-                                    help=f"Data spans {_wn_data_min}–{_wn_data_max} cm⁻¹.")
-        _gp3, _gp4 = st.columns(2)
-        _gp_rb    = _gp3.toggle("Rubberband baseline", value=True,  key="gp_rb",
-                                 help="Subtract a convex-hull baseline over the broad cut region.")
-        _gp_spike = _gp4.toggle("Spike removal",       value=True,  key="gp_spike2",
-                                 help="Detect and interpolate cosmic-ray spikes (uses spectrochempy).")
-
-        _gp_mask = (_wn >= _gp_min) & (_wn <= _gp_max)
-        _wn      = _wn[_gp_mask]
-        _X_all   = _X_all[:, _gp_mask].copy()
-
-        if _gp_rb:
-            for _si in range(_X_all.shape[0]):
-                _X_all[_si] -= rms.rubberband_correction(_wn, _X_all[_si])
-
-        if _gp_spike:
-            with st.spinner("Removing spikes…"):
-                for _si in range(_X_all.shape[0]):
-                    _X_all[_si] = rms.spike_removal_scp(_X_all[_si])
 
         st.divider()
 

@@ -124,16 +124,22 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
                           window_length=settings.get("sg_window", 11),
                           polyorder=settings.get("sg_poly", 3))
     elif smooth == "whittaker":
-        from ramanspy.preprocessing.denoise import _whittaker
-        result, _ = _whittaker(I.reshape(1, -1), wn,
-                                settings.get("whittaker_lam", 1e3),
-                                settings.get("whittaker_d", 2))
-        I = result.squeeze()
+        lam = settings.get("whittaker_lam", 1e3)
+        d   = int(settings.get("whittaker_d", 2))
+        n   = len(I)
+        E   = sparse.eye(n, format="csc")
+        D   = sparse.csc_matrix(np.diff(np.eye(n), d))
+        I   = spsolve(E + lam * D.T @ D, I)
     elif smooth == "gaussian":
-        from ramanspy.preprocessing.denoise import _gauss
-        result, _ = _gauss(I.reshape(1, -1), wn,
-                            sigma=settings.get("gaussian_sigma", 1))
-        I = result.squeeze()
+        from scipy.ndimage import gaussian_filter
+        I = gaussian_filter(I.astype(float), sigma=settings.get("gaussian_sigma", 1))
+    elif smooth == "fft_lowpass":
+        cutoff = settings.get("fft_cutoff", 0.1)
+        n   = len(I)
+        F   = np.fft.rfft(I)
+        cut = max(1, int(cutoff * len(F)))
+        F[cut:] = 0
+        I = np.fft.irfft(F, n=n)
     # smooth == "none": skip
 
     # ── Normalisation ─────────────────────────────────────────────────────
