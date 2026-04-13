@@ -305,7 +305,7 @@ with tab_files:
             "none":   "None",
         }[x]
         normalize_pls = st.selectbox(
-            "PLS normalization",
+            "PLS regression normalization",
             _norm_opts,
             index=0,
             format_func=_norm_fmt,
@@ -320,7 +320,7 @@ with tab_files:
             ),
         )
         normalize_mcr = st.selectbox(
-            "MCR normalization",
+            "MCR-ALS normalization",
             _norm_opts,
             index=1,
             format_func=_norm_fmt,
@@ -335,7 +335,7 @@ with tab_files:
         )
         normalize = normalize_mcr  # used by salt and further-analysis paths
         salt_normalize = st.selectbox(
-            "Salt normalization",
+            "Salt PLS regression normalization",
             ["none", "minmax", "snv"],
             format_func=_norm_fmt,
             help="Normalization applied only to salt standards and linescan salt preprocessing.",
@@ -691,6 +691,7 @@ if build_btn:
                             ST_init=None,
                             n_components=n_components,
                             settings=settings,
+                            pls_settings=pls_settings,
                         )
                     except Exception as _ae:
                         st.warning(f"Could not process {_af.name}: {_ae}")
@@ -784,6 +785,7 @@ if run_btn:
                     n_components=n_comp,
                     settings=s,
                     mcr_params=mcr_params,
+                    pls_settings=pls_settings,
                 )
                 if _pca_var_exp is not None:
                     _res["pca_var_exp"]  = _pca_var_exp

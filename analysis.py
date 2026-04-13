@@ -45,6 +45,7 @@ def process_linescan(
     n_components:     int,
     settings:         dict,
     mcr_params:       dict = None,
+    pls_settings:     dict = None,  # if None, falls back to settings
 ) -> dict:
     """
     Full pipeline for one linescan: preprocess → MCR → PLS.
@@ -54,6 +55,8 @@ def process_linescan(
     """
     if mcr_params is None:
         mcr_params = {}
+    if pls_settings is None:
+        pls_settings = settings
 
     distance = compute_cumulative_distance(positions, scan_mode)
     X_proc, wn_proc, _ = preprocess_matrix(X, wn_original, settings)
@@ -71,23 +74,25 @@ def process_linescan(
         )
 
     # Protein (and optionally molecular crowder) PLS (optional)
+    # Preprocess with pls_settings to match the normalization used during training
     pls_protein = pls_peg = None
     if pls_protein_info is not None:
+        X_pls, _, _ = preprocess_matrix(X, wn_original, pls_settings)
         if pls_protein_info.get("dual"):
             Y_dual      = pls_protein_info["model"].predict(
-                X_proc[:, pls_protein_info["valid_features"]]
+                X_pls[:, pls_protein_info["valid_features"]]
             )
             pls_protein = Y_dual[:, 0].flatten()
             pls_peg     = Y_dual[:, 1].flatten()
         else:
             pls_protein = pls_protein_info["model"].predict(
-                X_proc[:, pls_protein_info["valid_features"]]
+                X_pls[:, pls_protein_info["valid_features"]]
             ).flatten()
 
     # Salt PLS (optional, separate model on fingerprint region)
     pls_salt = None
     if pls_salt_info is not None:
-        X_salt, _, _ = preprocess_matrix(X, wn_original, settings, is_salt=True)
+        X_salt, _, _ = preprocess_matrix(X, wn_original, pls_settings, is_salt=True)
         pls_salt = pls_salt_info["model"].predict(
             X_salt[:, pls_salt_info["valid_features"]]
         ).flatten()
