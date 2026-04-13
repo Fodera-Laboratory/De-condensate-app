@@ -99,13 +99,22 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
             p=settings.get("als_p", 0.01),
         )
     elif baseline in _RS_BASELINE_MAP:
-        mod_path, cls = _RS_BASELINE_MAP[baseline]
-        kwargs = {}
+        import ramanspy.preprocessing.baseline as _rsb
+        _fn_map = {
+            "arpls":    _rsb._arpls,
+            "airpls":   _rsb._airpls,
+            "iasls":    _rsb._iasls,
+            "drpls":    _rsb._drpls,
+            "imodpoly": _rsb._imodpoly,
+            "modpoly":  _rsb._modpoly,
+            "poly":     _rsb._poly,
+        }
+        _fn = _fn_map[baseline]
         if baseline in ("arpls", "airpls", "iasls", "drpls"):
-            kwargs["lam"] = settings.get("rs_lam", 1e5)
+            result, _ = _fn(I.reshape(1, -1), wn, lam=settings.get("rs_lam", 1e5))
         elif baseline in ("imodpoly", "modpoly", "poly"):
-            kwargs["poly_order"] = settings.get("rs_poly_order", 2)
-        I = _apply_rs_step(mod_path, cls, I, wn, **kwargs)
+            result, _ = _fn(I.reshape(1, -1), wn, poly_order=settings.get("rs_poly_order", 2))
+        I = result.squeeze()
     # baseline == "none": skip
 
     # ── Smoothing (optional) ──────────────────────────────────────────────
@@ -114,15 +123,17 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = Savgol_filter(I,
                           window_length=settings.get("sg_window", 11),
                           polyorder=settings.get("sg_poly", 3))
-    elif smooth in _RS_SMOOTH_MAP:
-        mod_path, cls = _RS_SMOOTH_MAP[smooth]
-        kwargs = {}
-        if smooth == "whittaker":
-            kwargs = {"lam": settings.get("whittaker_lam", 1e3),
-                      "d":   settings.get("whittaker_d",   2)}
-        elif smooth == "gaussian":
-            kwargs = {"sigma": settings.get("gaussian_sigma", 1)}
-        I = _apply_rs_step(mod_path, cls, I, wn, **kwargs)
+    elif smooth == "whittaker":
+        from ramanspy.preprocessing.denoise import _whittaker
+        result, _ = _whittaker(I.reshape(1, -1), wn,
+                                lam=settings.get("whittaker_lam", 1e3),
+                                d=settings.get("whittaker_d", 2))
+        I = result.squeeze()
+    elif smooth == "gaussian":
+        from ramanspy.preprocessing.denoise import _gauss
+        result, _ = _gauss(I.reshape(1, -1), wn,
+                            sigma=settings.get("gaussian_sigma", 1))
+        I = result.squeeze()
     # smooth == "none": skip
 
     # ── Normalisation ─────────────────────────────────────────────────────
