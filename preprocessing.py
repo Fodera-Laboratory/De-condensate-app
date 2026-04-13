@@ -48,10 +48,13 @@ def load_linescan_bytes(file_bytes: bytes, filename: str = "scan.txt"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
-    """Apply baseline → spike removal → normalisation to one spectrum."""
+    """Apply spike removal → baseline → normalisation to one spectrum."""
     baseline     = settings.get("baseline",     "rubberband")
     normalize    = settings.get("normalize",    "minmax")
     spike_remove = settings.get("spike_remove", True)
+
+    if spike_remove:
+        I = spike_removal_scp(I)
 
     if baseline == "rubberband":
         I = I - rubberband_correction(wn, I)
@@ -64,9 +67,6 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
             p=settings.get("als_p", 0.01),
         )
     # baseline == "none": skip
-
-    if spike_remove:
-        I = spike_removal_scp(I)
 
     if normalize == "minmax":
         I = Min_max_normalisation(I)
