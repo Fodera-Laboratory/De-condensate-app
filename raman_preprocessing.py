@@ -80,12 +80,18 @@ def spike_removal(y,
 
 def spike_removal_scp(data, size=11, delta=4):
     """
-    Remove spikes using the Whitaker-Hayes modified Z-score method.
+    Remove cosmic spikes using a local rolling-median modified Z-score method.
 
-    This replicates the algorithm used by SpectroChemPy's despike function.
+    Each point is compared to the median of its local neighbourhood. Points
+    that deviate by more than `delta` × the local MAD are classified as spikes
+    and replaced by the local median — identical in spirit to SpectroChemPy's
+    despike algorithm.
 
-    Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman spectra.
-    Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
+    Using a local (rolling) reference rather than a global one prevents broad
+    real Raman peaks from inflating the threshold and masking actual spikes.
+
+    Reference: Whitaker & Hayes (2018). A simple algorithm for despiking Raman
+    spectra. Chemometrics and Intelligent Laboratory Systems, 179, 82–84.
     https://doi.org/10.1016/j.chemolab.2018.06.009
 
     Parameters
@@ -93,36 +99,41 @@ def spike_removal_scp(data, size=11, delta=4):
     data : array_like, shape (n_wavenumbers,)
         Single spectrum.
     size : int
-        Window size for median replacement (default: 11, matching SpectroChemPy).
+        Half-width of the rolling window (default: 11, matching SpectroChemPy).
     delta : float
-        Modified Z-score threshold; points above this are spikes (default: 4).
+        Modified Z-score threshold; points above this are classified as spikes
+        (default: 4, matching SpectroChemPy).
 
     Returns
     -------
     ndarray, shape (n_wavenumbers,)
         Despiked spectrum.
     """
-    y = np.asarray(data, dtype=float)
-    # Second difference — spikes appear as large excursions
-    d = np.diff(y, 2)
-    # Pad to original length (replicate edge values)
-    d = np.concatenate([[d[0]], d, [d[-1]]])
-    # Modified Z-score using median absolute deviation
-    m   = np.median(d)
-    mad = np.median(np.abs(d - m))
+    y    = np.asarray(data, dtype=float)
+    n    = len(y)
+    half = size // 2
+
+    # Compute rolling median for every point
+    roll_med = np.empty(n)
+    for i in range(n):
+        w_start = max(0, i - half)
+        w_end   = min(n, i + half + 1)
+        roll_med[i] = np.median(y[w_start:w_end])
+
+    # Deviation from local median
+    diff = y - roll_med
+
+    # Global MAD of deviations (captures typical noise level)
+    mad = np.median(np.abs(diff - np.median(diff)))
     if mad == 0:
         return y
-    z      = 0.6745 * (d - m) / mad
+
+    z      = 0.6745 * diff / mad
     spikes = np.abs(z) > delta
 
     y_out = y.copy()
-    half  = size // 2
     for i in np.where(spikes)[0]:
-        w_start = max(0, i - half)
-        w_end   = min(len(y), i + half + 1)
-        window      = y[w_start:w_end]
-        not_spike   = ~spikes[w_start:w_end]
-        y_out[i] = np.median(window[not_spike]) if not_spike.any() else np.median(window)
+        y_out[i] = roll_med[i]   # replace with local median
     return y_out
 
 
