@@ -1722,12 +1722,17 @@ with tab_further:
         from scipy.optimize import curve_fit as _curve_fit
 
         # ── Drag-and-drop pipeline helpers ────────────────────────────────────
+        # Presets: name → (steps_list, seed_state_dict or None)
+        # seed_state keys are the item label (e.g. "Spectral cut #2") and map param → value.
         _PIPE_PRESETS = {
-            "— custom —":                    None,
-            "Amide I band decomposition":    ["spectral_cut","spike_removal","savgol","area","endpoint"],
-            "General (rubberband + SNV)":    ["spectral_cut","spike_removal","rubberband","snv"],
-            "PCA (rubberband + SNV)":        ["spectral_cut","spike_removal","rubberband","snv"],
-            "Peak ratio (rubberband only)":  ["spectral_cut","spike_removal","rubberband"],
+            "— custom —": None,
+            "Amide I band decomposition": (
+                ["spectral_cut","spike_removal","spectral_cut","savgol","area","endpoint"],
+                {"Spectral cut #2": {"wn_min": 1580, "wn_max": 1720, "use_gap": False}},
+            ),
+            "General (rubberband + SNV)":   (["spectral_cut","spike_removal","rubberband","snv"], None),
+            "PCA (rubberband + SNV)":        (["spectral_cut","spike_removal","rubberband","snv"], None),
+            "Peak ratio (rubberband only)":  (["spectral_cut","spike_removal","rubberband"], None),
         }
         _PIPE_CATS = [
             ("Spectral cut",         ["spectral_cut"]),
@@ -1759,7 +1764,10 @@ with tab_further:
             _safe = s.replace(" ","_").replace("#","n").replace(".","_").replace("-","_")
             return f"pp_{pfx}_{_safe}_{p}"
 
-        def _pipe_init(pfx, defaults):
+        def _pipe_init(pfx, defaults, seed_state=None):
+            """Build pipeline from defaults list.
+            seed_state: optional dict mapping item name → {param: value} to pre-fill widgets.
+            """
             _ctr, _items = {}, []
             for _k in defaults:
                 _lbl = _PKLAB.get(_k, _k)
@@ -1769,6 +1777,10 @@ with tab_further:
             st.session_state[f"{pfx}_pipe"]     = _items
             st.session_state[f"{pfx}_ctr"]      = _ctr
             st.session_state[f"{pfx}_sort_ver"] = 0
+            if seed_state:
+                for _item, _params in seed_state.items():
+                    for _par, _val in _params.items():
+                        st.session_state[_wk(pfx, _item, _par)] = _val
 
         def _step_params_ui(pfx, item):
             """Render parameter widgets for one pipeline item."""
@@ -1804,12 +1816,12 @@ with tab_further:
             elif _sk == "fft_lowpass":
                 st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01, key=_wk(pfx,item,"cutoff"))
 
-        def _pipeline_ui(pfx, defaults):
+        def _pipeline_ui(pfx, defaults, seed_defaults=None):
             """Render pipeline builder. Returns ordered list of item strings."""
             _ss  = f"{pfx}_pipe"
             _ssc = f"{pfx}_ctr"
             if _ss not in st.session_state:
-                _pipe_init(pfx, defaults)
+                _pipe_init(pfx, defaults, seed_state=seed_defaults)
 
             # ── Preset selector ───────────────────────────────────────────
             _ph1, _ph2, _ph3 = st.columns([3, 1, 1])
@@ -1820,12 +1832,13 @@ with tab_further:
             )
             if _ph2.button("Load", key=f"{pfx}_preset_load",
                            help="Replace current pipeline with selected preset"):
-                _psteps = _PIPE_PRESETS[_preset_sel]
-                if _psteps is not None:
-                    _pipe_init(pfx, _psteps)
+                _pval = _PIPE_PRESETS[_preset_sel]
+                if _pval is not None:
+                    _psteps, _pseed = _pval
+                    _pipe_init(pfx, _psteps, seed_state=_pseed)
                     st.rerun()
             if _ph3.button("↺ Reset", key=f"{pfx}_rst", help="Restore default pipeline"):
-                _pipe_init(pfx, defaults)
+                _pipe_init(pfx, defaults, seed_state=seed_defaults)
                 st.rerun()
 
             _ph1.caption(
@@ -2299,7 +2312,8 @@ with tab_further:
         _n_gauss = st.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
         _items_amide = _pipeline_ui(
-            "amide", ["spectral_cut", "spike_removal", "savgol", "area", "endpoint"])
+            "amide", ["spectral_cut", "spike_removal", "spectral_cut", "savgol", "area", "endpoint"],
+            seed_defaults={"Spectral cut #2": {"wn_min": 1580, "wn_max": 1720, "use_gap": False}})
 
         # ── Gaussian centre constraints ───────────────────────────────────
         st.markdown("**Gaussian components**")
@@ -2529,6 +2543,7 @@ with tab_further:
                 _fig_single.update_layout(
                     title=dict(text=_title_ind, font=dict(size=12)),
                     xaxis_title="Wavenumber (cm⁻¹)", yaxis_title="Intensity (a.u.)",
+                    yaxis=dict(tickformat="g"),
                     height=400, margin=dict(t=55),
                     legend=dict(orientation="v", x=1.02, xanchor="left"),
                 )
@@ -2608,6 +2623,7 @@ with tab_further:
                         ))
                     _fig_avg.update_layout(
                         xaxis_title="Wavenumber (cm⁻¹)", yaxis_title="Intensity (a.u.)",
+                        yaxis=dict(tickformat="g"),
                         height=380, margin=dict(t=20),
                         legend=dict(orientation="v", x=1.02, xanchor="left"),
                     )
