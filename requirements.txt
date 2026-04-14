@@ -10,3 +10,4 @@ pymcr
 ramanspy
 openpyxl
 Pillow
+streamlit-sortables
