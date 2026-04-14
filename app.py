@@ -1721,249 +1721,250 @@ with tab_further:
         from sklearn.decomposition import PCA as _SklearnPCA
         from scipy.optimize import curve_fit as _curve_fit
 
-        # ── Drag-and-drop pipeline helpers ───────────────────────────────────
-        # Ordered mapping: display label → internal key
-        _PP_STEPS = [
-            ("Spectral cut",       "spectral_cut"),
-            ("Spike removal",      "spike_removal"),
-            ("Rubberband BL",      "rubberband"),
-            ("Rolling ball BL",    "rolling_ball"),
-            ("ALS BL",             "als"),
-            ("ARPLS BL",           "arpls"),
-            ("AIRPLS BL",          "airpls"),
-            ("IASLS BL",           "iasls"),
-            ("DRPLS BL",           "drpls"),
-            ("IModPoly BL",        "imodpoly"),
-            ("ModPoly BL",         "modpoly"),
-            ("Poly BL",            "poly"),
-            ("Endpoint BL",        "endpoint"),
-            ("Linear BL",          "linear"),
-            ("Savitzky-Golay",     "savgol"),
-            ("Gaussian smooth",    "gaussian"),
-            ("FFT low-pass",       "fft_lowpass"),
-            ("SNV norm.",          "snv"),
-            ("Area norm.",         "area"),
-            ("Vector norm.",       "vector"),
-            ("Min-max norm.",      "minmax"),
+        # ── Drag-and-drop pipeline helpers ────────────────────────────────────
+        _PIPE_CATS = [
+            ("Spectral cut",         ["spectral_cut"]),
+            ("Spike removal",        ["spike_removal"]),
+            ("Baseline subtraction", ["rubberband","rolling_ball","als","arpls","airpls",
+                                       "iasls","drpls","imodpoly","modpoly","poly","endpoint","linear"]),
+            ("Smoothing",            ["savgol","gaussian","fft_lowpass"]),
+            ("Normalisation",        ["snv","area","vector","minmax"]),
         ]
-        _LABEL_TO_KEY = dict(_PP_STEPS)
-        _KEY_TO_LABEL = {v: k for k, v in _PP_STEPS}
-        _ALL_LABELS   = [l for l, _ in _PP_STEPS]
+        _PKLAB = {
+            "spectral_cut":"Spectral cut", "spike_removal":"Spike removal",
+            "rubberband":"Rubberband",     "rolling_ball":"Rolling ball",
+            "als":"ALS",      "arpls":"ARPLS",   "airpls":"AIRPLS",
+            "iasls":"IASLS",  "drpls":"DRPLS",   "imodpoly":"IModPoly",
+            "modpoly":"ModPoly","poly":"Poly",    "endpoint":"Endpoint",
+            "linear":"Linear", "savgol":"Savitzky-Golay",
+            "gaussian":"Gaussian","fft_lowpass":"FFT low-pass",
+            "snv":"SNV","area":"Area","vector":"Vector","minmax":"Min-max",
+        }
+        _PKLKEY  = {v: k for k, v in _PKLAB.items()}
+        _NO_PPAR = {"spike_removal","rubberband","endpoint","linear",
+                    "snv","area","vector","minmax"}
 
-        def _pipeline_ui(key_prefix, default_pipeline):
-            """Drag-and-drop preprocessing pipeline builder.
+        def _pkey(s):
+            """'Rubberband #2' → 'rubberband'"""
+            return _PKLKEY.get(s.rsplit(" #", 1)[0], "")
 
-            Returns (pipeline_keys: list[str], params: dict)
-            """
-            _ss_avail = f"{key_prefix}_pp_avail"
-            _ss_pipe  = f"{key_prefix}_pp_pipe"
-            _def_labels = [_KEY_TO_LABEL[k] for k in default_pipeline if k in _KEY_TO_LABEL]
+        def _wk(pfx, s, p):
+            _safe = s.replace(" ","_").replace("#","n").replace(".","_").replace("-","_")
+            return f"pp_{pfx}_{_safe}_{p}"
 
-            # Initialise session state on first render
-            if _ss_pipe not in st.session_state:
-                st.session_state[_ss_avail] = [l for l in _ALL_LABELS if l not in _def_labels]
-                st.session_state[_ss_pipe]  = list(_def_labels)
+        def _pipe_init(pfx, defaults):
+            _ctr, _items = {}, []
+            for _k in defaults:
+                _lbl = _PKLAB.get(_k, _k)
+                _n   = _ctr.get(_lbl, 1)
+                _items.append(f"{_lbl} #{_n}")
+                _ctr[_lbl] = _n + 1
+            st.session_state[f"{pfx}_pipe"] = _items
+            st.session_state[f"{pfx}_ctr"]  = _ctr
 
-            # Reset button
-            _hcol1, _hcol2 = st.columns([6, 1])
-            _hcol1.caption(
-                "Drag steps between **Available** and **Pipeline**, and reorder within Pipeline."
+        def _step_params_ui(pfx, item):
+            """Render parameter widgets for one pipeline item."""
+            _sk = _pkey(item)
+            if _sk == "spectral_cut":
+                _c1, _c2 = st.columns(2)
+                _c1.number_input("Min (cm⁻¹)", value=700,  step=50, key=_wk(pfx,item,"wn_min"))
+                _c2.number_input("Max (cm⁻¹)", value=3900, step=50, key=_wk(pfx,item,"wn_max"))
+                st.toggle("Exclude gap region", value=True, key=_wk(pfx,item,"use_gap"))
+                if st.session_state.get(_wk(pfx,item,"use_gap"), True):
+                    _g1, _g2 = st.columns(2)
+                    _g1.number_input("Gap from", value=1850, step=50, key=_wk(pfx,item,"gap_lo"))
+                    _g2.number_input("Gap to",   value=2750, step=50, key=_wk(pfx,item,"gap_hi"))
+            elif _sk == "rolling_ball":
+                st.slider("Ball radius", 10, 300, 50, key=_wk(pfx,item,"radius"))
+            elif _sk == "als":
+                _c1, _c2 = st.columns(2)
+                _c1.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8,
+                                  format="%.0e", key=_wk(pfx,item,"lam"))
+                _c2.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5,
+                                  format="%.3f",  key=_wk(pfx,item,"p"))
+            elif _sk in ("arpls","airpls","iasls","drpls"):
+                st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9,
+                                format="%.0e", key=_wk(pfx,item,"lam"))
+            elif _sk in ("imodpoly","modpoly","poly"):
+                st.slider("Polynomial order", 1, 8, 2, key=_wk(pfx,item,"order"))
+            elif _sk == "savgol":
+                _c1, _c2 = st.columns(2)
+                _c1.slider("Window length (odd)", 5, 51, 11, step=2, key=_wk(pfx,item,"window"))
+                _c2.slider("Poly order", 1, 9, 3, key=_wk(pfx,item,"poly"))
+            elif _sk == "gaussian":
+                st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key=_wk(pfx,item,"sigma"))
+            elif _sk == "fft_lowpass":
+                st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01, key=_wk(pfx,item,"cutoff"))
+
+        def _pipeline_ui(pfx, defaults):
+            """Render pipeline builder. Returns ordered list of item strings."""
+            _ss  = f"{pfx}_pipe"
+            _ssc = f"{pfx}_ctr"
+            if _ss not in st.session_state:
+                _pipe_init(pfx, defaults)
+
+            _hc1, _hc2 = st.columns([9, 1])
+            _hc1.caption(
+                "Click **+** to add steps (can be added multiple times). "
+                "Drag the pipeline list to reorder. Click **×** to remove a step."
             )
-            if _hcol2.button("↺ Reset", key=f"{key_prefix}_pp_reset",
-                             help="Restore the default pipeline for this analysis"):
-                st.session_state[_ss_avail] = [l for l in _ALL_LABELS if l not in _def_labels]
-                st.session_state[_ss_pipe]  = list(_def_labels)
+            if _hc2.button("↺ Reset", key=f"{pfx}_rst", help="Restore default pipeline"):
+                _pipe_init(pfx, defaults)
                 st.rerun()
 
-            try:
-                from streamlit_sortables import sort_items as _sort_items
-                _result = _sort_items(
-                    [
-                        {"header": "Available steps",        "items": st.session_state[_ss_avail]},
-                        {"header": "▶ Pipeline (in order)", "items": st.session_state[_ss_pipe]},
-                    ],
-                    multi_containers=True,
-                    direction="vertical",
-                    key=f"{key_prefix}_sortable",
-                )
-                st.session_state[_ss_avail] = _result[0]["items"]
-                st.session_state[_ss_pipe]  = _result[1]["items"]
-                _pipe_labels = _result[1]["items"]
-            except ImportError:
-                st.caption("(Install `streamlit-sortables` for drag-and-drop.)")
-                _pipe_labels = st.session_state[_ss_pipe]
+            _lc, _rc = st.columns([1, 2])
 
-            _pipeline_keys = [_LABEL_TO_KEY[l] for l in _pipe_labels if l in _LABEL_TO_KEY]
+            # ── Palette (left) ────────────────────────────────────────────
+            with _lc:
+                st.markdown("**Available steps**")
+                for _cat, _ckeys in _PIPE_CATS:
+                    with st.expander(_cat, expanded=(_cat != "Baseline subtraction")):
+                        for _k in _ckeys:
+                            _lbl = _PKLAB[_k]
+                            if st.button(f"+ {_lbl}", key=f"{pfx}_add_{_k}",
+                                         use_container_width=True):
+                                _c = st.session_state[_ssc]
+                                _n = _c.get(_lbl, 1)
+                                st.session_state[_ss].append(f"{_lbl} #{_n}")
+                                _c[_lbl] = _n + 1
+                                st.rerun()
 
-            # Parameter inputs for pipeline steps that need them
-            _params = {}
-            _NEEDS_PARAMS = {"spectral_cut", "rolling_ball", "als", "arpls", "airpls",
-                             "iasls", "drpls", "imodpoly", "modpoly", "poly",
-                             "savgol", "gaussian", "fft_lowpass"}
-            _active_param_steps = [k for k in _pipeline_keys if k in _NEEDS_PARAMS]
-            if _active_param_steps:
-                with st.expander("⚙ Step parameters", expanded=True):
-                    for _k in _active_param_steps:
-                        st.markdown(f"**{_KEY_TO_LABEL[_k]}**")
-                        if _k == "spectral_cut":
-                            _c1, _c2 = st.columns(2)
-                            _params["sc_wn_min"] = _c1.number_input(
-                                "Min (cm⁻¹)", value=700, step=50, key=f"{key_prefix}_sc_wn_min")
-                            _params["sc_wn_max"] = _c2.number_input(
-                                "Max (cm⁻¹)", value=3900, step=50, key=f"{key_prefix}_sc_wn_max")
-                            _params["sc_use_gap"] = st.toggle(
-                                "Exclude gap region", value=True, key=f"{key_prefix}_sc_gap")
-                            if _params["sc_use_gap"]:
-                                _g1, _g2 = st.columns(2)
-                                _params["sc_gap_lo"] = _g1.number_input(
-                                    "Gap from", value=1850, step=50, key=f"{key_prefix}_sc_gap_lo")
-                                _params["sc_gap_hi"] = _g2.number_input(
-                                    "Gap to",   value=2750, step=50, key=f"{key_prefix}_sc_gap_hi")
+            # ── Pipeline (right) ──────────────────────────────────────────
+            with _rc:
+                _cur = list(st.session_state[_ss])
+                if not _cur:
+                    st.caption("_No steps added yet — click + on the left._")
+                else:
+                    st.markdown("**Pipeline** (drag to reorder):")
+                    try:
+                        from streamlit_sortables import sort_items as _si
+                        _new = _si(_cur, key=f"{pfx}_sortable")
+                        if list(_new) != _cur:
+                            st.session_state[_ss] = list(_new)
+                    except ImportError:
+                        st.info("Install `streamlit-sortables` for drag-and-drop reordering.")
+
+                    st.markdown("**Step configuration:**")
+                    for _i, _item in enumerate(list(st.session_state[_ss])):
+                        _sk = _pkey(_item)
+                        _pc, _rx = st.columns([11, 1])
+                        with _rx:
+                            if st.button("×", key=f"{pfx}_rm_{_i}",
+                                          help=f"Remove {_item}"):
+                                st.session_state[_ss].pop(_i)
+                                st.rerun()
+                        with _pc:
+                            if _sk not in _NO_PPAR and _sk:
+                                with st.expander(f"⚙ {_item}", expanded=False):
+                                    _step_params_ui(pfx, _item)
                             else:
-                                _params["sc_gap_lo"] = _params["sc_gap_hi"] = None
-                        elif _k == "rolling_ball":
-                            _params["rb_radius"] = st.slider(
-                                "Ball radius", 10, 300, 50, key=f"{key_prefix}_rb_radius")
-                        elif _k == "als":
-                            _c1, _c2 = st.columns(2)
-                            _params["als_lam"] = _c1.number_input(
-                                "λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8,
-                                format="%.0e", key=f"{key_prefix}_als_lam")
-                            _params["als_p"] = _c2.number_input(
-                                "p (asymmetry)", value=0.01, min_value=0.001, max_value=0.5,
-                                format="%.3f", key=f"{key_prefix}_als_p")
-                        elif _k in ("arpls", "airpls", "iasls", "drpls"):
-                            _params[f"{_k}_lam"] = st.number_input(
-                                "λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9,
-                                format="%.0e", key=f"{key_prefix}_{_k}_lam")
-                        elif _k in ("imodpoly", "modpoly", "poly"):
-                            _params[f"{_k}_order"] = st.slider(
-                                "Poly order", 1, 8, 2, key=f"{key_prefix}_{_k}_order")
-                        elif _k == "savgol":
-                            _c1, _c2 = st.columns(2)
-                            _params["sg_window"] = _c1.slider(
-                                "Window (odd)", 5, 51, 11, step=2, key=f"{key_prefix}_sg_win")
-                            _params["sg_poly"] = _c2.slider(
-                                "Poly order", 1, 9, 3, key=f"{key_prefix}_sg_poly")
-                        elif _k == "gaussian":
-                            _params["gauss_sigma"] = st.slider(
-                                "σ (sigma)", 0.5, 5.0, 1.0, step=0.5,
-                                key=f"{key_prefix}_gauss_sigma")
-                        elif _k == "fft_lowpass":
-                            _params["fft_cutoff"] = st.slider(
-                                "Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
-                                key=f"{key_prefix}_fft_cut")
+                                st.caption(f"✓ {_item}  _(no parameters)_")
 
-            return _pipeline_keys, _params
+            return list(st.session_state[_ss])
 
-        def _apply_pipeline(X, wn, pipeline_keys, params, fine_lo=None, fine_hi=None):
-            """Execute pipeline steps in order, then apply optional fine cut.
-
-            Returns (X_proc, wn_proc).
-            """
+        def _apply_pipeline(X, wn, items, pfx, fine_lo=None, fine_hi=None):
+            """Execute pipeline steps in order; apply optional fine wavenumber cut at the end."""
             X  = X.copy().astype(float)
             wn = wn.copy().astype(float)
 
-            for _step in pipeline_keys:
-                if X.shape[1] == 0:
-                    break
+            def _p(item, param, default):
+                return st.session_state.get(_wk(pfx, item, param), default)
 
-                if _step == "spectral_cut":
-                    _lo   = params.get("sc_wn_min", float(wn.min()))
-                    _hi   = params.get("sc_wn_max", float(wn.max()))
+            for _item in items:
+                _sk = _pkey(_item)
+                if not _sk or X.shape[1] == 0:
+                    continue
+
+                if _sk == "spectral_cut":
+                    _lo, _hi = _p(_item,"wn_min",700.0), _p(_item,"wn_max",3900.0)
                     _mask = (wn >= _lo) & (wn <= _hi)
-                    if params.get("sc_use_gap"):
-                        _glo, _ghi = params.get("sc_gap_lo"), params.get("sc_gap_hi")
+                    if _p(_item,"use_gap",True):
+                        _glo, _ghi = _p(_item,"gap_lo",1850.0), _p(_item,"gap_hi",2750.0)
                         if _glo is not None and _ghi is not None:
                             _mask &= ~((wn >= _glo) & (wn <= _ghi))
-                    X, wn = X[:, _mask], wn[_mask]
+                    X, wn = X[:,_mask], wn[_mask]
 
-                elif _step == "spike_removal":
+                elif _sk == "spike_removal":
                     for _i in range(X.shape[0]):
                         X[_i] = rms.spike_removal_scp(X[_i])
 
-                elif _step == "rubberband":
+                elif _sk == "rubberband":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.rubberband_correction(wn, X[_i])
 
-                elif _step == "rolling_ball":
-                    _r = params.get("rb_radius", 50)
+                elif _sk == "rolling_ball":
+                    _r = int(_p(_item,"radius",50))
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.rolling_ball_baseline(X[_i], ball_radius=_r)
 
-                elif _step == "als":
+                elif _sk == "als":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.als_baseline_correction(
-                            X[_i], lam=params.get("als_lam", 1e5), p=params.get("als_p", 0.01))
+                            X[_i], lam=_p(_item,"lam",1e5), p=_p(_item,"p",0.01))
 
-                elif _step in ("arpls", "airpls", "iasls", "drpls"):
+                elif _sk in ("arpls","airpls","iasls","drpls"):
                     import ramanspy.preprocessing.baseline as _rsb
-                    _fn = {"arpls": _rsb._arpls, "airpls": _rsb._airpls,
-                           "iasls": _rsb._iasls, "drpls":  _rsb._drpls}[_step]
-                    _lam = params.get(f"{_step}_lam", 1e5)
+                    _fn = {"arpls":_rsb._arpls,"airpls":_rsb._airpls,
+                           "iasls":_rsb._iasls,"drpls":_rsb._drpls}[_sk]
+                    _lam = _p(_item,"lam",1e5)
                     for _i in range(X.shape[0]):
                         _res, _ = _fn(X[_i:_i+1], wn, lam=_lam)
                         X[_i] -= _res.squeeze()
 
-                elif _step in ("imodpoly", "modpoly", "poly"):
+                elif _sk in ("imodpoly","modpoly","poly"):
                     import ramanspy.preprocessing.baseline as _rsb
-                    _fn = {"imodpoly": _rsb._imodpoly, "modpoly": _rsb._modpoly,
-                           "poly":     _rsb._poly}[_step]
-                    _ord = params.get(f"{_step}_order", 2)
+                    _fn = {"imodpoly":_rsb._imodpoly,"modpoly":_rsb._modpoly,
+                           "poly":_rsb._poly}[_sk]
+                    _ord = int(_p(_item,"order",2))
                     for _i in range(X.shape[0]):
                         _res, _ = _fn(X[_i:_i+1], wn, poly_order=_ord)
                         X[_i] -= _res.squeeze()
 
-                elif _step == "endpoint":
+                elif _sk == "endpoint":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.endpoint_baseline(X[_i])
 
-                elif _step == "linear":
+                elif _sk == "linear":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.linear_baseline(X[_i])
 
-                elif _step == "savgol":
-                    _win  = int(params.get("sg_window", 11))
-                    _poly = int(params.get("sg_poly", 3))
+                elif _sk == "savgol":
+                    _win  = int(_p(_item,"window",11))
+                    _poly = int(_p(_item,"poly",3))
                     if _win > _poly and _win % 2 == 1:
                         for _i in range(X.shape[0]):
                             X[_i] = rms.Savgol_filter(X[_i], _win, _poly)
 
-                elif _step == "gaussian":
+                elif _sk == "gaussian":
                     from scipy.ndimage import gaussian_filter as _gfilt
-                    _sig = params.get("gauss_sigma", 1.0)
+                    _sig = float(_p(_item,"sigma",1.0))
                     for _i in range(X.shape[0]):
                         X[_i] = _gfilt(X[_i], sigma=_sig)
 
-                elif _step == "fft_lowpass":
-                    _cut = params.get("fft_cutoff", 0.1)
+                elif _sk == "fft_lowpass":
+                    _cut = float(_p(_item,"cutoff",0.1))
                     _n   = X.shape[1]
                     for _i in range(X.shape[0]):
                         _F = np.fft.rfft(X[_i])
-                        _F[max(1, int(_cut * len(_F))):] = 0
+                        _F[max(1,int(_cut*len(_F))):] = 0
                         X[_i] = np.fft.irfft(_F, n=_n)
 
-                elif _step == "snv":
+                elif _sk == "snv":
                     X = rms.snv_normalization(X)
-
-                elif _step == "area":
+                elif _sk == "area":
                     X = rms.area_normalization(X, wn)
-
-                elif _step == "vector":
+                elif _sk == "vector":
                     X = rms.vector_normalization(X)
+                elif _sk == "minmax":
+                    _mn, _mx = X.min(axis=1,keepdims=True), X.max(axis=1,keepdims=True)
+                    X = np.where(_mx-_mn > 0, (X-_mn)/(_mx-_mn), 0.0)
 
-                elif _step == "minmax":
-                    _mn  = X.min(axis=1, keepdims=True)
-                    _mx  = X.max(axis=1, keepdims=True)
-                    _rng = _mx - _mn
-                    X = np.where(_rng > 0, (X - _mn) / _rng, 0.0)
-
-            # Fine cut (analysis-specific region, e.g. amide I window)
+            # Fine cut to analysis-specific region (e.g. amide I 1600–1700 cm⁻¹)
             if X.shape[1] > 0 and (fine_lo is not None or fine_hi is not None):
-                _lo   = fine_lo if fine_lo is not None else float(wn.min())
-                _hi   = fine_hi if fine_hi is not None else float(wn.max())
-                _mask = (wn >= _lo) & (wn <= _hi)
-                X, wn = X[:, _mask], wn[_mask]
+                _lo  = fine_lo  if fine_lo  is not None else float(wn.min())
+                _hi  = fine_hi  if fine_hi  is not None else float(wn.max())
+                _m   = (wn >= _lo) & (wn <= _hi)
+                X, wn = X[:,_m], wn[_m]
 
             return X, wn
 
@@ -2133,14 +2134,14 @@ with tab_further:
         _pca3, _pca4 = st.columns(2)
         _pca_n_comp  = _pca3.slider("Number of PCs", 2, 10, 3, key="pca_n_comp")
         _pca_lbl_key = _pca4.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
-        _pipeline_pca, _params_pca = _pipeline_ui(
+        _items_pca = _pipeline_ui(
             "pca", ["spectral_cut", "spike_removal", "rubberband", "snv"])
         _run_pca = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
 
         if _run_pca:
             with st.spinner("Preprocessing spectra for PCA…"):
                 _X_proc, _wn2 = _apply_pipeline(
-                    _X_raw_all, _wn_raw_shared, _pipeline_pca, _params_pca,
+                    _X_raw_all, _wn_raw_shared, _items_pca, "pca",
                     fine_lo=_pca_cut2_min, fine_hi=_pca_cut2_max,
                 )
             if _X_proc.shape[1] == 0:
@@ -2253,7 +2254,7 @@ with tab_further:
         _amide_max = _cb2.number_input("Amide max (cm⁻¹)", value=1700, step=10, key="amide_max")
         _n_gauss   = _cb3.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
-        _pipeline_amide, _params_amide = _pipeline_ui(
+        _items_amide = _pipeline_ui(
             "amide", ["spectral_cut", "spike_removal", "rubberband", "endpoint", "savgol", "area"])
 
         # ── Gaussian centre constraints ───────────────────────────────────
@@ -2315,7 +2316,7 @@ with tab_further:
         if _run_amide:
             with st.spinner("Preprocessing spectra for amide decomposition…"):
                 _X_am, _wn_am = _apply_pipeline(
-                    _X_raw_all, _wn_raw_shared, _pipeline_amide, _params_amide,
+                    _X_raw_all, _wn_raw_shared, _items_amide, "amide",
                     fine_lo=_amide_min, fine_hi=_amide_max,
                 )
             if _X_am.shape[1] < _n_gauss * 3:
@@ -2673,14 +2674,14 @@ with tab_further:
                                    step=5, key="pk_hw",
                                    help="Intensity summed over [centre ± half-window]")
         _pr_lbl = st.selectbox("Plot ratio vs", list(_label_opts.keys()), key="pr_label")
-        _pipeline_peak, _params_peak = _pipeline_ui(
+        _items_peak = _pipeline_ui(
             "peak", ["spectral_cut", "spike_removal", "rubberband"])
         _run_peak = st.button("▶ Compute ratio", key="btn_peak", on_click=_goto_further)
 
         if _run_peak:
             with st.spinner("Preprocessing spectra for peak ratio…"):
                 _X_peak, _wn_peak = _apply_pipeline(
-                    _X_raw_all, _wn_raw_shared, _pipeline_peak, _params_peak
+                    _X_raw_all, _wn_raw_shared, _items_peak, "peak"
                 )
 
             def _integrate(X, wn, centre, hw):
