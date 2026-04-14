@@ -1722,6 +1722,13 @@ with tab_further:
         from scipy.optimize import curve_fit as _curve_fit
 
         # ── Drag-and-drop pipeline helpers ────────────────────────────────────
+        _PIPE_PRESETS = {
+            "— custom —":                    None,
+            "Amide I band decomposition":    ["spectral_cut","spike_removal","savgol","area","endpoint"],
+            "General (rubberband + SNV)":    ["spectral_cut","spike_removal","rubberband","snv"],
+            "PCA (rubberband + SNV)":        ["spectral_cut","spike_removal","rubberband","snv"],
+            "Peak ratio (rubberband only)":  ["spectral_cut","spike_removal","rubberband"],
+        }
         _PIPE_CATS = [
             ("Spectral cut",         ["spectral_cut"]),
             ("Spike removal",        ["spike_removal"]),
@@ -1804,14 +1811,26 @@ with tab_further:
             if _ss not in st.session_state:
                 _pipe_init(pfx, defaults)
 
-            _hc1, _hc2 = st.columns([9, 1])
-            _hc1.caption(
-                "Click **+** to add steps (can be added multiple times). "
-                "Drag the pipeline list to reorder. Click **×** to remove a step."
+            # ── Preset selector ───────────────────────────────────────────
+            _ph1, _ph2, _ph3 = st.columns([3, 1, 1])
+            _preset_sel = _ph1.selectbox(
+                "Load preset", list(_PIPE_PRESETS.keys()),
+                key=f"{pfx}_preset_sel",
+                label_visibility="collapsed",
             )
-            if _hc2.button("↺ Reset", key=f"{pfx}_rst", help="Restore default pipeline"):
+            if _ph2.button("Load", key=f"{pfx}_preset_load",
+                           help="Replace current pipeline with selected preset"):
+                _psteps = _PIPE_PRESETS[_preset_sel]
+                if _psteps is not None:
+                    _pipe_init(pfx, _psteps)
+                    st.rerun()
+            if _ph3.button("↺ Reset", key=f"{pfx}_rst", help="Restore default pipeline"):
                 _pipe_init(pfx, defaults)
                 st.rerun()
+
+            _ph1.caption(
+                "Click **+** to add steps. Drag to reorder. **×** to remove."
+            )
 
             _lc, _rc = st.columns([1, 2])
 
@@ -1871,14 +1890,26 @@ with tab_further:
             return list(st.session_state[_ss])
 
         def _apply_pipeline(X, wn, items, pfx, fine_lo=None, fine_hi=None):
-            """Execute pipeline steps in order; apply optional fine wavenumber cut at the end."""
+            """Execute pipeline steps in order; apply optional fine wavenumber cut at the end.
+
+            When fine_lo/fine_hi are given, any trailing endpoint/linear steps in the
+            pipeline are deferred until after the fine cut so they anchor the endpoints
+            of the final spectral window (not the wider pre-cut window) to zero.
+            """
             X  = X.copy().astype(float)
             wn = wn.copy().astype(float)
 
             def _p(item, param, default):
                 return st.session_state.get(_wk(pfx, item, param), default)
 
-            for _item in items:
+            # Collect trailing endpoint/linear steps to run after the fine cut
+            _main  = list(items)
+            _deferred = []
+            if fine_lo is not None or fine_hi is not None:
+                while _main and _pkey(_main[-1]) in ("endpoint", "linear"):
+                    _deferred.insert(0, _main.pop())
+
+            for _item in _main:
                 _sk = _pkey(_item)
                 if not _sk or X.shape[1] == 0:
                     continue
@@ -1967,12 +1998,24 @@ with tab_further:
                     _mn, _mx = X.min(axis=1,keepdims=True), X.max(axis=1,keepdims=True)
                     X = np.where(_mx-_mn > 0, (X-_mn)/(_mx-_mn), 0.0)
 
-            # Fine cut to analysis-specific region (e.g. amide I 1600–1700 cm⁻¹)
+            # Fine cut to analysis-specific region (e.g. amide I 1600–1700 cm⁻¹).
+            # Applied BEFORE any trailing endpoint/linear steps so those steps
+            # anchor the endpoints of the final spectral window to zero.
             if X.shape[1] > 0 and (fine_lo is not None or fine_hi is not None):
                 _lo  = fine_lo  if fine_lo  is not None else float(wn.min())
                 _hi  = fine_hi  if fine_hi  is not None else float(wn.max())
                 _m   = (wn >= _lo) & (wn <= _hi)
                 X, wn = X[:,_m], wn[_m]
+
+            # Run any trailing endpoint / linear steps that were deferred
+            for _item in _deferred:
+                _sk = _pkey(_item)
+                if _sk == "endpoint":
+                    for _i in range(X.shape[0]):
+                        X[_i] -= rms.endpoint_baseline(X[_i])
+                elif _sk == "linear":
+                    for _i in range(X.shape[0]):
+                        X[_i] -= rms.linear_baseline(X[_i])
 
             return X, wn
 
@@ -2259,7 +2302,7 @@ with tab_further:
         _n_gauss   = _cb3.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
         _items_amide = _pipeline_ui(
-            "amide", ["spectral_cut", "spike_removal", "rubberband", "endpoint", "savgol", "area"])
+            "amide", ["spectral_cut", "spike_removal", "savgol", "area", "endpoint"])
 
         # ── Gaussian centre constraints ───────────────────────────────────
         st.markdown("**Gaussian components**")
