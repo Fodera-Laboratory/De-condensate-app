@@ -2296,10 +2296,7 @@ with tab_further:
             "Configure the preprocessing below, then click Run. "
             "The resulting Gaussian areas represent the fractional contribution of each secondary structure element."
         )
-        _cb1, _cb2, _cb3 = st.columns(3)
-        _amide_min = _cb1.number_input("Amide min (cm⁻¹)", value=1600, step=10, key="amide_min")
-        _amide_max = _cb2.number_input("Amide max (cm⁻¹)", value=1700, step=10, key="amide_max")
-        _n_gauss   = _cb3.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
+        _n_gauss = st.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
         _items_amide = _pipeline_ui(
             "amide", ["spectral_cut", "spike_removal", "savgol", "area", "endpoint"])
@@ -2321,7 +2318,7 @@ with tab_further:
         for _gi in range(_n_gauss):
             _pr_gi = _PRESETS[_gi] if _gi < len(_PRESETS) else {
                 "label": f"Component {_gi+1}",
-                "centre": int(_amide_min + (_amide_max - _amide_min) * (_gi + 1) / (_n_gauss + 1)),
+                "centre": 1605 + _gi * 20,
                 "tol": 12, "fwhm_min": 15, "fwhm_max": 25,
             }
             with _g_cols[_gi]:
@@ -2364,7 +2361,6 @@ with tab_further:
             with st.spinner("Preprocessing spectra for amide decomposition…"):
                 _X_am, _wn_am = _apply_pipeline(
                     _X_raw_all, _wn_raw_shared, _items_amide, "amide",
-                    fine_lo=_amide_min, fine_hi=_amide_max,
                 )
             if _X_am.shape[1] < _n_gauss * 3:
                 st.error("Too few wavenumber points for the requested number of Gaussians.")
