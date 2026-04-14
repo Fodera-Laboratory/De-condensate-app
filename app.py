@@ -1746,83 +1746,112 @@ with tab_further:
         _FA_NM_FMT  = {"snv": "SNV", "area": "Area (unit area)",
                        "vector": "Vector (unit norm)", "minmax": "Min-max [0, 1]", "none": "None"}
 
-        def _further_pp_ui(key_prefix, default_baseline="none", default_smooth="none",
-                           default_norm="snv", expanded=True):
-            """Render preprocessing controls and return a settings dict."""
-            with st.expander("⚙ Preprocessing", expanded=expanded):
-                _fa1, _fa2, _fa3 = st.columns(3)
-                _fa_bl = _fa1.selectbox(
-                    "Baseline", _FA_BL_OPTS,
-                    index=_FA_BL_OPTS.index(default_baseline),
+        def _fa_baseline_params(key_prefix, bl):
+            """Render baseline parameter inputs; return (ball, alsl, alsp, rsl, rsp)."""
+            _ball = 50; _alsl = 1e5; _alsp = 0.01; _rsl = 1e5; _rsp = 2
+            if bl == "rolling_ball":
+                _ball = st.slider("Ball radius", 10, 300, 50, key=f"{key_prefix}_ball")
+            elif bl == "als":
+                _c1, _c2 = st.columns(2)
+                _alsl = _c1.number_input("λ (smoothness)", value=1e5, min_value=1e2,
+                                          max_value=1e8, format="%.0e", key=f"{key_prefix}_alsl")
+                _alsp = _c2.number_input("p (asymmetry)", value=0.01, min_value=0.001,
+                                          max_value=0.5, format="%.3f", key=f"{key_prefix}_alsp")
+            elif bl in ("arpls", "airpls", "iasls", "drpls"):
+                _rsl = st.number_input("λ (smoothness)", value=1e5, min_value=1e2,
+                                        max_value=1e9, format="%.0e", key=f"{key_prefix}_rsl")
+            elif bl in ("imodpoly", "modpoly", "poly"):
+                _rsp = st.slider("Polynomial order", 1, 8, 2, key=f"{key_prefix}_rsp")
+            return _ball, _alsl, _alsp, _rsl, _rsp
+
+        def _fa_smooth_params(key_prefix, sm):
+            """Render smoothing parameter inputs; return (sgw, sgp, gss, fftc)."""
+            _sgw = 11; _sgp = 3; _gss = 1.0; _fftc = 0.1
+            if sm == "savgol":
+                _s1, _s2 = st.columns(2)
+                _sgw = _s1.slider("Window (odd)", 5, 51, 11, step=2, key=f"{key_prefix}_sgw")
+                _sgp = _s2.slider("Poly order",   1,  9,  3,        key=f"{key_prefix}_sgp")
+            elif sm == "gaussian":
+                _gss = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key=f"{key_prefix}_gss")
+            elif sm == "fft_lowpass":
+                _fftc = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
+                                   key=f"{key_prefix}_fftc")
+            return _sgw, _sgp, _gss, _fftc
+
+        def _further_prior_pp_ui(key_prefix, expanded=True):
+            """Prior preprocessing: spectral cut + background + spike removal."""
+            with st.expander("⚙ Step 1 — Cut & background correction", expanded=expanded):
+                _c1, _c2 = st.columns(2)
+                _wlo = _c1.number_input("Min (cm⁻¹)", value=700, step=50, key=f"{key_prefix}_wlo")
+                _whi = _c2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{key_prefix}_whi")
+                _use_cut = st.toggle("Exclude gap region", value=True, key=f"{key_prefix}_usecut")
+                _cut_lo = _cut_hi = None
+                if _use_cut:
+                    _gc1, _gc2 = st.columns(2)
+                    _cut_lo = _gc1.number_input("Gap from", value=1850, step=50, key=f"{key_prefix}_cutlo")
+                    _cut_hi = _gc2.number_input("Gap to",   value=2750, step=50, key=f"{key_prefix}_cuthi")
+                _bl = st.selectbox(
+                    "Baseline correction", _FA_BL_OPTS,
+                    index=_FA_BL_OPTS.index("rubberband"),
                     format_func=lambda x: _FA_BL_FMT[x],
                     key=f"{key_prefix}_bl",
                 )
-                _fa_sm = _fa2.selectbox(
+                _ball, _alsl, _alsp, _rsl, _rsp = _fa_baseline_params(key_prefix, _bl)
+                _spike = st.toggle("Spike removal", value=True, key=f"{key_prefix}_spike")
+            return dict(
+                baseline=_bl, ball_radius=_ball,
+                als_lam=_alsl, als_p=_alsp, rs_lam=_rsl, rs_poly_order=_rsp,
+                spike_remove=_spike,
+                smooth="none", normalize="none",
+                wn_min=_wlo, wn_max=_whi,
+                use_cut=_use_cut, wn_cut_min=_cut_lo, wn_cut_max=_cut_hi,
+            )
+
+        def _further_pp_ui(key_prefix, default_smooth="none", default_norm="snv", expanded=True):
+            """Step 2 preprocessing: smoothing + normalisation."""
+            with st.expander("⚙ Step 2 — Smoothing & normalisation", expanded=expanded):
+                _fa1, _fa2 = st.columns(2)
+                _fa_sm = _fa1.selectbox(
                     "Smoothing", _FA_SM_OPTS,
                     index=_FA_SM_OPTS.index(default_smooth),
                     format_func=lambda x: _FA_SM_FMT[x],
                     key=f"{key_prefix}_sm",
                 )
-                _fa_nm = _fa3.selectbox(
+                _fa_nm = _fa2.selectbox(
                     "Normalisation", _FA_NM_OPTS,
                     index=_FA_NM_OPTS.index(default_norm),
                     format_func=lambda x: _FA_NM_FMT[x],
                     key=f"{key_prefix}_nm",
                 )
-                _fa_ball = 50; _fa_alsl = 1e5; _fa_alsp = 0.01
-                _fa_rsl = 1e5; _fa_rsp = 2
-                _fa_sgw = 11; _fa_sgp = 3; _fa_gss = 1.0; _fa_fftc = 0.1
-                if _fa_bl == "rolling_ball":
-                    _fa_ball = st.slider("Ball radius", 10, 300, 50, key=f"{key_prefix}_ball")
-                elif _fa_bl == "als":
-                    _fp1, _fp2 = st.columns(2)
-                    _fa_alsl = _fp1.number_input("λ (smoothness)", value=1e5, min_value=1e2,
-                                                  max_value=1e8, format="%.0e", key=f"{key_prefix}_alsl")
-                    _fa_alsp = _fp2.number_input("p (asymmetry)", value=0.01, min_value=0.001,
-                                                  max_value=0.5, format="%.3f", key=f"{key_prefix}_alsp")
-                elif _fa_bl in ("arpls", "airpls", "iasls", "drpls"):
-                    _fa_rsl = st.number_input("λ (smoothness)", value=1e5, min_value=1e2,
-                                               max_value=1e9, format="%.0e", key=f"{key_prefix}_rsl")
-                elif _fa_bl in ("imodpoly", "modpoly", "poly"):
-                    _fa_rsp = st.slider("Polynomial order", 1, 8, 2, key=f"{key_prefix}_rsp")
-                if _fa_sm == "savgol":
-                    _fs1, _fs2 = st.columns(2)
-                    _fa_sgw = _fs1.slider("Window (odd)", 5, 51, 11, step=2, key=f"{key_prefix}_sgw")
-                    _fa_sgp = _fs2.slider("Poly order",   1,  9,  3,        key=f"{key_prefix}_sgp")
-                elif _fa_sm == "gaussian":
-                    _fa_gss = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key=f"{key_prefix}_gss")
-                elif _fa_sm == "fft_lowpass":
-                    _fa_fftc = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
-                                          key=f"{key_prefix}_fftc")
+                _fa_sgw, _fa_sgp, _fa_gss, _fa_fftc = _fa_smooth_params(key_prefix, _fa_sm)
             return dict(
-                baseline=_fa_bl, ball_radius=_fa_ball,
-                als_lam=_fa_alsl, als_p=_fa_alsp,
-                rs_lam=_fa_rsl, rs_poly_order=_fa_rsp,
+                baseline="none",
                 smooth=_fa_sm, sg_window=_fa_sgw, sg_poly=_fa_sgp,
                 gaussian_sigma=_fa_gss, fft_cutoff=_fa_fftc,
                 normalize=_fa_nm, spike_remove=False,
             )
 
-        def _apply_further_pp(X_raw, wn_raw, pp, wn_lo=None, wn_hi=None):
-            """Preprocess raw spectra with analysis-specific settings.
+        def _apply_further_pp(X_raw, wn_raw, prior_pp, analysis_pp, wn_lo=None, wn_hi=None):
+            """Two-step preprocessing from raw spectra.
 
-            Parameters
-            ----------
-            X_raw   : raw spectral matrix (n_spectra × n_raw_wn)
-            wn_raw  : raw wavenumber axis
-            pp      : settings dict from _further_pp_ui
-            wn_lo, wn_hi : optional wavenumber range (defaults to full raw range)
+            Step 1 (prior_pp): broad spectral cut + background subtraction + spike removal.
+            Step 2 (analysis_pp): fine cut to [wn_lo, wn_hi] + smoothing + normalisation.
 
             Returns (X_proc, wn_proc)
             """
-            _s = dict(
-                pp,
-                wn_min=wn_lo if wn_lo is not None else float(wn_raw.min()),
-                wn_max=wn_hi if wn_hi is not None else float(wn_raw.max()),
+            # Step 1: cut + background + spike
+            _s1 = dict(prior_pp)
+            _X1, _wn1, _ = an.preprocess_matrix(X_raw, wn_raw, _s1)
+
+            # Step 2: fine cut + smooth + normalise
+            _s2 = dict(
+                analysis_pp,
+                wn_min=wn_lo if wn_lo is not None else float(_wn1.min()),
+                wn_max=wn_hi if wn_hi is not None else float(_wn1.max()),
                 use_cut=False,
             )
-            _Xp, _wn_out, _ = an.preprocess_matrix(X_raw, wn_raw, _s)
-            return _Xp, _wn_out
+            _X2, _wn2, _ = an.preprocess_matrix(_X1, _wn1, _s2)
+            return _X2, _wn2
 
         results_all = st.session_state.get("results", {})
         models      = st.session_state.get("models", {})
@@ -1990,23 +2019,22 @@ with tab_further:
         _pca3, _pca4 = st.columns(2)
         _pca_n_comp  = _pca3.slider("Number of PCs", 2, 10, 3, key="pca_n_comp")
         _pca_lbl_key = _pca4.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
-        _pp_pca  = _further_pp_ui("pca", default_norm="snv")
-        _run_pca = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
+        _prior_pca = _further_prior_pp_ui("pca")
+        _pp_pca    = _further_pp_ui("pca", default_norm="snv")
+        _run_pca   = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
 
         if _run_pca:
-            _wn_lo_check = (_wn_raw_shared >= _pca_cut2_min).sum()
-            _wn_hi_check = (_wn_raw_shared <= _pca_cut2_max).sum()
-            if _wn_lo_check == 0 or _wn_hi_check == 0:
+            with st.spinner("Preprocessing spectra for PCA…"):
+                _X_proc, _wn2 = _apply_further_pp(
+                    _X_raw_all, _wn_raw_shared, _prior_pca, _pp_pca,
+                    wn_lo=_pca_cut2_min, wn_hi=_pca_cut2_max,
+                )
+            if _X_proc.shape[1] == 0:
                 st.error(
-                    f"Analysis cut {_pca_cut2_min}–{_pca_cut2_max} cm⁻¹ lies outside the "
-                    f"raw wavenumber range {_wn_raw_shared.min():.0f}–{_wn_raw_shared.max():.0f} cm⁻¹."
+                    f"Analysis cut {_pca_cut2_min}–{_pca_cut2_max} cm⁻¹ contains no points "
+                    f"after prior preprocessing. Adjust the spectral range in Step 1."
                 )
             else:
-                with st.spinner("Preprocessing spectra for PCA…"):
-                    _X_proc, _wn2 = _apply_further_pp(
-                        _X_raw_all, _wn_raw_shared, _pp_pca,
-                        wn_lo=_pca_cut2_min, wn_hi=_pca_cut2_max,
-                    )
                 if _X_proc.shape[1] < 2:
                     st.error("Analysis cut contains fewer than 2 wavenumber points after preprocessing.")
                 else:
@@ -2111,8 +2139,8 @@ with tab_further:
         _amide_max = _cb2.number_input("Amide max (cm⁻¹)", value=1700, step=10, key="amide_max")
         _n_gauss   = _cb3.slider("Gaussian components", 2, 8, 6, key="n_gauss2")
 
-        _pp_amide = _further_pp_ui("amide", default_baseline="endpoint",
-                                    default_smooth="savgol", default_norm="area")
+        _prior_amide = _further_prior_pp_ui("amide")
+        _pp_amide    = _further_pp_ui("amide", default_smooth="savgol", default_norm="area")
 
         # ── Gaussian centre constraints ───────────────────────────────────
         st.markdown("**Gaussian components**")
@@ -2173,7 +2201,7 @@ with tab_further:
         if _run_amide:
             with st.spinner("Preprocessing spectra for amide decomposition…"):
                 _X_am, _wn_am = _apply_further_pp(
-                    _X_raw_all, _wn_raw_shared, _pp_amide,
+                    _X_raw_all, _wn_raw_shared, _prior_amide, _pp_amide,
                     wn_lo=_amide_min, wn_hi=_amide_max,
                 )
             if _X_am.shape[1] < _n_gauss * 3:
@@ -2531,12 +2559,15 @@ with tab_further:
                                    step=5, key="pk_hw",
                                    help="Intensity summed over [centre ± half-window]")
         _pr_lbl = st.selectbox("Plot ratio vs", list(_label_opts.keys()), key="pr_label")
-        _pp_peak = _further_pp_ui("peak", default_norm="none", expanded=False)
-        _run_peak = st.button("▶ Compute ratio", key="btn_peak", on_click=_goto_further)
+        _prior_peak = _further_prior_pp_ui("peak")
+        _pp_peak    = _further_pp_ui("peak", default_norm="none")
+        _run_peak   = st.button("▶ Compute ratio", key="btn_peak", on_click=_goto_further)
 
         if _run_peak:
             with st.spinner("Preprocessing spectra for peak ratio…"):
-                _X_peak, _wn_peak = _apply_further_pp(_X_raw_all, _wn_raw_shared, _pp_peak)
+                _X_peak, _wn_peak = _apply_further_pp(
+                    _X_raw_all, _wn_raw_shared, _prior_peak, _pp_peak
+                )
 
             def _integrate(X, wn, centre, hw):
                 _m = (wn >= centre - hw) & (wn <= centre + hw)
