@@ -1759,8 +1759,9 @@ with tab_further:
                 _n   = _ctr.get(_lbl, 1)
                 _items.append(f"{_lbl} #{_n}")
                 _ctr[_lbl] = _n + 1
-            st.session_state[f"{pfx}_pipe"] = _items
-            st.session_state[f"{pfx}_ctr"]  = _ctr
+            st.session_state[f"{pfx}_pipe"]     = _items
+            st.session_state[f"{pfx}_ctr"]      = _ctr
+            st.session_state[f"{pfx}_sort_ver"] = 0
 
         def _step_params_ui(pfx, item):
             """Render parameter widgets for one pipeline item."""
@@ -1827,6 +1828,9 @@ with tab_further:
                                 _n = _c.get(_lbl, 1)
                                 st.session_state[_ss].append(f"{_lbl} #{_n}")
                                 _c[_lbl] = _n + 1
+                                st.session_state[f"{pfx}_sort_ver"] = (
+                                    st.session_state.get(f"{pfx}_sort_ver", 0) + 1
+                                )
                                 st.rerun()
 
             # ── Pipeline (right) ──────────────────────────────────────────
@@ -1838,7 +1842,8 @@ with tab_further:
                     st.markdown("**Pipeline** (drag to reorder):")
                     try:
                         from streamlit_sortables import sort_items as _si
-                        _new = _si(_cur, key=f"{pfx}_sortable")
+                        _sort_ver = st.session_state.get(f"{pfx}_sort_ver", 0)
+                        _new = _si(_cur, key=f"{pfx}_sortable_{_sort_ver}")
                         if list(_new) != _cur:
                             st.session_state[_ss] = list(_new)
                     except ImportError:
@@ -1852,6 +1857,9 @@ with tab_further:
                             if st.button("×", key=f"{pfx}_rm_{_i}",
                                           help=f"Remove {_item}"):
                                 st.session_state[_ss].pop(_i)
+                                st.session_state[f"{pfx}_sort_ver"] = (
+                                    st.session_state.get(f"{pfx}_sort_ver", 0) + 1
+                                )
                                 st.rerun()
                         with _pc:
                             if _sk not in _NO_PPAR and _sk:
@@ -2128,9 +2136,6 @@ with tab_further:
 
         # ── a. PCA ────────────────────────────────────────────────────────
         st.markdown("### a. PCA of a selected spectral region")
-        _pcc3, _pcc4, _, _ = st.columns(4)
-        _pca_cut2_min = _pcc3.number_input("Analysis cut min (cm⁻¹)", value=max(1580, int(_wn.min())), step=10)
-        _pca_cut2_max = _pcc4.number_input("Analysis cut max (cm⁻¹)", value=min(1720, int(_wn.max())), step=10)
         _pca3, _pca4 = st.columns(2)
         _pca_n_comp  = _pca3.slider("Number of PCs", 2, 10, 3, key="pca_n_comp")
         _pca_lbl_key = _pca4.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
@@ -2142,12 +2147,11 @@ with tab_further:
             with st.spinner("Preprocessing spectra for PCA…"):
                 _X_proc, _wn2 = _apply_pipeline(
                     _X_raw_all, _wn_raw_shared, _items_pca, "pca",
-                    fine_lo=_pca_cut2_min, fine_hi=_pca_cut2_max,
                 )
             if _X_proc.shape[1] == 0:
                 st.error(
-                    f"Analysis cut {_pca_cut2_min}–{_pca_cut2_max} cm⁻¹ contains no points "
-                    f"after preprocessing. Check Step parameters (Spectral cut) and analysis cut range."
+                    "No wavenumber points remain after preprocessing. "
+                    "Check the Spectral cut step parameters in the pipeline."
                 )
             else:
                 if _X_proc.shape[1] < 2:
