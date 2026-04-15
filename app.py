@@ -1742,8 +1742,11 @@ with tab_further:
             ),
             "PCA on MFR":               (["spectral_cut","spike_removal","rubberband","snv"], None),
             "PCA on LFR":               (
-                ["spectral_cut","spike_removal","endpoint","snv"],
-                {"Spectral cut #1": {"wn_min": -300, "wn_max": 300, "use_gap": False}},
+                ["spectral_cut","spike_removal","endpoint","spectral_cut","snv"],
+                {
+                    "Spectral cut #1": {"wn_min": -300, "wn_max": 300, "use_gap": False},
+                    "Spectral cut #2": {"wn_min": 8,    "wn_max": 300, "use_gap": False},
+                },
             ),
             "Peak ratio (rubberband only)":  (["spectral_cut","spike_removal","rubberband"], None),
         }
