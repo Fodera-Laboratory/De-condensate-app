@@ -2835,6 +2835,8 @@ with tab_further:
                 fnames=_fname_list,
                 distances=_dist_list,
                 pk1=_pk1, pk2=_pk2, hw=_hw,
+                label_key=_pr_lbl,
+                label_vals=_label_opts[_pr_lbl].tolist(),
             )
 
         if "ratio_result" in st.session_state:
@@ -3494,6 +3496,275 @@ with tab_download:
                 f"**{_ov_scan} — {_ov_label}**. "
                 "HTML: interactive, zoomable in any browser. "
                 "PDF: static vector graphic, suitable for publications."
+            )
+
+        # ── Publication SVG figures ─────────────────────────────────────────
+        st.divider()
+        st.subheader("Publication figures")
+        st.caption(
+            "All generated plots combined into a single SVG file sized for publication "
+            "(subplots: 4.5 × 2.5 cm, standalone panels: 4.5 × 4.5 cm; "
+            "tick labels 8 pt, axis labels 9 pt). "
+            "Figure captions exported as a separate .txt file."
+        )
+
+        _pub_has = (
+            (results_all and any(r.get("C_mcr") is not None or r.get("pls_protein") is not None
+                                 for r in results_all.values()))
+            or _has_pca or _has_amide or _has_ratio
+        )
+
+        if not _pub_has:
+            st.info("Run MCR/PLS analysis or further analysis to generate figures.")
+        else:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import matplotlib.gridspec as _mgs
+            import matplotlib.ticker as _mticker
+            import io as _mio
+
+            _CM    = 1 / 2.54          # inches per cm
+            _PW    = 4.5 * _CM         # panel width
+            _PH    = 2.5 * _CM         # subplot row height
+            _SH    = 4.5 * _CM         # square panel height
+            _NCOLS = 3                 # grid columns
+            _FW    = _NCOLS * _PW      # total figure width
+            _TS, _LS = 8, 9            # tick size, label size (pt)
+            _MCOLS = ["#636EFA","#EF553B","#00CC96","#AB63FA",
+                      "#FFA15A","#19D3F3","#FF6692","#B6E880"]
+
+            def _style_ax(ax):
+                ax.tick_params(labelsize=_TS, width=0.5, length=2)
+                ax.xaxis.label.set_size(_LS)
+                ax.yaxis.label.set_size(_LS)
+                for _sp in ax.spines.values():
+                    _sp.set_linewidth(0.5)
+
+            # ── Collect row specs: (n_cols, height_inches, draw_fn, caption) ─
+            _row_specs   = []
+            _cap_parts   = []
+            _res_sv      = results_all
+            _sm_sv       = st.session_state.get("scan_mode", "xy")
+            _unit_sv     = st.session_state.get("unit", "mg/mL")
+            _clabels_sv  = st.session_state.get("models", {}).get("comp_labels", [])
+            _dlbl_sv     = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
+
+            # ── Per-linescan MCR / PLS rows ───────────────────────────────
+            for _sv_fn, _sv_r in _res_sv.items():
+                _has_mcr_sv = _sv_r.get("C_mcr") is not None
+                _safe_fn    = os.path.splitext(_sv_fn)[0]
+
+                def _draw_ls(axs, r=_sv_r, has_mcr=_has_mcr_sv):
+                    # a) preprocessed spectra
+                    _n_show = min(r["X_proc"].shape[0], 60)
+                    for _si in range(_n_show):
+                        axs[0].plot(r["wn_proc"], r["X_proc"][_si],
+                                    color="#aaaaaa", lw=0.3, alpha=0.4)
+                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].set_ylabel("Intensity (a.u.)")
+                    _style_ax(axs[0])
+                    # b) MCR concentration profiles
+                    if has_mcr:
+                        for _k in range(r["C_mcr"].shape[1]):
+                            _lb = _clabels_sv[_k] if _k < len(_clabels_sv) else f"Comp {_k+1}"
+                            axs[1].plot(r["distance"], r["C_mcr"][:, _k],
+                                        color=_MCOLS[_k % len(_MCOLS)], lw=0.8, label=_lb)
+                        axs[1].set_xlabel(_dlbl_sv)
+                        axs[1].set_ylabel("MCR score (a.u.)")
+                        axs[1].legend(fontsize=6, frameon=False, loc="upper right")
+                    _style_ax(axs[1])
+                    # c) MCR recovered spectra
+                    if has_mcr:
+                        for _k in range(r["ST_mcr"].shape[0]):
+                            _lb = _clabels_sv[_k] if _k < len(_clabels_sv) else f"Comp {_k+1}"
+                            axs[2].plot(r["wn_proc"], r["ST_mcr"][_k],
+                                        color=_MCOLS[_k % len(_MCOLS)], lw=0.8, label=_lb)
+                        axs[2].set_xlabel("Wavenumber (cm⁻¹)")
+                        axs[2].set_ylabel("Intensity (a.u.)")
+                    _style_ax(axs[2])
+
+                _row_specs.append((3, _PH, _draw_ls))
+                _cap_ls = (
+                    f"Linescan analysis — {_safe_fn}. "
+                    f"a) Preprocessed Raman spectra (up to 60 shown, grey). "
+                )
+                if _has_mcr_sv:
+                    _nc = _sv_r["C_mcr"].shape[1]
+                    _cap_ls += (
+                        f"b) MCR-ALS concentration profiles, {_nc} component(s). "
+                        f"c) MCR-recovered pure-component spectra (ST matrix)."
+                    )
+                _cap_parts.append(_cap_ls)
+
+            # ── PCA row ──────────────────────────────────────────────────
+            _pca_sv = st.session_state.get("pca_result")
+            if _pca_sv:
+                def _draw_pca(axs, pr=_pca_sv):
+                    # a) scores
+                    _sc = pr["scores"]
+                    _cv = _sc[:, 0]
+                    _sp = axs[0].scatter(_sc[:, 0], _sc[:, 1] if _sc.shape[1] > 1 else _sc[:, 0],
+                                         s=4, c=_cv, cmap="viridis", linewidths=0)
+                    axs[0].set_xlabel(f"PC1 ({pr['var_exp'][0]:.1f}%)")
+                    axs[0].set_ylabel(f"PC2 ({pr['var_exp'][1]:.1f}%)" if _sc.shape[1] > 1 else "PC1")
+                    _style_ax(axs[0])
+                    # b) loadings
+                    for _k in range(pr["loadings"].shape[0]):
+                        axs[1].plot(pr["wn"], pr["loadings"][_k],
+                                    color=_MCOLS[_k % len(_MCOLS)], lw=0.6,
+                                    label=f"PC{_k+1}")
+                    axs[1].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[1].set_ylabel("Loading")
+                    axs[1].legend(fontsize=6, frameon=False)
+                    axs[1].axhline(0, color="black", lw=0.3, ls="--")
+                    _style_ax(axs[1])
+                    # c) explained variance
+                    _ve = pr["var_exp"]
+                    _xs = range(len(_ve))
+                    axs[2].bar(_xs, _ve, color=_MCOLS[0], width=0.6, alpha=0.8)
+                    _ax3b = axs[2].twinx()
+                    _ax3b.plot(_xs, np.cumsum(_ve), "o-",
+                               color=_MCOLS[1], ms=3, lw=0.8)
+                    axs[2].set_xticks(list(_xs))
+                    axs[2].set_xticklabels([f"PC{_i+1}" for _i in _xs], fontsize=_TS)
+                    axs[2].set_ylabel("Variance (%)")
+                    _ax3b.set_ylabel("Cumulative (%)", fontsize=_LS)
+                    _ax3b.tick_params(labelsize=_TS)
+                    _style_ax(axs[2])
+
+                _row_specs.append((3, _PH, _draw_pca))
+                _npc = _pca_sv["scores"].shape[1]
+                _cap_parts.append(
+                    f"PCA of {_pca_sv['scores'].shape[0]} spectra "
+                    f"({_pca_sv['wn'][0]:.0f}–{_pca_sv['wn'][-1]:.0f} cm⁻¹). "
+                    f"a) Score plot (PC1 vs PC2) coloured by PC1 score. "
+                    f"b) PC loadings ({_npc} components). "
+                    f"c) Individual (bars) and cumulative (line) explained variance; "
+                    f"{_npc} PCs capture {sum(_pca_sv['var_exp']):.1f}% of total variance."
+                )
+
+            # ── Amide I row (square panel) ────────────────────────────────
+            _amide_sv = st.session_state.get("amide_result")
+            if _amide_sv and _amide_sv.get("popt") is not None:
+                def _draw_amide(axs, ar=_amide_sv):
+                    _wn  = ar["wn"]
+                    _sp  = ar["mean_sp"]
+                    _p   = ar["popt"]
+                    _ng  = ar["n_gauss"]
+                    _lbs = ar.get("g_labels", [f"G{_k+1}" for _k in range(_ng)])
+                    axs[0].plot(_wn, _sp, color="black", lw=0.8, label="Mean", zorder=3)
+                    _ytot = np.zeros_like(_sp, dtype=float)
+                    for _gi in range(_ng):
+                        _A, _mu, _sig = _p[3*_gi], _p[3*_gi+1], _p[3*_gi+2]
+                        _yi = _A * np.exp(-0.5*((_wn - _mu)/_sig)**2)
+                        _ytot += _yi
+                        _col = _MCOLS[_gi % len(_MCOLS)]
+                        axs[0].fill_between(_wn, _yi, alpha=0.25, color=_col)
+                        axs[0].plot(_wn, _yi, color=_col, lw=0.6,
+                                    label=f"{_lbs[_gi]} ({_mu:.0f})")
+                    axs[0].plot(_wn, _ytot, color="red", lw=0.8, ls="--", label="Fit")
+                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].set_ylabel("Intensity (a.u.)")
+                    axs[0].yaxis.set_major_formatter(_mticker.FormatStrFormatter("%.4f"))
+                    axs[0].legend(fontsize=5, frameon=False, loc="upper left")
+                    _style_ax(axs[0])
+
+                _row_specs.append((1, _SH, _draw_amide))
+                _cap_parts.append(
+                    f"Amide I band deconvolution "
+                    f"({_amide_sv['wn'][0]:.0f}–{_amide_sv['wn'][-1]:.0f} cm⁻¹). "
+                    f"Mean spectrum (black) with {_amide_sv['n_gauss']} Gaussian components "
+                    f"(coloured fills, labelled by centre position) and total fit (red dashed). "
+                    f"Component labels: {', '.join(_amide_sv.get('g_labels', []))}."
+                )
+
+            # ── Peak ratio row ────────────────────────────────────────────
+            _ratio_sv = st.session_state.get("ratio_result")
+            if _ratio_sv:
+                _rr_lk  = _ratio_sv.get("label_key", "")
+                _rr_lv  = _ratio_sv.get("label_vals")
+                _n_rcols = 2 if _rr_lv is not None else 1
+
+                def _draw_ratio(axs, rr=_ratio_sv, lk=_rr_lk, lv=_rr_lv):
+                    _rat = np.array(rr["ratio"])
+                    _dists = np.array(rr["distances"])
+                    # a) spatial profile
+                    axs[0].plot(_dists, _rat, "o", ms=2,
+                                color=_MCOLS[0], alpha=0.7)
+                    axs[0].set_xlabel(_dlbl_sv)
+                    axs[0].set_ylabel(f"I({rr['pk1']})/I({rr['pk2']})")
+                    _style_ax(axs[0])
+                    # b) scatter vs label
+                    if lv is not None and len(axs) > 1:
+                        axs[1].scatter(np.array(lv), _rat, s=4,
+                                       color=_MCOLS[0], alpha=0.6,
+                                       linewidths=0)
+                        axs[1].set_xlabel(lk)
+                        axs[1].set_ylabel(f"I({rr['pk1']})/I({rr['pk2']})")
+                        _style_ax(axs[1])
+
+                _row_specs.append((_n_rcols, _PH, _draw_ratio))
+                _cap_parts.append(
+                    f"Peak intensity ratio I({_ratio_sv['pk1']} cm⁻¹) / "
+                    f"I({_ratio_sv['pk2']} cm⁻¹), "
+                    f"integrated over ±{_ratio_sv['hw']} cm⁻¹ windows "
+                    f"({len(_ratio_sv['ratio'])} spectra). "
+                    f"a) Ratio as a function of position along the linescan. "
+                    + (f"b) Ratio vs {_rr_lk}." if _rr_lv is not None else "")
+                )
+
+            # ── Assemble figure ───────────────────────────────────────────
+            _height_ratios = [spec[1] / _PH for spec in _row_specs]
+            _total_h = sum(spec[1] for spec in _row_specs)
+
+            _fig_pub = plt.figure(figsize=(_FW, _total_h))
+            _gs_pub  = _mgs.GridSpec(
+                len(_row_specs), _NCOLS,
+                figure=_fig_pub,
+                height_ratios=_height_ratios,
+                hspace=0.9, wspace=0.55,
+            )
+
+            for _ri, (_ncols_r, _h_r, _draw_fn) in enumerate(_row_specs):
+                _axs_r = [_fig_pub.add_subplot(_gs_pub[_ri, _ci])
+                          for _ci in range(_ncols_r)]
+                # hide unused columns in this row
+                for _ci in range(_ncols_r, _NCOLS):
+                    _dummy = _fig_pub.add_subplot(_gs_pub[_ri, _ci])
+                    _dummy.set_visible(False)
+                try:
+                    _draw_fn(_axs_r)
+                except Exception as _draw_err:
+                    _axs_r[0].text(0.5, 0.5, f"Error:\n{_draw_err}",
+                                   ha="center", va="center",
+                                   transform=_axs_r[0].transAxes, fontsize=6)
+
+            _svg_buf = _mio.BytesIO()
+            _fig_pub.savefig(_svg_buf, format="svg", bbox_inches="tight")
+            plt.close(_fig_pub)
+            _svg_bytes = _svg_buf.getvalue()
+
+            _cap_txt = "\n\n".join(
+                f"Figure {_fi+1}. {_c}" for _fi, _c in enumerate(_cap_parts)
+            )
+
+            _pub_c1, _pub_c2 = st.columns(2)
+            _pub_c1.download_button(
+                "⬇  Download figures (.svg)",
+                data=_svg_bytes,
+                file_name="de_condensate_figures.svg",
+                mime="image/svg+xml",
+                use_container_width=True,
+                key="dl_pub_svg",
+            )
+            _pub_c2.download_button(
+                "⬇  Download captions (.txt)",
+                data=_cap_txt.encode("utf-8"),
+                file_name="de_condensate_captions.txt",
+                mime="text/plain",
+                use_container_width=True,
+                key="dl_pub_cap",
             )
 
 
