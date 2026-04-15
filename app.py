@@ -232,6 +232,50 @@ def _std_spectra_plot(df, title, conc_unit, color, height=300, is_salt=False, us
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Shared help strings — used by both Files & preprocessing and the
+# Further analysis pipeline UI so the two stay in sync automatically.
+# ─────────────────────────────────────────────────────────────────────────────
+_HELP_SPECTRAL_CUT = (
+    "Trim the wavenumber axis to the selected range before further processing. "
+    "Use multiple Spectral cut steps in a pipeline to apply successive cuts. "
+    "Enable **Exclude gap region** to remove a silent or artefact-prone region "
+    "(e.g. 1850–2750 cm⁻¹) from the middle of the spectrum."
+)
+_HELP_SPIKE_REMOVAL = (
+    "Detects and replaces cosmic-ray spikes using the Whitaker-Hayes modified "
+    "Z-score algorithm on the first difference of the spectrum. "
+    "Spikes are replaced iteratively with the mean of their non-spike neighbours. "
+    "Toggle off if your data contains genuine sharp features that must be preserved."
+)
+_HELP_BASELINE = (
+    "Removes fluorescence or other broad backgrounds. "
+    "**Rubberband** — fast convex-hull baseline, robust for most Raman data. "
+    "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants (RamanSPy). "
+    "**IModPoly / ModPoly / Poly** — polynomial fits to the spectral envelope. "
+    "**Rolling ball** — morphological opening with a tunable ball radius. "
+    "**ALS** — classic asymmetric least squares (Eilers & Boelens). "
+    "**Endpoint** — subtracts a straight line connecting the first and last point; "
+    "ideal for anchoring the ends of a narrow region (e.g. amide I) to zero. "
+    "**Linear** — straight line fitted to the outermost 5 % of spectral points."
+)
+_HELP_SMOOTHING = (
+    "Optional smoothing applied after baseline correction. "
+    "**Savitzky-Golay** — polynomial convolution; preserves peak shapes and heights well. "
+    "**Gaussian** — convolves with a Gaussian kernel; σ controls the width. "
+    "**FFT low-pass** — zeros Fourier components above a cutoff fraction, "
+    "removing high-frequency noise while retaining band structure."
+)
+_HELP_NORMALISATION = (
+    "Scales spectra to remove intensity differences unrelated to concentration. "
+    "**SNV** (Standard Normal Variate) — centres to zero mean and scales to unit variance; "
+    "the standard choice for PLS and for MFR PCA. "
+    "**Area** — divides by the spectral integral; preserves relative peak ratios; "
+    "recommended before MCR-ALS. "
+    "**Vector** — divides by the Euclidean (L2) norm. "
+    "**Min-max** — scales to [0, 1]; simple but sensitive to outlier peaks."
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 tab_tutorial, tab_files, tab_pls, tab_mcr, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
@@ -288,16 +332,7 @@ with tab_files:
                 "linear":      "Linear (fit to spectral edges)",
                 "none":        "None",
             }[x],
-            help=(
-                "Removes fluorescence background. "
-                "**Rubberband** (default) — fast convex hull, robust for most Raman data. "
-                "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants from RamanSPy. "
-                "**IModPoly / ModPoly / Poly** — polynomial fits. "
-                "**Rolling ball** — morphological, tunable radius. "
-                "**ALS** — classic asymmetric least squares. "
-                "**Endpoint** — straight line between first and last point. "
-                "**Linear** — straight line fitted to outermost 5 % of points."
-            ),
+            help=_HELP_BASELINE,
         )
         ball_radius, als_lam, als_p = 50, 1e5, 0.01
         rs_lam, rs_poly_order = 1e5, 2
@@ -321,12 +356,7 @@ with tab_files:
                 "gaussian":    "Gaussian",
                 "fft_lowpass": "FFT low-pass filter",
             }[x],
-            help=(
-                "Optional smoothing applied after baseline correction. "
-                "**Savitzky-Golay** — polynomial smoothing, preserves peak shapes well. "
-                "**Gaussian** — convolves with a Gaussian kernel. "
-                "**FFT low-pass** — removes high-frequency noise by zeroing Fourier components above a cutoff fraction."
-            ),
+            help=_HELP_SMOOTHING,
         )
         sg_window, sg_poly, gaussian_sigma, fft_cutoff = 11, 3, 1, 0.1
         if smooth == "savgol":
@@ -1798,9 +1828,37 @@ with tab_further:
                     for _par, _val in _params.items():
                         st.session_state[_wk(pfx, _item, _par)] = _val
 
+        # Per-step help text — same strings as the Files & preprocessing tab widgets
+        _STEP_HELP = {
+            "spectral_cut":  _HELP_SPECTRAL_CUT,
+            "spike_removal": _HELP_SPIKE_REMOVAL,
+            "rubberband":    _HELP_BASELINE,
+            "rolling_ball":  _HELP_BASELINE,
+            "als":           _HELP_BASELINE,
+            "arpls":         _HELP_BASELINE,
+            "airpls":        _HELP_BASELINE,
+            "iasls":         _HELP_BASELINE,
+            "drpls":         _HELP_BASELINE,
+            "imodpoly":      _HELP_BASELINE,
+            "modpoly":       _HELP_BASELINE,
+            "poly":          _HELP_BASELINE,
+            "endpoint":      _HELP_BASELINE,
+            "linear":        _HELP_BASELINE,
+            "savgol":        _HELP_SMOOTHING,
+            "gaussian":      _HELP_SMOOTHING,
+            "fft_lowpass":   _HELP_SMOOTHING,
+            "snv":           _HELP_NORMALISATION,
+            "area":          _HELP_NORMALISATION,
+            "vector":        _HELP_NORMALISATION,
+            "minmax":        _HELP_NORMALISATION,
+        }
+
         def _step_params_ui(pfx, item):
             """Render parameter widgets for one pipeline item."""
             _sk = _pkey(item)
+            _help = _STEP_HELP.get(_sk, "")
+            if _help:
+                st.caption(_help)
             if _sk == "spectral_cut":
                 _c1, _c2 = st.columns(2)
                 _c1.number_input("Min (cm⁻¹)", value=700,  step=50, key=_wk(pfx,item,"wn_min"))
@@ -1914,7 +1972,12 @@ with tab_further:
                                 with st.expander(f"⚙ {_item}", expanded=False):
                                     _step_params_ui(pfx, _item)
                             else:
-                                st.caption(f"✓ {_item}  _(no parameters)_")
+                                _no_par_help = _STEP_HELP.get(_sk, "")
+                                with st.expander(f"✓ {_item}", expanded=False):
+                                    if _no_par_help:
+                                        st.caption(_no_par_help)
+                                    else:
+                                        st.caption("No configurable parameters.")
 
             return list(st.session_state[_ss])
 
@@ -3491,10 +3554,13 @@ with tab_tutorial:
 
             "#### 3 · Set preprocessing  `📂 Files tab → Preprocessing`\n"
             "Each step can be switched or disabled independently:\n"
-            "- **Baseline correction** — *Rubberband* (default), *Rolling ball*, *ALS*, or *None*.\n"
-            "- **Normalisation** — *Min-max [0, 1]* (default), *SNV*, or *None*. "
-            "Salt spectra have a separate normalisation setting (default: None).\n"
-            "- **Spike removal** *(toggle)* — detects and replaces cosmic-ray spikes.\n\n"
+            "- **Baseline correction** — *Rubberband* (default), *Rolling ball*, *ALS*, "
+            "*ARPLS/AIRPLS/IASLS/DRPLS*, *IModPoly/ModPoly/Poly*, *Endpoint*, *Linear*, or *None*.\n"
+            "- **Smoothing** — *Savitzky-Golay*, *Gaussian*, *FFT low-pass*, or *None*.\n"
+            "- **Normalisation** — *SNV* (PLS default), *Area* (MCR default), *Vector*, "
+            "*Min-max*, or *None*. Salt spectra have a separate normalisation setting.\n"
+            "- **Spike removal** *(toggle)* — detects and replaces cosmic-ray spikes using "
+            "the Whitaker-Hayes modified Z-score algorithm.\n\n"
 
             "#### 4 · Configure analysis settings  `📂 Files tab → Analysis settings`\n"
             "- **Concentration unit** and **protein MW** (for mM ↔ mg/mL conversion).\n"
@@ -3516,17 +3582,27 @@ with tab_tutorial:
 
             "#### 7 · Further analysis  `🔍 Further analysis tab`  *(independent)*\n"
             "Available as soon as linescans have been processed (PLS/MCR not required). "
-            "All sub-tools have their own spectral range and preprocessing controls, "
-            "independent of the main pipeline. "
-            "A dataset selector lets you include/exclude individual linescans. "
-            "**Distance (µm)** and **Spectrum index** are always available as plot axis/colour "
-            "options, alongside any PLS or MCR scores.\n\n"
-            "- **PCA** — choose spectral region, normalisation (SNV / Min-max / None), and number of PCs. "
-            "Score, loading, and explained-variance plots are shown.\n"
-            "- **Amide I deconvolution** — fits Gaussian components to the amide I band for each "
-            "spectrum individually. Distributions of peak position, width, and area are reported.\n"
-            "- **Peak ratio** — integrates two band windows and plots their ratio spatially and "
-            "against any score label.\n\n"
+            "Each sub-tool reads the raw linescan data and applies its own independent "
+            "preprocessing pipeline — the settings in the Files tab have no effect here. "
+            "A **dataset selector** lets you include/exclude individual linescans. "
+            "Concentration and MCR score range sliders filter spectra by phase when available. "
+            "**Distance (µm)** and **Spectrum index** are always available as plot/colour options.\n\n"
+            "Each tool has a **drag-and-drop preprocessing pipeline** with a palette of steps: "
+            "Spectral cut, Spike removal, Baseline subtraction, Smoothing, and Normalisation. "
+            "Steps can be added multiple times, reordered by dragging, and configured individually. "
+            "Built-in presets are available for common workflows:\n"
+            "- **PCA on MFR** — Spectral cut → Spike removal → Rubberband → SNV\n"
+            "- **PCA on LFR** — Spectral cut (−300 to 300) → Spike removal → Endpoint → "
+            "Spectral cut (8 to 300) → SNV\n"
+            "- **Amide I band deconvolution** — Spectral cut → Spike removal → "
+            "Spectral cut (1580–1720) → Savitzky-Golay → Area → Endpoint\n"
+            "- **Peak ratio (rubberband only)** — Spectral cut → Spike removal → Rubberband\n\n"
+            "- **a. PCA** — number of PCs selectable (2–10); score plots coloured by Distance, "
+            "Spectrum index, PLS, or MCR scores; loadings and explained-variance chart shown.\n"
+            "- **b. Amide I band deconvolution** — fits Gaussians to the amide I region "
+            "spectrum-by-spectrum; reports distributions of centre, FWHM, and relative area.\n"
+            "- **c. Peak ratio** — integrates two band windows and plots their ratio spatially "
+            "and against any available score.\n\n"
 
             "#### 8 · Image overlay  `🗺️ Image overlay tab`\n"
             "Upload a microscopy image and map any score onto its spatial coordinates.\n"
@@ -3548,23 +3624,17 @@ with tab_tutorial:
     with st.expander("How the analysis works — methods"):
         st.markdown(
             "##### Preprocessing pipeline\n"
-            "Each spectrum passes through up to three steps (all individually selectable):\n\n"
-            "1. **Baseline correction** — removes the broad fluorescence background. "
-            "*Rubberband* fits a convex hull beneath the spectrum (via SpectroChemPy); "
-            "*Rolling ball* uses morphological opening for curved baselines; "
-            "*ALS* (Asymmetric Least Squares, via SpectroChemPy) fits a smooth baseline "
-            "weighted towards the lower envelope. Choose *None* to skip.\n"
-            "2. **Spike removal** — identifies cosmic-ray spikes using the SpectroChemPy "
-            "despike algorithm and replaces them by interpolation from neighbouring points. "
-            "Toggle off if your data contains genuine sharp features that should not be removed.\n"
-            "3. **Normalisation** — *Min-max* scales each spectrum to [0, 1]; "
-            "*SNV* (Standard Normal Variate) centres and scales to unit variance, "
-            "correcting for multiplicative scatter. Choose *None* to preserve absolute "
-            "intensities (recommended for salt PLS).\n\n"
-            "A wavenumber gap cut can be toggled on to exclude the silent region "
-            "(e.g. 1850–2750 cm⁻¹) before modelling. "
-            "**Further analysis always uses the full raw spectral range** — the range "
-            "set here does not affect it."
+            "The **Files & preprocessing** tab applies a fixed pipeline to all linescans and "
+            "standard spectra before PLS/MCR modelling:\n\n"
+            "1. **Spike removal** — " + _HELP_SPIKE_REMOVAL + "\n"
+            "2. **Baseline correction** — " + _HELP_BASELINE + "\n"
+            "3. **Smoothing** *(optional)* — " + _HELP_SMOOTHING + "\n"
+            "4. **Normalisation** — " + _HELP_NORMALISATION + "\n\n"
+            "A **spectral range** (default 700–3900 cm⁻¹) and optional **gap cut** "
+            "(e.g. 1850–2750 cm⁻¹ silent region) are applied before baseline correction. "
+            "Salt spectra use a separate narrow window (default 900–1000 cm⁻¹).\n\n"
+            "**Further analysis** uses a fully independent drag-and-drop pipeline per tool — "
+            "the Files tab settings do not affect it."
         )
 
         st.markdown(
@@ -3621,21 +3691,24 @@ with tab_tutorial:
             "as axis and colour options, regardless of whether PLS or MCR was run.\n\n"
 
             "**a. PCA of a selected spectral region**  \n"
-            "A broad spectral cut and optional rubberband baseline are applied first; "
-            "then a narrower analysis cut and a selectable normalisation "
-            "(SNV / Min-max / None) are applied before PCA. "
-            "The number of PCs is selectable (2–10). "
-            "Score plots can be coloured by Distance, Spectrum index, PLS concentration, "
-            "or MCR component score. Loadings and an explained-variance bar chart "
-            "are shown alongside.\n\n"
+            "Preprocessing is controlled by the drag-and-drop pipeline. "
+            "The default preset is **PCA on MFR** (Spectral cut → Spike removal → Rubberband → SNV). "
+            "The **PCA on LFR** preset targets the low-frequency region (−300 to 300 cm⁻¹) "
+            "with an endpoint baseline and a final cut to 8–300 cm⁻¹ before SNV. "
+            "The number of PCs is selectable (2–10). Score plots can be coloured by Distance, "
+            "Spectrum index, PLS concentration, or MCR component score. "
+            "Loadings and an explained-variance bar chart are shown alongside.\n\n"
 
             "**b. Amide I band deconvolution**  \n"
-            "Fits a user-defined number of Gaussians to the amide I region "
-            "(default 1580–1720 cm⁻¹). Each spectrum is fitted individually, yielding "
-            "distributions of peak centres, widths, and relative areas across the dataset. "
-            "An individual spectrum viewer lets you inspect any single fit with an R² "
-            "quality indicator. The mean spectrum is fitted separately and shown with a "
-            "±1 SD band. Results are summarised as mean ± σ per component.\n\n"
+            "The default preset (**Amide I band deconvolution**) applies: "
+            "Spectral cut (700–3900, gap excluded) → Spike removal → "
+            "Spectral cut (1580–1720) → Savitzky-Golay → Area normalisation → Endpoint subtraction. "
+            "The Endpoint step is deferred until after the final spectral cut so the "
+            "edges of the 1580–1720 cm⁻¹ window are anchored to zero. "
+            "A user-defined number of Gaussians is fitted to each spectrum individually, "
+            "yielding distributions of peak centres, widths, and relative areas. "
+            "An individual spectrum viewer shows any single fit with its R² value. "
+            "The mean spectrum is fitted separately and shown with a ±1 SD band.\n\n"
 
             "**c. Peak ratio comparison**  \n"
             "Integrates two user-defined spectral windows and computes their ratio for "
@@ -3745,12 +3818,15 @@ with tab_about:
     st.markdown(
         "| Library | Role | Reference |\n"
         "|---|---|---|\n"
-        "| [scikit-learn](https://scikit-learn.org) · `PLSRegression` | PLS regression for concentration prediction | [Pedregosa et al., 2011](https://scikit-learn.org/stable/modules/generated/sklearn.cross_decomposition.PLSRegression.html) |\n"
+        "| [scikit-learn](https://scikit-learn.org) · `PLSRegression` | PLS regression, cross-validation, component selection | [Pedregosa et al., 2011](https://scikit-learn.org/stable/modules/generated/sklearn.cross_decomposition.PLSRegression.html) |\n"
         "| [pyMCR](https://pages.nist.gov/pyMCR/) | MCR-ALS spectral decomposition | [Camp, 2019](https://pages.nist.gov/pyMCR/) |\n"
-        "| [SpectroChemPy](https://www.spectrochempy.fr) | Baseline correction (ALS, rubberband), Savitzky-Golay smoothing, spike removal | [Travert & Fernandez, J. Open Source Softw. 2023, 8(83), 5338](https://doi.org/10.21105/joss.05338) |\n"
+        "| [RamanSPy](https://ramanspy.readthedocs.io) | Baseline correction (ARPLS, AIRPLS, IASLS, DRPLS, polynomial variants) | Georgiev et al., 2023 |\n"
+        "| [SciPy](https://scipy.org) | Savitzky-Golay smoothing, ALS baseline, rolling-ball, Gaussian smoothing, FFT low-pass, peak fitting | Virtanen et al., 2020 |\n"
+        "| [pyMCR](https://pages.nist.gov/pyMCR/) · custom | Spike removal (Whitaker-Hayes modified Z-score), rubberband (convex hull), endpoint/linear baseline, SNV/area/vector normalisation | Whitaker & Hayes, *Chemom. Intell. Lab. Syst.* 2018 |\n"
         "| [NumPy](https://numpy.org) | Numerical array operations | Harris et al., 2020 |\n"
         "| [pandas](https://pandas.pydata.org) | Data handling and Excel export | McKinney, 2010 |\n"
         "| [Plotly](https://plotly.com/python/) | Interactive figures | Plotly Technologies Inc. |\n"
         "| [Streamlit](https://streamlit.io) | Web application framework | Streamlit Inc. |\n"
+        "| [streamlit-sortables](https://github.com/ohtaman/streamlit-sortables) | Drag-and-drop pipeline reordering | Ohta, 2022 |\n"
     )
 
