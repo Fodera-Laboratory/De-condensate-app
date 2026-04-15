@@ -3820,7 +3820,7 @@ with tab_about:
         "|---|---|---|\n"
         "| [scikit-learn](https://scikit-learn.org) · `PLSRegression` | PLS regression, cross-validation, component selection | [Pedregosa et al., 2011](https://scikit-learn.org/stable/modules/generated/sklearn.cross_decomposition.PLSRegression.html) |\n"
         "| [pyMCR](https://pages.nist.gov/pyMCR/) | MCR-ALS spectral decomposition | [Camp, 2019](https://pages.nist.gov/pyMCR/) |\n"
-        "| [RamanSPy](https://ramanspy.readthedocs.io) | Baseline correction (ARPLS, AIRPLS, IASLS, DRPLS, polynomial variants) | Georgiev et al., 2023 |\n"
+        "| [RamanSPy](https://ramanspy.readthedocs.io) | Baseline correction (ARPLS, AIRPLS, IASLS, DRPLS, polynomial variants) | [Georgiev et al., 2023](https://pubs.acs.org/doi/10.1021/acs.analchem.4c00383) |\n"
         "| [SciPy](https://scipy.org) | Savitzky-Golay smoothing, ALS baseline, rolling-ball, Gaussian smoothing, FFT low-pass, peak fitting | Virtanen et al., 2020 |\n"
         "| [pyMCR](https://pages.nist.gov/pyMCR/) · custom | Spike removal (Whitaker-Hayes modified Z-score), rubberband (convex hull), endpoint/linear baseline, SNV/area/vector normalisation | Whitaker & Hayes, *Chemom. Intell. Lab. Syst.* 2018 |\n"
         "| [NumPy](https://numpy.org) | Numerical array operations | Harris et al., 2020 |\n"
