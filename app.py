@@ -1413,11 +1413,12 @@ with tab_results:
                 fig_top.add_trace(go.Scatter(
                     x=r["distance"], y=r["C_mcr"][:, k], name=label,
                     line=dict(color=COLORS[k % len(COLORS)], width=1.5),
+                    legendgroup=label,
                 ), row=1, col=2)
                 fig_top.add_trace(go.Scatter(
                     x=r["wn_proc"], y=r["ST_mcr"][k], name=label,
                     line=dict(color=COLORS[k % len(COLORS)], width=1.5),
-                    showlegend=False,
+                    legendgroup=label, showlegend=False,
                 ), row=1, col=3)
         else:
             fig_top.add_annotation(
