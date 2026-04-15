@@ -1505,10 +1505,19 @@ with tab_results:
         if has_mcr:
             st.divider()
             with st.expander("MCR summary"):
+                _mcr_max = st.session_state.get("mcr_params", {}).get("max_iter", 2000)
+                _hit_max = r["mcr_n_iter"] >= _mcr_max
                 st.markdown(
-                    f"**MCR** — converged in {r['mcr_n_iter']} iteration(s), "
+                    f"**MCR** — {'reached max iterations' if _hit_max else 'converged'} "
+                    f"in {r['mcr_n_iter']} iteration(s), "
                     f"{r['C_mcr'].shape[1]} component(s)."
                 )
+                if _hit_max:
+                    st.warning(
+                        f"MCR-ALS reached the maximum of {_mcr_max} iterations without converging. "
+                        "The solution may not be optimal — consider increasing **Max iterations** "
+                        "or verifying that the number of components is correct."
+                    )
 
 
 # ── PLS linescan results (bottom of PLS tab) ──────────────────────────────────
