@@ -1736,12 +1736,15 @@ with tab_further:
         # seed_state keys are the item label (e.g. "Spectral cut #2") and map param → value.
         _PIPE_PRESETS = {
             "— custom —": None,
-            "Amide I band decomposition": (
+            "Amide I band deconvolution": (
                 ["spectral_cut","spike_removal","spectral_cut","savgol","area","endpoint"],
                 {"Spectral cut #2": {"wn_min": 1580, "wn_max": 1720, "use_gap": False}},
             ),
-            "General (rubberband + SNV)":   (["spectral_cut","spike_removal","rubberband","snv"], None),
-            "PCA (rubberband + SNV)":        (["spectral_cut","spike_removal","rubberband","snv"], None),
+            "PCA on MFR":               (["spectral_cut","spike_removal","rubberband","snv"], None),
+            "PCA on LFR":               (
+                ["spectral_cut","spike_removal","endpoint","snv"],
+                {"Spectral cut #1": {"wn_min": -300, "wn_max": 300, "use_gap": False}},
+            ),
             "Peak ratio (rubberband only)":  (["spectral_cut","spike_removal","rubberband"], None),
         }
         _PIPE_CATS = [
@@ -2206,7 +2209,8 @@ with tab_further:
         _pca_n_comp  = _pca3.slider("Number of PCs", 2, 10, 3, key="pca_n_comp")
         _pca_lbl_key = _pca4.selectbox("Colour by", list(_label_opts.keys()), key="pca_label")
         _items_pca = _pipeline_ui(
-            "pca", ["spectral_cut", "spike_removal", "rubberband", "snv"])
+            "pca", ["spectral_cut", "spike_removal", "rubberband", "snv"],
+            seed_defaults={"Spectral cut #1": {"wn_min": 700, "wn_max": 3900, "use_gap": True}})
         _run_pca = st.button("▶ Run PCA", key="btn_pca", on_click=_goto_further)
 
         if _run_pca:
@@ -2313,7 +2317,7 @@ with tab_further:
 
         # ── b. Amide band decomposition ───────────────────────────────────
         st.divider()
-        st.markdown("### b. Amide I band decomposition")
+        st.markdown("### b. Amide I band deconvolution")
         _fig_caption(
             "Gaussians are fitted to each individual spectrum in the amide I region. "
             "Configure the preprocessing below, then click Run. "
@@ -2379,10 +2383,10 @@ with tab_further:
             except Exception as _pdb_err:
                 _pc3.warning(f"PDB fetch failed: {_pdb_err}")
 
-        _run_amide = st.button("▶ Run decomposition", key="btn_amide", on_click=_goto_further)
+        _run_amide = st.button("▶ Run deconvolution", key="btn_amide", on_click=_goto_further)
 
         if _run_amide:
-            with st.spinner("Preprocessing spectra for amide decomposition…"):
+            with st.spinner("Preprocessing spectra for amide deconvolution…"):
                 _X_am, _wn_am = _apply_pipeline(
                     _X_raw_all, _wn_raw_shared, _items_amide, "amide",
                 )
@@ -2644,7 +2648,7 @@ with tab_further:
                         else "(no concentration filter — build a PLS model to enable filtering)"
                     )
                     _fig_caption(
-                        f"Gaussian decomposition of the mean amide I spectrum computed from {_n_conc} spectra "
+                        f"Gaussian deconvolution of the mean amide I spectrum computed from {_n_conc} spectra "
                         f"{_conc_filter_str}. "
                         f"Grey shading: ±1 standard deviation across averaged spectra. "
                         f"Black: mean spectrum; red dashed: total Gaussian fit (R² = {_r2_avg:.4f}); "
@@ -3447,7 +3451,7 @@ with tab_tutorial:
             "| **MCR-ALS only** | Linescans + reference CSV *or* PCA init | Spatial component profiles, recovered pure spectra |\n"
             "| **PLS only** | Linescans + protein standard CSV | Quantitative protein (and optionally molecular crowder/salt) concentration profiles |\n"
             "| **MCR + PLS** | All of the above | Both, with spatial co-localisation scatter |\n"
-            "| **Further analysis only** | Linescans (no standards needed) | PCA score plots, amide I decomposition, peak ratio profiles |\n\n"
+            "| **Further analysis only** | Linescans (no standards needed) | PCA score plots, amide I deconvolution, peak ratio profiles |\n\n"
             "**Nothing is mandatory except the linescan file(s).** "
             "**▶ Build PLS Model** is only needed if you want PLS concentration calibration. "
             "PLS predictions run automatically on all linescans immediately after building the model. "
@@ -3516,7 +3520,7 @@ with tab_tutorial:
             "options, alongside any PLS or MCR scores.\n\n"
             "- **PCA** — choose spectral region, normalisation (SNV / Min-max / None), and number of PCs. "
             "Score, loading, and explained-variance plots are shown.\n"
-            "- **Amide I decomposition** — fits Gaussian components to the amide I band for each "
+            "- **Amide I deconvolution** — fits Gaussian components to the amide I band for each "
             "spectrum individually. Distributions of peak position, width, and area are reported.\n"
             "- **Peak ratio** — integrates two band windows and plots their ratio spatially and "
             "against any score label.\n\n"
@@ -3622,7 +3626,7 @@ with tab_tutorial:
             "or MCR component score. Loadings and an explained-variance bar chart "
             "are shown alongside.\n\n"
 
-            "**b. Amide I band decomposition**  \n"
+            "**b. Amide I band deconvolution**  \n"
             "Fits a user-defined number of Gaussians to the amide I region "
             "(default 1580–1720 cm⁻¹). Each spectrum is fitted individually, yielding "
             "distributions of peak centres, widths, and relative areas across the dataset. "
