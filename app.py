@@ -103,19 +103,39 @@ def _fetch_pdb_ss(pdb_id):
 
 
 def _pdb_amp_priors(helix, sheet, other, n_gauss):
-    """Map PDB secondary structure fractions to amplitude priors for n_gauss components.
-    Component order follows Fellows et al. 2020 presets (1605, 1618, 1635, 1653, 1672, 1686).
-    Beyond 6 components, flat prior is used.
+    """Map PDB secondary structure fractions to amplitude priors for n_gauss Gaussians.
+
+    Component order follows the preset table (Fellows et al. 2020 assignments):
+      0  1605  Aromatic side chains / intermolecular aggregation
+      1  1618  Intermolecular antiparallel β-sheet (aggregation)
+      2  1635  Intramolecular β-sheet (native parallel / AP)
+      3  1653  α-helix
+      4  1672  β-turn / random coil
+      5  1686  High-frequency antiparallel β-sheet / side chains
+
+    Amplitude prior rationale (Tuma 2005; Barth 2007):
+    - Side chains/aggregation (1605): small fixed prior (~0.03); non-zero
+      even in native solutions because Tyr/Phe always contribute.
+    - Intermolecular AP β (1618): ~5 % of total sheet; near-zero for purely
+      native proteins but small rather than exactly 0 to avoid the optimiser
+      being stuck at a bound.
+    - Native intramolecular β (1635): ~60 % of sheet fraction.
+    - α-helix (1653): helix fraction directly.
+    - β-turn / coil (1672): "other" fraction (loops, turns, disordered).
+    - High-freq AP β (1686): ~30 % of sheet fraction; paired high-wavenumber
+      component of antiparallel β-sheet; smaller than the low-freq component.
+
+    Beyond 6 components a flat prior is used.
     """
-    # Fellows et al. mapping:
-    # 1605 – sidechains/aggregates: small fixed contribution
-    # 1618 – β-sheet intermolecular (aggregation): 0 for native structure
-    # 1635 – β-sheet intramolecular parallel: half of sheet
-    # 1653 – α-helix: helix
-    # 1672 – β-turn / random coil: other
-    # 1686 – β-sheet intermolecular AP + sidechains: other half of sheet
-    _base6 = [0.03, 0.0, sheet * 0.5, helix, other, sheet * 0.5]
-    _flat  = 1.0 / n_gauss
+    _base6 = [
+        0.03,                # 1605 side chains/aggregation
+        sheet * 0.05,        # 1618 intermolecular AP β
+        sheet * 0.60,        # 1635 native intramolecular β
+        helix,               # 1653 α-helix
+        other,               # 1672 β-turn / random coil
+        sheet * 0.30,        # 1686 high-freq AP β
+    ]
+    _flat   = 1.0 / n_gauss
     _priors = [(_base6[i] if i < 6 else _flat) for i in range(n_gauss)]
     _total  = sum(_priors) or 1.0
     return [v / _total for v in _priors]
@@ -2412,13 +2432,24 @@ with tab_further:
         st.markdown("**Gaussian components**")
         # Presets from Fellows et al. 2020 (Applied Spectroscopy), Table 1
         # Tolerances = half the reported literature range
+        # FWHM ranges from Raman-specific literature:
+        # Tuma (2005) J. Raman Spectrosc. 36:307; Barth (2007) BBA 1767:1073;
+        # Kong & Yu (2007) Acta Biochim. Biophys. Sin. 39:549.
+        # Raman components are narrower than IR equivalents (~10–30 cm⁻¹ vs 20–40).
         _PRESETS = [
-            {"label": "Aggregates / sidechains",    "centre": 1605, "tol": 8,  "fwhm_min": 15, "fwhm_max": 25},
-            {"label": "β-sheet (inter. AP)",        "centre": 1618, "tol": 8,  "fwhm_min": 15, "fwhm_max": 25},
-            {"label": "β-sheet (intra. P)",         "centre": 1635, "tol": 9,  "fwhm_min": 15, "fwhm_max": 25},
+            # label                           centre  tol  FWHM_min  FWHM_max
+            # Aromatic side chains + intermolecular aggregation: sharp, narrow
+            {"label": "Aggregates / sidechains",    "centre": 1605, "tol": 8,  "fwhm_min":  8, "fwhm_max": 18},
+            # Intermolecular antiparallel β-sheet (aggregation band): narrow
+            {"label": "β-sheet (inter. AP)",        "centre": 1618, "tol": 8,  "fwhm_min": 10, "fwhm_max": 20},
+            # Intramolecular β-sheet (native, parallel or AP): slightly broader
+            {"label": "β-sheet (intra.)",           "centre": 1635, "tol": 9,  "fwhm_min": 12, "fwhm_max": 22},
+            # α-helix: moderately broad, well-defined centre
             {"label": "α-helix",                    "centre": 1653, "tol": 6,  "fwhm_min": 15, "fwhm_max": 25},
-            {"label": "β-turn / random coil",       "centre": 1672, "tol": 13, "fwhm_min": 15, "fwhm_max": 25},
-            {"label": "β-sheet (inter. AP) / s.c.", "centre": 1686, "tol": 11, "fwhm_min": 15, "fwhm_max": 25},
+            # β-turn / random coil: broad and highly overlapping
+            {"label": "β-turn / random coil",       "centre": 1672, "tol": 13, "fwhm_min": 15, "fwhm_max": 30},
+            # High-frequency antiparallel β-sheet + side chains: narrow
+            {"label": "β-sheet (AP, high-freq.)",   "centre": 1686, "tol": 11, "fwhm_min": 10, "fwhm_max": 22},
         ]
         _g_cens, _g_tols, _g_fwhm_min, _g_fwhm_max, _g_labels = [], [], [], [], []
         _g_cols = st.columns(_n_gauss)
@@ -2426,7 +2457,7 @@ with tab_further:
             _pr_gi = _PRESETS[_gi] if _gi < len(_PRESETS) else {
                 "label": f"Component {_gi+1}",
                 "centre": 1605 + _gi * 20,
-                "tol": 12, "fwhm_min": 15, "fwhm_max": 25,
+                "tol": 12, "fwhm_min": 10, "fwhm_max": 25,
             }
             with _g_cols[_gi]:
                 _g_labels.append(st.text_input("Label", value=_pr_gi["label"], key=f"g{_gi}_label_b"))
@@ -2441,11 +2472,16 @@ with tab_further:
                                                     key=f"g{_gi}_fwhm_max_b",
                                                     help="Upper bound on FWHM."))
 
-        # ── PDB-informed amplitude priors ─────────────────────────────
+        # ── PDB-informed area priors ───────────────────────────────────
         _pc1, _pc2, _pc3 = st.columns([1, 1.2, 3])
-        _use_pdb = _pc1.toggle("PDB priors", value=False, key="use_pdb",
-                               help="Use secondary structure content from PDB as amplitude initial guesses (p₀). "
-                                    "Does not hard-constrain the fit — the optimiser can still deviate freely.")
+        _use_pdb = _pc1.toggle("PDB area priors", value=False, key="use_pdb",
+                               help="Use secondary structure fractions from a PDB entry to set the "
+                                    "initial area under each Gaussian component. The helix, sheet, "
+                                    "and loop fractions are fetched from the PDBe REST API and mapped "
+                                    "to area fractions for the 6 preset components. "
+                                    "The amplitude p₀ is then derived as: A₀ = area_fraction × "
+                                    "total_spectral_area / (σ₀ × √2π). "
+                                    "This is a soft prior only — the optimiser can still deviate freely.")
         _pdb_id_in = _pc2.text_input("PDB ID", value="4INS", key="pdb_id_inp",
                                      label_visibility="collapsed", disabled=not _use_pdb)
         _amp_priors = [1.0 / _n_gauss] * _n_gauss  # flat default
@@ -2480,13 +2516,28 @@ with tab_further:
                         y += p[3*_gi] * np.exp(-((x - p[3*_gi+1])**2) / (2*p[3*_gi+2]**2))
                     return y
 
+                # Total spectral area — used to convert area fractions → amplitudes.
+                # Amplitude A of a Gaussian with area fraction f is:
+                #   A = f × total_area / (σ × √(2π))
+                # so that the initialised Gaussian areas are proportional to
+                # the secondary structure fractions reported in the literature
+                # (or flat equal fractions when no PDB prior is used).
+                _total_am_area = float(np.trapz(_mean_sp, _wn_am))
+                if _total_am_area <= 0:
+                    _total_am_area = 1.0   # guard against non-positive spectra
+
                 _p0, _blo, _bhi = [], [], []
                 for _gi in range(_n_gauss):
                     _cen      = float(_g_cens[_gi])
                     _tol      = float(_g_tols[_gi])
                     _smin     = float(_g_fwhm_min[_gi]) / 2.355
                     _smax     = float(_g_fwhm_max[_gi]) / 2.355
-                    _p0  += [_amp_priors[_gi], _cen, max(_smin, min(10.0 / 2.355, _smax))]
+                    _sig0     = max(_smin, min(10.0 / 2.355, _smax))
+                    # Convert area fraction → amplitude prior
+                    _amp0     = (_amp_priors[_gi] * _total_am_area
+                                 / (_sig0 * np.sqrt(2 * np.pi)))
+                    _amp0     = float(np.clip(_amp0, 1e-9, 1.4))
+                    _p0  += [_amp0, _cen, _sig0]
                     _blo += [0,   max(float(_wn_am[0]),  _cen - _tol), _smin]
                     _bhi += [1.5, min(float(_wn_am[-1]), _cen + _tol), _smax]
 
@@ -2750,7 +2801,7 @@ with tab_further:
                             "Fitted area (%)": f"{100 * _areas_avg[_gi] / _total_area:.1f}",
                         }
                         if _pdb_fracs_display is not None and _gi < len(_pdb_fracs_display):
-                            _row["PDB prior (%)"] = f"{100 * _pdb_fracs_display[_gi]:.1f}"
+                            _row["PDB area prior (%)"] = f"{100 * _pdb_fracs_display[_gi]:.1f}"
                         _pct_rows.append(_row)
                     st.dataframe(pd.DataFrame(_pct_rows), use_container_width=True, hide_index=True)
                 except Exception as _exc_avg:
