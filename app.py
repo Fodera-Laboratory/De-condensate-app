@@ -3566,6 +3566,10 @@ with tab_download:
             _unit_sv     = st.session_state.get("unit", "mg/mL")
             _clabels_sv  = st.session_state.get("models", {}).get("comp_labels", [])
             _dlbl_sv     = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
+            _models_sv   = st.session_state.get("models", {})
+            _pls_p_sv    = _models_sv.get("pls_protein")
+            _pls_s_sv    = _models_sv.get("pls_salt")
+            _dual_sv     = _pls_p_sv.get("dual", False) if _pls_p_sv else False
 
             # ── Per-linescan MCR / PLS rows ───────────────────────────────
             for _sv_fn, _sv_r in _res_sv.items():
@@ -3613,6 +3617,276 @@ with tab_download:
                         f"c) MCR-recovered pure-component spectra (ST matrix)."
                     )
                 _cap_parts.append(_cap_ls)
+
+                # ── Per-linescan PLS concentration profile row ────────────
+                if _sv_r.get("pls_protein") is not None and _pls_p_sv is not None:
+                    _has_peg_sv  = _dual_sv and _sv_r.get("pls_peg") is not None
+                    _has_salt_sv = _pls_s_sv is not None and _sv_r.get("pls_salt") is not None
+                    _cv_p_sv     = (_pls_p_sv["cv_rmse_protein"] if _dual_sv
+                                    else _pls_p_sv["cv_rmse"])
+
+                    if _has_peg_sv:
+                        _pls_ncols = 2
+                    elif _has_salt_sv:
+                        _pls_ncols = 2
+                    else:
+                        _pls_ncols = 1
+
+                    def _draw_pls_profile(
+                        axs,
+                        r=_sv_r,
+                        has_peg=_has_peg_sv,
+                        has_salt=_has_salt_sv,
+                        cv_p=_cv_p_sv,
+                        unit=_unit_sv,
+                        dlbl=_dlbl_sv,
+                    ):
+                        _prot = np.array(r["pls_protein"])
+                        _dist = np.array(r["distance"])
+                        # ── col 0: protein (+ optional twin crowder) ──────
+                        axs[0].plot(_dist, _prot, color=_MCOLS[0], lw=0.8)
+                        axs[0].fill_between(
+                            _dist, _prot - cv_p, _prot + cv_p,
+                            color=_MCOLS[0], alpha=0.2,
+                        )
+                        axs[0].set_xlabel(dlbl)
+                        axs[0].set_ylabel(f"Protein ({unit})", color=_MCOLS[0])
+                        axs[0].tick_params(axis="y", colors=_MCOLS[0], labelsize=_TS)
+                        _style_ax(axs[0])
+
+                        if has_peg:
+                            _peg   = np.array(r["pls_peg"])
+                            _cv_pg = _pls_p_sv["cv_rmse_peg"]
+                            _axtw  = axs[0].twinx()
+                            _axtw.plot(_dist, _peg, color=_MCOLS[2], lw=0.8)
+                            _axtw.fill_between(
+                                _dist, _peg - _cv_pg, _peg + _cv_pg,
+                                color=_MCOLS[2], alpha=0.2,
+                            )
+                            _axtw.set_ylabel("Crowder (wt%)", color=_MCOLS[2], fontsize=_LS)
+                            _axtw.tick_params(axis="y", colors=_MCOLS[2], labelsize=_TS,
+                                              width=0.5, length=2)
+                            for _sp in _axtw.spines.values():
+                                _sp.set_linewidth(0.5)
+                                _sp.set_edgecolor("black")
+                            # ── col 1: crowder vs protein scatter ─────────
+                            axs[1].scatter(_prot, _peg, s=3, color=_MCOLS[2], alpha=0.6,
+                                           linewidths=0)
+                            axs[1].set_xlabel(f"Protein ({unit})", color=_MCOLS[0])
+                            axs[1].set_ylabel("Crowder (wt%)", color=_MCOLS[2])
+                            axs[1].tick_params(axis="x", colors=_MCOLS[0], labelsize=_TS)
+                            axs[1].tick_params(axis="y", colors=_MCOLS[2], labelsize=_TS)
+                            _style_ax(axs[1])
+
+                        elif has_salt:
+                            _salt  = np.array(r["pls_salt"])
+                            _cv_s  = _pls_s_sv["cv_rmse"]
+                            # ── col 1: salt concentration profile ─────────
+                            axs[1].plot(_dist, _salt, color=_MCOLS[3], lw=0.8)
+                            axs[1].fill_between(
+                                _dist, _salt - _cv_s, _salt + _cv_s,
+                                color=_MCOLS[3], alpha=0.2,
+                            )
+                            axs[1].set_xlabel(dlbl)
+                            axs[1].set_ylabel("Salt (mM)", color=_MCOLS[3])
+                            axs[1].tick_params(axis="y", colors=_MCOLS[3], labelsize=_TS)
+                            _style_ax(axs[1])
+
+                    _row_specs.append((_pls_ncols, _PH, _draw_pls_profile))
+
+                    _cap_pls = (
+                        f"PLS concentration profiles — {_safe_fn}. "
+                        f"a) Protein ({_unit_sv}), shaded band = ±{_cv_p_sv:.4f} {_unit_sv} CV RMSE."
+                    )
+                    if _has_peg_sv:
+                        _cap_pls += (
+                            f" Twin y-axis (green): molecular crowder (wt%), "
+                            f"±{_pls_p_sv['cv_rmse_peg']:.4f} wt% CV RMSE. "
+                            f"b) Crowder vs protein co-localisation scatter."
+                        )
+                    elif _has_salt_sv:
+                        _cap_pls += (
+                            f" b) Salt (mM), shaded band = ±{_pls_s_sv['cv_rmse']:.4f} mM CV RMSE."
+                        )
+                    _cap_parts.append(_cap_pls)
+
+            # ── PLS calibration rows (once, model-level) ─────────────────
+            if _pls_p_sv is not None and not _dual_sv:
+                # Single protein PLS: scatter | RMSE | loadings
+                _wn_cal   = _pls_p_sv["wn"]
+                _vf_cal   = _pls_p_sv["valid_features"]
+                _wn_vld   = _wn_cal[_vf_cal] if _wn_cal is not None else None
+
+                def _draw_pls_single_cal(axs, pp=_pls_p_sv, unit=_unit_sv, wn_v=_wn_vld):
+                    # a) scatter
+                    _yt = pp["y_raw"]
+                    _yp = pp["y_pred_train"]
+                    axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn, _mx = _yt.min(), _yt.max()
+                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                    axs[0].set_xlabel(f"Actual ({unit})")
+                    axs[0].set_ylabel(f"Predicted ({unit})")
+                    _style_ax(axs[0])
+                    # b) CV / Train RMSE
+                    _comps = list(range(1, len(pp["rmse_cv_all"]) + 1))
+                    axs[1].plot(_comps, pp["rmse_cv_all"], "o-",
+                                color="red", lw=0.8, ms=3, label="CV")
+                    axs[1].plot(_comps, pp["rmse_train_all"], "o-",
+                                color="steelblue", lw=0.8, ms=3, label="Train")
+                    axs[1].axvline(pp["n_components"], color="black", lw=0.6, ls="--")
+                    axs[1].set_xlabel("Latent variables")
+                    axs[1].set_ylabel("RMSE")
+                    axs[1].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[1])
+                    # c) loadings
+                    if wn_v is not None:
+                        for _i in range(pp["n_components"]):
+                            axs[2].plot(wn_v, pp["model"].x_loadings_[:, _i],
+                                        color=_MCOLS[_i % len(_MCOLS)], lw=0.6,
+                                        label=f"LV{_i+1}")
+                        axs[2].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[2].set_xlabel("Wavenumber (cm⁻¹)")
+                        axs[2].set_ylabel("Loading")
+                        axs[2].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[2])
+
+                _row_specs.append((3, _PH, _draw_pls_single_cal))
+                _wn_rng = (f"{_wn_vld[0]:.0f}–{_wn_vld[-1]:.0f} cm⁻¹"
+                           if _wn_vld is not None else "")
+                _cap_parts.append(
+                    f"PLS1 protein calibration ({_wn_rng}), "
+                    f"{_pls_p_sv['n_components']} latent variable(s). "
+                    f"a) Predicted vs actual ({_unit_sv}); train R² = {_pls_p_sv['r2_train']:.4f}. "
+                    f"b) CV RMSE (red) and training RMSE (blue) vs number of latent variables; "
+                    f"opt = {_pls_p_sv['n_components']}, CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
+                    f"c) X-loadings for each latent variable."
+                )
+
+            elif _pls_p_sv is not None and _dual_sv:
+                # Dual PLS row 1: protein scatter | crowder scatter | RMSE
+                _wn_cal   = _pls_p_sv["wn"]
+                _vf_cal   = _pls_p_sv["valid_features"]
+                _wn_vld   = _wn_cal[_vf_cal] if _wn_cal is not None else None
+
+                def _draw_dual_row1(axs, pp=_pls_p_sv, unit=_unit_sv):
+                    # a) protein scatter
+                    _ypt = pp["y_protein_train"]
+                    _ypp = pp["y_pred_protein_train"]
+                    axs[0].scatter(_ypt, _ypp, s=10, color=_MCOLS[0], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn, _mx = _ypt.min(), _ypt.max()
+                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                    axs[0].set_xlabel(f"Actual ({unit})")
+                    axs[0].set_ylabel(f"Predicted ({unit})")
+                    _style_ax(axs[0])
+                    # b) crowder scatter
+                    _ygt = pp["y_peg_train"]
+                    _ygp = pp["y_pred_peg_train"]
+                    axs[1].scatter(_ygt, _ygp, s=10, color=_MCOLS[2], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn2, _mx2 = _ygt.min(), _ygt.max()
+                    axs[1].plot([_mn2, _mx2], [_mn2, _mx2], "k--", lw=0.6)
+                    axs[1].set_xlabel("Actual (wt%)")
+                    axs[1].set_ylabel("Predicted (wt%)")
+                    _style_ax(axs[1])
+                    # c) RMSE
+                    _comps = list(range(1, len(pp["rmse_cv_all"]) + 1))
+                    axs[2].plot(_comps, pp["rmse_cv_all"], "o-",
+                                color="red", lw=0.8, ms=3, label="CV")
+                    axs[2].plot(_comps, pp["rmse_train_all"], "o-",
+                                color="steelblue", lw=0.8, ms=3, label="Train")
+                    axs[2].axvline(pp["n_components"], color="black", lw=0.6, ls="--")
+                    axs[2].set_xlabel("Latent variables")
+                    axs[2].set_ylabel("RMSE")
+                    axs[2].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[2])
+
+                _row_specs.append((3, _PH, _draw_dual_row1))
+                _cap_parts.append(
+                    f"PLS2 dual calibration, {_pls_p_sv['n_components']} latent variable(s). "
+                    f"a) Protein predicted vs actual ({_unit_sv}); "
+                    f"train R² = {_pls_p_sv['r2_protein_train']:.4f}, "
+                    f"CV RMSE = {_pls_p_sv['cv_rmse_protein']:.4f} {_unit_sv}. "
+                    f"b) Molecular crowder predicted vs actual (wt%); "
+                    f"train R² = {_pls_p_sv['r2_peg_train']:.4f}, "
+                    f"CV RMSE = {_pls_p_sv['cv_rmse_peg']:.4f} wt%. "
+                    f"c) CV RMSE (red) and training RMSE (blue) vs latent variables; "
+                    f"opt = {_pls_p_sv['n_components']}."
+                )
+
+                # Dual PLS row 2: loadings (1 square panel)
+                def _draw_dual_loadings(axs, pp=_pls_p_sv, wn_v=_wn_vld):
+                    if wn_v is not None:
+                        for _i in range(pp["n_components"]):
+                            axs[0].plot(wn_v, pp["model"].x_loadings_[:, _i],
+                                        color=_MCOLS[_i % len(_MCOLS)], lw=0.6,
+                                        label=f"LV{_i+1}")
+                        axs[0].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                        axs[0].set_ylabel("Loading")
+                        axs[0].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[0])
+
+                _row_specs.append((1, _SH, _draw_dual_loadings))
+                _wn_rng2 = (f"{_wn_vld[0]:.0f}–{_wn_vld[-1]:.0f} cm⁻¹"
+                            if _wn_vld is not None else "")
+                _cap_parts.append(
+                    f"PLS2 X-loadings ({_wn_rng2}) for each of the "
+                    f"{_pls_p_sv['n_components']} latent variable(s)."
+                )
+
+            # ── Salt PLS calibration ──────────────────────────────────────
+            if _pls_s_sv is not None:
+                _wn_sv_s  = _pls_s_sv["wn"]
+                _vf_sv_s  = _pls_s_sv["valid_features"]
+                _wn_sv_sv = _wn_sv_s[_vf_sv_s] if _wn_sv_s is not None else None
+
+                def _draw_salt_cal(axs, ps=_pls_s_sv, wn_sv=_wn_sv_sv):
+                    # a) training spectra
+                    _Xs = ps["X_train_proc"]
+                    _wn = ps["wn"]
+                    for _si in range(_Xs.shape[0]):
+                        axs[0].plot(_wn, _Xs[_si],
+                                    color="#aaaaaa", lw=0.3, alpha=0.5)
+                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].set_ylabel("Intensity (a.u.)")
+                    _style_ax(axs[0])
+                    # b) scatter
+                    _ys  = ps["y_raw"]
+                    _ysp = ps["y_pred_train"]
+                    axs[1].scatter(_ys, _ysp, s=10, color=_MCOLS[3], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn, _mx = _ys.min(), _ys.max()
+                    axs[1].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                    axs[1].set_xlabel("Actual (mM)")
+                    axs[1].set_ylabel("Predicted (mM)")
+                    _style_ax(axs[1])
+                    # c) RMSE
+                    _comps = list(range(1, len(ps["rmse_cv_all"]) + 1))
+                    axs[2].plot(_comps, ps["rmse_cv_all"], "o-",
+                                color="red", lw=0.8, ms=3, label="CV")
+                    axs[2].plot(_comps, ps["rmse_train_all"], "o-",
+                                color="steelblue", lw=0.8, ms=3, label="Train")
+                    axs[2].axvline(ps["n_components"], color="black", lw=0.6, ls="--")
+                    axs[2].set_xlabel("Latent variables")
+                    axs[2].set_ylabel("RMSE (mM)")
+                    axs[2].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[2])
+
+                _row_specs.append((3, _PH, _draw_salt_cal))
+                _wn_s_rng = (f"{_wn_sv_sv[0]:.0f}–{_wn_sv_sv[-1]:.0f} cm⁻¹"
+                             if _wn_sv_sv is not None else "")
+                _cap_parts.append(
+                    f"Salt PLS1 calibration ({_wn_s_rng}), "
+                    f"{_pls_s_sv['n_components']} latent variable(s). "
+                    f"a) Preprocessed salt standard spectra ({_pls_s_sv['X_train_proc'].shape[0]} spectra, grey). "
+                    f"b) Predicted vs actual salt concentration (mM); "
+                    f"train R² = {_pls_s_sv['r2_train']:.4f}. "
+                    f"c) CV RMSE (red) and training RMSE (blue) vs latent variables; "
+                    f"opt = {_pls_s_sv['n_components']}, "
+                    f"CV RMSE = {_pls_s_sv['cv_rmse']:.4f} mM."
+                )
 
             # ── PCA row ──────────────────────────────────────────────────
             _pca_sv = st.session_state.get("pca_result")
