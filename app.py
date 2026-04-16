@@ -3524,22 +3524,39 @@ with tab_download:
             import matplotlib.ticker as _mticker
             import io as _mio
 
+            # Keep text as editable SVG <text> elements (not paths) so Inkscape
+            # can select and edit individual labels.
+            plt.rcParams.update({
+                "svg.fonttype":        "none",   # text stays as text, not paths
+                "font.family":         "Arial",
+                "text.color":          "black",
+                "axes.labelcolor":     "black",
+                "xtick.color":         "black",
+                "ytick.color":         "black",
+                "axes.edgecolor":      "black",
+            })
+
             _CM    = 1 / 2.54          # inches per cm
             _PW    = 4.5 * _CM         # panel width
             _PH    = 2.5 * _CM         # subplot row height
             _SH    = 4.5 * _CM         # square panel height
             _NCOLS = 3                 # grid columns
             _FW    = _NCOLS * _PW      # total figure width
-            _TS, _LS = 8, 9            # tick size, label size (pt)
+            _TS, _LS = 5, 8            # tick size 5 pt, label size 8 pt
+            # Plotly default colour sequence (matches the web-page plots)
             _MCOLS = ["#636EFA","#EF553B","#00CC96","#AB63FA",
                       "#FFA15A","#19D3F3","#FF6692","#B6E880"]
 
             def _style_ax(ax):
-                ax.tick_params(labelsize=_TS, width=0.5, length=2)
+                ax.tick_params(labelsize=_TS, width=0.5, length=2,
+                               colors="black")
                 ax.xaxis.label.set_size(_LS)
                 ax.yaxis.label.set_size(_LS)
+                ax.xaxis.label.set_color("black")
+                ax.yaxis.label.set_color("black")
                 for _sp in ax.spines.values():
                     _sp.set_linewidth(0.5)
+                    _sp.set_edgecolor("black")
 
             # ── Collect row specs: (n_cols, height_inches, draw_fn, caption) ─
             _row_specs   = []
