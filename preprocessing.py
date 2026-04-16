@@ -71,7 +71,7 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
     spike_remove = settings.get("spike_remove", True)
 
     if spike_remove:
-        I = spike_removal_scp(I)
+        I = spike_removal_scp(I, threshold=settings.get("spike_threshold", 8.0))
 
     # ── Baseline correction ───────────────────────────────────────────────
     if baseline == "rubberband":

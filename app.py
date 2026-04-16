@@ -413,6 +413,17 @@ with tab_files:
             help="Normalization applied only to salt standards and linescan salt preprocessing.",
         )
         spike_remove = st.toggle("Spike removal", value=True)
+        spike_threshold = st.number_input(
+            "Spike detection threshold",
+            min_value=1.0, max_value=30.0, value=8.0, step=0.5,
+            key="spike_threshold",
+            help=(
+                "Modified Z-score threshold for the Whitaker-Hayes spike detector. "
+                "Lower values = more aggressive (removes more, risk of false positives). "
+                "Default 8; try 4–6 if spikes are being missed."
+            ),
+            disabled=not spike_remove,
+        )
 
     with _fc2:
         st.subheader("Spectral Range")
@@ -615,6 +626,7 @@ settings = dict(
     normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
     spike_remove=spike_remove,
+    spike_threshold=spike_threshold,
     wn_min=wn_min,
     wn_max=wn_max,
     use_cut=use_cut,
@@ -2016,8 +2028,9 @@ with tab_further:
                     X, wn = X[:,_mask], wn[_mask]
 
                 elif _sk == "spike_removal":
+                    _sth = st.session_state.get("spike_threshold", 8.0)
                     for _i in range(X.shape[0]):
-                        X[_i] = rms.spike_removal_scp(X[_i])
+                        X[_i] = rms.spike_removal_scp(X[_i], threshold=_sth)
 
                 elif _sk == "rubberband":
                     for _i in range(X.shape[0]):
@@ -3546,10 +3559,10 @@ with tab_download:
             _H_SQ    = 5.0 * _CM
             _TS, _LS = 5, 8        # tick 5 pt, label 8 pt
             # Layout spacing (in)
-            _HPAD = 0.75 * _CM     # horizontal gap between panels
-            _VPAD = 1.05 * _CM     # vertical gap between rows
-            _ML, _MR = 1.0*_CM, 0.5*_CM
-            _MT, _MB = 0.4*_CM, 0.7*_CM
+            _HPAD = 1.4 * _CM      # horizontal gap between panels
+            _VPAD = 1.8 * _CM      # vertical gap between rows
+            _ML, _MR = 1.6*_CM, 1.0*_CM
+            _MT, _MB = 0.8*_CM, 1.2*_CM
             # Colour palette — matches COLORS used in web-page Plotly charts
             _MCOLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
                       "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
@@ -3771,7 +3784,7 @@ with tab_download:
                 ax.legend(fontsize=5, frameon=False)
                 _style_ax(ax)
 
-            if _pls_p_sv is not None and not _dual_sv:
+            if _pls_p_sv is not None:
                 _wn_cal = _pls_p_sv["wn"]
                 _vf_cal = _pls_p_sv["valid_features"]
                 _wn_vld = _wn_cal[_vf_cal] if _wn_cal is not None else None
@@ -3779,33 +3792,124 @@ with tab_download:
                 _wn_rng = (f"{_wn_vld[0]:.0f}\u2013{_wn_vld[-1]:.0f} cm\u207b\xb9"
                            if _wn_vld is not None else "")
 
-                # Regression + RMSE
-                def _draw_pls1_reg_rmse(axs, pp=_pls_p_sv, unit=_unit_sv):
-                    _yt = pp["y_raw"]; _yp = pp["y_pred_train"]
-                    axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
-                                   edgecolors="black", linewidths=0.3, zorder=3)
-                    _mn, _mx = _yt.min(), _yt.max()
-                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
-                    axs[0].set_xlabel(f"Actual ({unit})")
-                    axs[0].set_ylabel(f"Predicted ({unit})")
-                    _style_ax(axs[0])
-                    _rmse_row(axs[1], pp)
+                # ── Training spectra ─────────────────────────────────────
+                def _draw_pls_tr_spec(axs, pp=_pls_p_sv, unit=_unit_sv,
+                                      dual=_dual_sv):
+                    _wn = pp["wn"]
+                    if dual:
+                        _Xprot = pp["X_prot_proc"]
+                        _Xpeg  = pp.get("X_peg_proc",
+                                        pp["X_train_proc"][_Xprot.shape[0]:])
+                        for _si in range(_Xprot.shape[0]):
+                            axs[0].plot(_wn, _Xprot[_si],
+                                        color=_MCOLS[0], lw=0.3, alpha=0.5)
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[0].set_ylabel("Intensity (a.u.)")
+                        axs[0].set_xlim(_wn[0], _wn[-1])
+                        _style_ax(axs[0])
+                        for _si in range(_Xpeg.shape[0]):
+                            axs[1].plot(_wn, _Xpeg[_si],
+                                        color=_MCOLS[2], lw=0.3, alpha=0.5)
+                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[1].set_ylabel("Intensity (a.u.)")
+                        axs[1].set_xlim(_wn[0], _wn[-1])
+                        _style_ax(axs[1])
+                    else:
+                        _Xtr = pp["X_train_proc"]
+                        for _si in range(_Xtr.shape[0]):
+                            axs[0].plot(_wn, _Xtr[_si],
+                                        color=_MCOLS[0], lw=0.3, alpha=0.5)
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[0].set_ylabel("Intensity (a.u.)")
+                        axs[0].set_xlim(_wn[0], _wn[-1])
+                        _style_ax(axs[0])
 
-                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
-                                   _draw_pls1_reg_rmse))
-                _cap_parts.append(
-                    f"PLS1 protein calibration ({_wn_rng}). "
-                    f"a) Predicted vs actual ({_unit_sv}); "
-                    f"R\u00b2 = {_pls_p_sv['r2_train']:.4f}. "
-                    f"b) CV RMSE (red) and training RMSE (blue) vs latent variables; "
-                    f"opt = {_pls_p_sv['n_components']}, "
-                    f"CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
-                    f"Red shading: overfitting region."
-                )
+                if _dual_sv:
+                    _n_prot = _pls_p_sv["X_prot_proc"].shape[0]
+                    _n_peg  = _pls_p_sv["X_train_proc"].shape[0] - _n_prot
+                    _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
+                                       _draw_pls_tr_spec))
+                    _cap_parts.append(
+                        f"PLS2 training spectra ({_wn_rng}). "
+                        f"a) Protein standards ({_n_prot} spectra, blue). "
+                        f"b) Molecular crowder standards ({_n_peg} spectra, green)."
+                    )
+                else:
+                    _n_tr = _pls_p_sv["X_train_proc"].shape[0]
+                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_tr_spec))
+                    _cap_parts.append(
+                        f"PLS1 training spectra ({_wn_rng}), "
+                        f"{_n_tr} preprocessed protein standard spectra."
+                    )
 
-                # Loadings + coefficients
-                def _draw_pls1_load_coef(axs, pp=_pls_p_sv, unit=_unit_sv,
-                                         wn_v=_wn_vld, nf=_nf_cal):
+                # ── Regression + RMSE ─────────────────────────────────────
+                if not _dual_sv:
+                    def _draw_pls1_reg_rmse(axs, pp=_pls_p_sv, unit=_unit_sv):
+                        _yt = pp["y_raw"]; _yp = pp["y_pred_train"]
+                        axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
+                                       edgecolors="black", linewidths=0.3, zorder=3)
+                        _mn, _mx = _yt.min(), _yt.max()
+                        axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                        axs[0].set_xlabel(f"Actual ({unit})")
+                        axs[0].set_ylabel(f"Predicted ({unit})")
+                        _style_ax(axs[0])
+                        _rmse_row(axs[1], pp)
+
+                    _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                                       _draw_pls1_reg_rmse))
+                    _cap_parts.append(
+                        f"PLS1 protein calibration ({_wn_rng}). "
+                        f"a) Predicted vs actual ({_unit_sv}); "
+                        f"R\u00b2 = {_pls_p_sv['r2_train']:.4f}. "
+                        f"b) CV RMSE (red) and training RMSE (blue); "
+                        f"opt = {_pls_p_sv['n_components']}, "
+                        f"CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
+                        f"Red shading: overfitting region."
+                    )
+                else:
+                    def _draw_dual_scatters(axs, pp=_pls_p_sv, unit=_unit_sv):
+                        _ypt = pp["y_protein_train"]
+                        _ypp = pp["y_pred_protein_train"]
+                        axs[0].scatter(_ypt, _ypp, s=10, color=_MCOLS[0], alpha=0.8,
+                                       edgecolors="black", linewidths=0.3, zorder=3)
+                        _mn, _mx = _ypt.min(), _ypt.max()
+                        axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                        axs[0].set_xlabel(f"Actual ({unit})")
+                        axs[0].set_ylabel(f"Predicted ({unit})")
+                        _style_ax(axs[0])
+                        _ygt = pp["y_peg_train"]
+                        _ygp = pp["y_pred_peg_train"]
+                        axs[1].scatter(_ygt, _ygp, s=10, color=_MCOLS[2], alpha=0.8,
+                                       edgecolors="black", linewidths=0.3, zorder=3)
+                        _mn2, _mx2 = _ygt.min(), _ygt.max()
+                        axs[1].plot([_mn2, _mx2], [_mn2, _mx2], "k--", lw=0.6)
+                        axs[1].set_xlabel("Actual (wt%)")
+                        axs[1].set_ylabel("Predicted (wt%)")
+                        _style_ax(axs[1])
+
+                    _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                                       _draw_dual_scatters))
+                    _cap_parts.append(
+                        f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
+                        f"a) Protein predicted vs actual ({_unit_sv}); "
+                        f"R\u00b2 = {_pls_p_sv['r2_protein_train']:.4f}. "
+                        f"b) Crowder predicted vs actual (wt%); "
+                        f"R\u00b2 = {_pls_p_sv['r2_peg_train']:.4f}."
+                    )
+
+                    def _draw_dual_rmse(axs, pp=_pls_p_sv):
+                        _rmse_row(axs[0], pp)
+
+                    _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_dual_rmse))
+                    _cap_parts.append(
+                        f"PLS2 RMSE vs latent variables. "
+                        f"CV RMSE (red) and training RMSE (blue); "
+                        f"opt = {_pls_p_sv['n_components']}. "
+                        f"Red shading: overfitting region."
+                    )
+
+                # ── Loadings (separate row) ───────────────────────────────
+                def _draw_pls_loadings(axs, pp=_pls_p_sv, wn_v=_wn_vld):
                     if wn_v is not None:
                         for _i in range(pp["n_components"]):
                             axs[0].plot(wn_v, pp["model"].x_loadings_[:, _i],
@@ -3817,110 +3921,47 @@ with tab_download:
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
                         axs[0].legend(fontsize=5, frameon=False)
                     _style_ax(axs[0])
-                    if wn_v is not None and len(axs) > 1 and nf > 0:
-                        _coef = _pls_coef(pp["model"], nf)
-                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[0], lw=0.8)
-                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
-                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[1].set_ylabel(f"Coeff. ({unit})")
-                        axs[1].set_xlim(wn_v[0], wn_v[-1])
-                        _style_ax(axs[1])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
-                                   _draw_pls1_load_coef))
+                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_loadings))
                 _cap_parts.append(
-                    f"PLS1 spectral features ({_wn_rng}). "
-                    f"a) X-loadings for each LV. "
-                    f"b) Regression coefficients for protein ({_unit_sv})."
+                    f"{'PLS1' if not _dual_sv else 'PLS2'} X-loadings ({_wn_rng}), "
+                    f"{_pls_p_sv['n_components']} latent variable(s)."
                 )
 
-            elif _pls_p_sv is not None and _dual_sv:
-                _wn_cal = _pls_p_sv["wn"]
-                _vf_cal = _pls_p_sv["valid_features"]
-                _wn_vld = _wn_cal[_vf_cal] if _wn_cal is not None else None
-                _nf_cal = len(_wn_vld) if _wn_vld is not None else 0
-                _wn_rng = (f"{_wn_vld[0]:.0f}\u2013{_wn_vld[-1]:.0f} cm\u207b\xb9"
-                           if _wn_vld is not None else "")
+                # ── Regression coefficients — one panel per output ────────
+                if _wn_vld is not None and _nf_cal > 0:
+                    _coef_all = _pls_coef(_pls_p_sv["model"], _nf_cal)
 
-                # Protein scatter + crowder scatter
-                def _draw_dual_scatters(axs, pp=_pls_p_sv, unit=_unit_sv):
-                    _ypt = pp["y_protein_train"]
-                    _ypp = pp["y_pred_protein_train"]
-                    axs[0].scatter(_ypt, _ypp, s=10, color=_MCOLS[0], alpha=0.8,
-                                   edgecolors="black", linewidths=0.3, zorder=3)
-                    _mn, _mx = _ypt.min(), _ypt.max()
-                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
-                    axs[0].set_xlabel(f"Actual ({unit})")
-                    axs[0].set_ylabel(f"Predicted ({unit})")
-                    _style_ax(axs[0])
-                    _ygt = pp["y_peg_train"]
-                    _ygp = pp["y_pred_peg_train"]
-                    axs[1].scatter(_ygt, _ygp, s=10, color=_MCOLS[2], alpha=0.8,
-                                   edgecolors="black", linewidths=0.3, zorder=3)
-                    _mn2, _mx2 = _ygt.min(), _ygt.max()
-                    axs[1].plot([_mn2, _mx2], [_mn2, _mx2], "k--", lw=0.6)
-                    axs[1].set_xlabel("Actual (wt%)")
-                    axs[1].set_ylabel("Predicted (wt%)")
-                    _style_ax(axs[1])
-
-                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
-                                   _draw_dual_scatters))
-                _cap_parts.append(
-                    f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
-                    f"a) Protein predicted vs actual ({_unit_sv}); "
-                    f"R\u00b2 = {_pls_p_sv['r2_protein_train']:.4f}. "
-                    f"b) Crowder predicted vs actual (wt%); "
-                    f"R\u00b2 = {_pls_p_sv['r2_peg_train']:.4f}."
-                )
-
-                # RMSE
-                def _draw_dual_rmse(axs, pp=_pls_p_sv):
-                    _rmse_row(axs[0], pp)
-
-                _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_dual_rmse))
-                _cap_parts.append(
-                    f"PLS2 RMSE vs latent variables. "
-                    f"CV RMSE (red) and training RMSE (blue); "
-                    f"opt = {_pls_p_sv['n_components']}. "
-                    f"Red shading: overfitting region."
-                )
-
-                # Loadings + coefficients
-                def _draw_dual_load_coef(axs, pp=_pls_p_sv, unit=_unit_sv,
-                                          wn_v=_wn_vld, nf=_nf_cal):
-                    if wn_v is not None:
-                        for _i in range(pp["n_components"]):
-                            axs[0].plot(wn_v, pp["model"].x_loadings_[:, _i],
-                                        color=_MCOLS[_i % len(_MCOLS)],
-                                        lw=0.6, label=f"LV{_i+1}")
+                    def _draw_coef_protein(axs, wn_v=_wn_vld, coef=_coef_all,
+                                           unit=_unit_sv):
+                        axs[0].plot(wn_v, coef[:, 0], color=_MCOLS[0], lw=0.8)
                         axs[0].axhline(0, color="black", lw=0.3, ls="--")
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[0].set_ylabel("Loading")
+                        axs[0].set_ylabel(f"Coeff. ({unit})")
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
-                        axs[0].legend(fontsize=5, frameon=False)
-                    _style_ax(axs[0])
-                    if wn_v is not None and len(axs) > 1 and nf > 0:
-                        _coef = _pls_coef(pp["model"], nf)
-                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[0],
-                                    lw=0.8, label=f"Protein ({unit})")
-                        if _coef.shape[1] > 1:
-                            axs[1].plot(wn_v, _coef[:, 1], color=_MCOLS[2],
-                                        lw=0.8, label="Crowder (wt%)")
-                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
-                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[1].set_ylabel("Coefficient")
-                        axs[1].set_xlim(wn_v[0], wn_v[-1])
-                        axs[1].legend(fontsize=5, frameon=False)
-                        _style_ax(axs[1])
+                        _style_ax(axs[0])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
-                                   _draw_dual_load_coef))
-                _cap_parts.append(
-                    f"PLS2 spectral features ({_wn_rng}). "
-                    f"a) X-loadings. "
-                    f"b) Regression coefficients for protein ({_unit_sv}, blue) "
-                    f"and crowder (wt%, green)."
-                )
+                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_coef_protein))
+                    _cap_parts.append(
+                        f"{'PLS1' if not _dual_sv else 'PLS2'} regression coefficients "
+                        f"— protein ({_unit_sv})."
+                    )
+
+                    if _dual_sv and _coef_all.shape[1] > 1:
+                        def _draw_coef_crowder(axs, wn_v=_wn_vld,
+                                               coef=_coef_all):
+                            axs[0].plot(wn_v, coef[:, 1], color=_MCOLS[2], lw=0.8)
+                            axs[0].axhline(0, color="black", lw=0.3, ls="--")
+                            axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                            axs[0].set_ylabel("Coeff. (wt%)")
+                            axs[0].set_xlim(wn_v[0], wn_v[-1])
+                            _style_ax(axs[0])
+
+                        _row_specs.append(([(_W_SPEC, _H_SPEC)],
+                                           _draw_coef_crowder))
+                        _cap_parts.append(
+                            "PLS2 regression coefficients — molecular crowder (wt%)."
+                        )
 
             # ── Salt PLS calibration ──────────────────────────────────────
             if _pls_s_sv is not None:
@@ -3970,8 +4011,7 @@ with tab_download:
                     f"Red shading: overfitting region."
                 )
 
-                def _draw_salt_load_coef(axs, ps=_pls_s_sv,
-                                          wn_v=_wn_sv_sv, nf=_nf_sv_s):
+                def _draw_salt_loadings(axs, ps=_pls_s_sv, wn_v=_wn_sv_sv):
                     if wn_v is not None:
                         for _i in range(ps["n_components"]):
                             axs[0].plot(wn_v, ps["model"].x_loadings_[:, _i],
@@ -3983,21 +4023,28 @@ with tab_download:
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
                         axs[0].legend(fontsize=5, frameon=False)
                     _style_ax(axs[0])
-                    if wn_v is not None and len(axs) > 1 and nf > 0:
-                        _coef = _pls_coef(ps["model"], nf)
-                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[3], lw=0.8)
-                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
-                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[1].set_ylabel("Coeff. (mM)")
-                        axs[1].set_xlim(wn_v[0], wn_v[-1])
-                        _style_ax(axs[1])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
-                                   _draw_salt_load_coef))
+                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_loadings))
                 _cap_parts.append(
-                    f"Salt PLS1 spectral features ({_wn_s_rng}). "
-                    f"a) X-loadings. b) Regression coefficients (mM)."
+                    f"Salt PLS1 X-loadings ({_wn_s_rng}), "
+                    f"{_pls_s_sv['n_components']} latent variable(s)."
                 )
+
+                if _wn_sv_sv is not None and _nf_sv_s > 0:
+                    def _draw_salt_coef(axs, ps=_pls_s_sv,
+                                        wn_v=_wn_sv_sv, nf=_nf_sv_s):
+                        _coef = _pls_coef(ps["model"], nf)
+                        axs[0].plot(wn_v, _coef[:, 0], color=_MCOLS[3], lw=0.8)
+                        axs[0].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[0].set_ylabel("Coeff. (mM)")
+                        axs[0].set_xlim(wn_v[0], wn_v[-1])
+                        _style_ax(axs[0])
+
+                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_coef))
+                    _cap_parts.append(
+                        f"Salt PLS1 regression coefficients ({_wn_s_rng})."
+                    )
 
             # ── PCA row ───────────────────────────────────────────────────
             _pca_sv = st.session_state.get("pca_result")
