@@ -1768,7 +1768,7 @@ with tab_further:
             "— custom —": None,
             "Amide I band deconvolution": (
                 ["spectral_cut","spike_removal","spectral_cut","savgol","area","endpoint"],
-                {"Spectral cut #2": {"wn_min": 1580, "wn_max": 1720, "use_gap": False}},
+                {"Spectral cut #2": {"wn_min": 1600, "wn_max": 1700, "use_gap": False}},
             ),
             "PCA on MFR":               (["spectral_cut","spike_removal","rubberband","snv"], None),
             "PCA on LFR":               (
@@ -2393,7 +2393,7 @@ with tab_further:
 
         _items_amide = _pipeline_ui(
             "amide", ["spectral_cut", "spike_removal", "spectral_cut", "savgol", "area", "endpoint"],
-            seed_defaults={"Spectral cut #2": {"wn_min": 1580, "wn_max": 1720, "use_gap": False}})
+            seed_defaults={"Spectral cut #2": {"wn_min": 1600, "wn_max": 1700, "use_gap": False}})
 
         # ── Gaussian centre constraints ───────────────────────────────────
         st.markdown("**Gaussian components**")
@@ -3536,16 +3536,23 @@ with tab_download:
                 "axes.edgecolor":      "black",
             })
 
-            _CM    = 1 / 2.54          # inches per cm
-            _PW    = 4.5 * _CM         # panel width
-            _PH    = 2.5 * _CM         # subplot row height
-            _SH    = 4.5 * _CM         # square panel height
-            _NCOLS = 3                 # grid columns
-            _FW    = _NCOLS * _PW      # total figure width
-            _TS, _LS = 5, 8            # tick size 5 pt, label size 8 pt
-            # Plotly default colour sequence (matches the web-page plots)
-            _MCOLS = ["#636EFA","#EF553B","#00CC96","#AB63FA",
-                      "#FFA15A","#19D3F3","#FF6692","#B6E880"]
+            _CM = 1 / 2.54
+            # Panel sizes (in) by type
+            _W_SPEC  = 5.0 * _CM   # spectra / loadings / coefficients
+            _H_SPEC  = 2.8 * _CM
+            _W_WIDE  = 7.0 * _CM   # scores / regression / RMSE / scatter
+            _H_WIDE  = 3.5 * _CM
+            _W_SQ    = 5.0 * _CM   # square panels (amide deconvolution)
+            _H_SQ    = 5.0 * _CM
+            _TS, _LS = 5, 8        # tick 5 pt, label 8 pt
+            # Layout spacing (in)
+            _HPAD = 0.75 * _CM     # horizontal gap between panels
+            _VPAD = 1.05 * _CM     # vertical gap between rows
+            _ML, _MR = 1.0*_CM, 0.5*_CM
+            _MT, _MB = 0.4*_CM, 0.7*_CM
+            # Colour palette — matches COLORS used in web-page Plotly charts
+            _MCOLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
+                      "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
 
             def _style_ax(ax):
                 ax.tick_params(labelsize=_TS, width=0.5, length=2,
@@ -3558,100 +3565,105 @@ with tab_download:
                     _sp.set_linewidth(0.5)
                     _sp.set_edgecolor("black")
 
-            # ── Collect row specs: (n_cols, height_inches, draw_fn, caption) ─
-            _row_specs   = []
-            _cap_parts   = []
-            _res_sv      = results_all
-            _sm_sv       = st.session_state.get("scan_mode", "xy")
-            _unit_sv     = st.session_state.get("unit", "mg/mL")
-            _clabels_sv  = st.session_state.get("models", {}).get("comp_labels", [])
-            _dlbl_sv     = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
-            _models_sv   = st.session_state.get("models", {})
-            _pls_p_sv    = _models_sv.get("pls_protein")
-            _pls_s_sv    = _models_sv.get("pls_salt")
-            _dual_sv     = _pls_p_sv.get("dual", False) if _pls_p_sv else False
+            # ── Collect row specs ─────────────────────────────────────────
+            # Format: ([(w_in, h_in), ...], draw_fn)
+            # Rows are stacked top-to-bottom; panels within a row are placed
+            # left-to-right using fig.add_axes() with absolute coordinates.
+            _row_specs  = []
+            _cap_parts  = []
+            _res_sv     = results_all
+            _sm_sv      = st.session_state.get("scan_mode", "xy")
+            _unit_sv    = st.session_state.get("unit", "mg/mL")
+            _clabels_sv = st.session_state.get("models", {}).get("comp_labels", [])
+            _dlbl_sv    = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
+            _models_sv  = st.session_state.get("models", {})
+            _pls_p_sv   = _models_sv.get("pls_protein")
+            _pls_s_sv   = _models_sv.get("pls_salt")
+            _dual_sv    = _pls_p_sv.get("dual", False) if _pls_p_sv else False
 
-            # ── Per-linescan MCR / PLS rows ───────────────────────────────
+            # ── Per-linescan rows ─────────────────────────────────────────
             for _sv_fn, _sv_r in _res_sv.items():
                 _has_mcr_sv = _sv_r.get("C_mcr") is not None
+                _has_pls_sv = (_sv_r.get("pls_protein") is not None
+                               and _pls_p_sv is not None)
                 _safe_fn    = os.path.splitext(_sv_fn)[0]
 
-                def _draw_ls(axs, r=_sv_r, has_mcr=_has_mcr_sv):
-                    # a) preprocessed spectra
+                # Row A: preprocessed spectra (+ MCR recovered spectra if MCR ran)
+                def _draw_spec_row(axs, r=_sv_r, has_mcr=_has_mcr_sv):
                     _n_show = min(r["X_proc"].shape[0], 60)
                     for _si in range(_n_show):
                         axs[0].plot(r["wn_proc"], r["X_proc"][_si],
                                     color="#aaaaaa", lw=0.3, alpha=0.4)
-                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
+                    axs[0].set_xlim(r["wn_proc"][0], r["wn_proc"][-1])
                     _style_ax(axs[0])
-                    # b) MCR concentration profiles
-                    if has_mcr:
-                        for _k in range(r["C_mcr"].shape[1]):
-                            _lb = _clabels_sv[_k] if _k < len(_clabels_sv) else f"Comp {_k+1}"
-                            axs[1].plot(r["distance"], r["C_mcr"][:, _k],
-                                        color=_MCOLS[_k % len(_MCOLS)], lw=0.8, label=_lb)
-                        axs[1].set_xlabel(_dlbl_sv)
-                        axs[1].set_ylabel("MCR score (a.u.)")
-                        axs[1].legend(fontsize=6, frameon=False, loc="upper right")
-                    _style_ax(axs[1])
-                    # c) MCR recovered spectra
-                    if has_mcr:
+                    if has_mcr and len(axs) > 1:
                         for _k in range(r["ST_mcr"].shape[0]):
-                            _lb = _clabels_sv[_k] if _k < len(_clabels_sv) else f"Comp {_k+1}"
-                            axs[2].plot(r["wn_proc"], r["ST_mcr"][_k],
-                                        color=_MCOLS[_k % len(_MCOLS)], lw=0.8, label=_lb)
-                        axs[2].set_xlabel("Wavenumber (cm⁻¹)")
-                        axs[2].set_ylabel("Intensity (a.u.)")
-                    _style_ax(axs[2])
+                            _lb = (_clabels_sv[_k] if _k < len(_clabels_sv)
+                                   else f"Comp {_k+1}")
+                            axs[1].plot(r["wn_proc"], r["ST_mcr"][_k],
+                                        color=_MCOLS[_k % len(_MCOLS)],
+                                        lw=0.8, label=_lb)
+                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[1].set_ylabel("Intensity (a.u.)")
+                        axs[1].set_xlim(r["wn_proc"][0], r["wn_proc"][-1])
+                        axs[1].legend(fontsize=5, frameon=False)
+                        _style_ax(axs[1])
 
-                _row_specs.append((3, _PH, _draw_ls))
-                _cap_ls = (
-                    f"Linescan analysis — {_safe_fn}. "
-                    f"a) Preprocessed Raman spectra (up to 60 shown, grey). "
-                )
+                _spec_panels = [(_W_SPEC, _H_SPEC)]
                 if _has_mcr_sv:
-                    _nc = _sv_r["C_mcr"].shape[1]
-                    _cap_ls += (
-                        f"b) MCR-ALS concentration profiles, {_nc} component(s). "
-                        f"c) MCR-recovered pure-component spectra (ST matrix)."
-                    )
-                _cap_parts.append(_cap_ls)
+                    _spec_panels.append((_W_SPEC, _H_SPEC))
+                _row_specs.append((_spec_panels, _draw_spec_row))
+                _cap_spec = (f"Linescan: {_safe_fn}. "
+                             f"a) Preprocessed Raman spectra (up to 60, grey).")
+                if _has_mcr_sv:
+                    _cap_spec += " b) MCR-recovered pure-component spectra."
+                _cap_parts.append(_cap_spec)
 
-                # ── Per-linescan PLS concentration profile row ────────────
-                if _sv_r.get("pls_protein") is not None and _pls_p_sv is not None:
+                # Row B: MCR concentration scores vs distance
+                if _has_mcr_sv:
+                    def _draw_mcr_scores(axs, r=_sv_r):
+                        for _k in range(r["C_mcr"].shape[1]):
+                            _lb = (_clabels_sv[_k] if _k < len(_clabels_sv)
+                                   else f"Comp {_k+1}")
+                            axs[0].plot(r["distance"], r["C_mcr"][:, _k],
+                                        color=_MCOLS[_k % len(_MCOLS)],
+                                        lw=0.8, label=_lb)
+                        axs[0].set_xlabel(_dlbl_sv)
+                        axs[0].set_ylabel("MCR score (a.u.)")
+                        axs[0].legend(fontsize=5, frameon=False, loc="upper right")
+                        _style_ax(axs[0])
+
+                    _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_mcr_scores))
+                    _nc = _sv_r["C_mcr"].shape[1]
+                    _cap_parts.append(
+                        f"MCR-ALS scores \u2014 {_safe_fn}. "
+                        f"{_nc} component(s) vs {_dlbl_sv.lower()}."
+                    )
+
+                # Row C: PLS concentration profile + co-localisation scatter
+                if _has_pls_sv:
                     _has_peg_sv  = _dual_sv and _sv_r.get("pls_peg") is not None
-                    _has_salt_sv = _pls_s_sv is not None and _sv_r.get("pls_salt") is not None
+                    _has_salt_sv = (_pls_s_sv is not None
+                                    and _sv_r.get("pls_salt") is not None)
                     _cv_p_sv     = (_pls_p_sv["cv_rmse_protein"] if _dual_sv
                                     else _pls_p_sv["cv_rmse"])
 
-                    if _has_peg_sv:
-                        _pls_ncols = 2
-                    elif _has_salt_sv:
-                        _pls_ncols = 2
-                    else:
-                        _pls_ncols = 1
-
-                    def _draw_pls_profile(
-                        axs,
-                        r=_sv_r,
-                        has_peg=_has_peg_sv,
-                        has_salt=_has_salt_sv,
-                        cv_p=_cv_p_sv,
-                        unit=_unit_sv,
-                        dlbl=_dlbl_sv,
+                    def _draw_pls_row(
+                        axs, r=_sv_r,
+                        has_peg=_has_peg_sv, has_salt=_has_salt_sv,
+                        cv_p=_cv_p_sv, unit=_unit_sv, dlbl=_dlbl_sv,
                     ):
                         _prot = np.array(r["pls_protein"])
                         _dist = np.array(r["distance"])
-                        # ── col 0: protein (+ optional twin crowder) ──────
                         axs[0].plot(_dist, _prot, color=_MCOLS[0], lw=0.8)
-                        axs[0].fill_between(
-                            _dist, _prot - cv_p, _prot + cv_p,
-                            color=_MCOLS[0], alpha=0.2,
-                        )
+                        axs[0].fill_between(_dist, _prot - cv_p, _prot + cv_p,
+                                            color=_MCOLS[0], alpha=0.15)
                         axs[0].set_xlabel(dlbl)
                         axs[0].set_ylabel(f"Protein ({unit})", color=_MCOLS[0])
-                        axs[0].tick_params(axis="y", colors=_MCOLS[0], labelsize=_TS)
+                        axs[0].tick_params(axis="y", colors=_MCOLS[0],
+                                           labelsize=_TS)
                         _style_ax(axs[0])
 
                         if has_peg:
@@ -3659,68 +3671,117 @@ with tab_download:
                             _cv_pg = _pls_p_sv["cv_rmse_peg"]
                             _axtw  = axs[0].twinx()
                             _axtw.plot(_dist, _peg, color=_MCOLS[2], lw=0.8)
-                            _axtw.fill_between(
-                                _dist, _peg - _cv_pg, _peg + _cv_pg,
-                                color=_MCOLS[2], alpha=0.2,
-                            )
-                            _axtw.set_ylabel("Crowder (wt%)", color=_MCOLS[2], fontsize=_LS)
-                            _axtw.tick_params(axis="y", colors=_MCOLS[2], labelsize=_TS,
-                                              width=0.5, length=2)
+                            _axtw.fill_between(_dist, _peg - _cv_pg,
+                                               _peg + _cv_pg,
+                                               color=_MCOLS[2], alpha=0.15)
+                            _axtw.set_ylabel("Crowder (wt%)",
+                                             color=_MCOLS[2], fontsize=_LS)
+                            _axtw.tick_params(axis="y", colors=_MCOLS[2],
+                                              labelsize=_TS, width=0.5, length=2)
                             for _sp in _axtw.spines.values():
                                 _sp.set_linewidth(0.5)
-                                _sp.set_edgecolor("black")
-                            # ── col 1: crowder vs protein scatter ─────────
-                            axs[1].scatter(_prot, _peg, s=3, color=_MCOLS[2], alpha=0.6,
-                                           linewidths=0)
-                            axs[1].set_xlabel(f"Protein ({unit})", color=_MCOLS[0])
-                            axs[1].set_ylabel("Crowder (wt%)", color=_MCOLS[2])
-                            axs[1].tick_params(axis="x", colors=_MCOLS[0], labelsize=_TS)
-                            axs[1].tick_params(axis="y", colors=_MCOLS[2], labelsize=_TS)
-                            _style_ax(axs[1])
+                            if len(axs) > 1:
+                                axs[1].errorbar(
+                                    _prot, _peg,
+                                    xerr=cv_p, yerr=_cv_pg,
+                                    fmt="o", ms=2, color=_MCOLS[2], alpha=0.6,
+                                    ecolor="black", elinewidth=0.5,
+                                    capsize=2, capthick=0.5, zorder=3,
+                                )
+                                axs[1].set_xlabel(f"Protein ({unit})",
+                                                  color=_MCOLS[0])
+                                axs[1].set_ylabel("Crowder (wt%)",
+                                                  color=_MCOLS[2])
+                                axs[1].tick_params(axis="x", colors=_MCOLS[0],
+                                                   labelsize=_TS)
+                                axs[1].tick_params(axis="y", colors=_MCOLS[2],
+                                                   labelsize=_TS)
+                                _style_ax(axs[1])
 
                         elif has_salt:
                             _salt  = np.array(r["pls_salt"])
                             _cv_s  = _pls_s_sv["cv_rmse"]
-                            # ── col 1: salt concentration profile ─────────
-                            axs[1].plot(_dist, _salt, color=_MCOLS[3], lw=0.8)
-                            axs[1].fill_between(
-                                _dist, _salt - _cv_s, _salt + _cv_s,
-                                color=_MCOLS[3], alpha=0.2,
-                            )
-                            axs[1].set_xlabel(dlbl)
-                            axs[1].set_ylabel("Salt (mM)", color=_MCOLS[3])
-                            axs[1].tick_params(axis="y", colors=_MCOLS[3], labelsize=_TS)
-                            _style_ax(axs[1])
+                            _axtw2 = axs[0].twinx()
+                            _axtw2.plot(_dist, _salt, color=_MCOLS[3], lw=0.8)
+                            _axtw2.fill_between(_dist, _salt - _cv_s,
+                                                _salt + _cv_s,
+                                                color=_MCOLS[3], alpha=0.15)
+                            _axtw2.set_ylabel("Salt (mM)",
+                                              color=_MCOLS[3], fontsize=_LS)
+                            _axtw2.tick_params(axis="y", colors=_MCOLS[3],
+                                               labelsize=_TS, width=0.5, length=2)
+                            for _sp in _axtw2.spines.values():
+                                _sp.set_linewidth(0.5)
+                            if len(axs) > 1:
+                                axs[1].errorbar(
+                                    _prot, _salt,
+                                    xerr=cv_p, yerr=_cv_s,
+                                    fmt="o", ms=2, color=_MCOLS[3], alpha=0.6,
+                                    ecolor="black", elinewidth=0.5,
+                                    capsize=2, capthick=0.5, zorder=3,
+                                )
+                                axs[1].set_xlabel(f"Protein ({unit})",
+                                                  color=_MCOLS[0])
+                                axs[1].set_ylabel("Salt (mM)", color=_MCOLS[3])
+                                axs[1].tick_params(axis="x", colors=_MCOLS[0],
+                                                   labelsize=_TS)
+                                axs[1].tick_params(axis="y", colors=_MCOLS[3],
+                                                   labelsize=_TS)
+                                _style_ax(axs[1])
 
-                    _row_specs.append((_pls_ncols, _PH, _draw_pls_profile))
-
+                    _pls_panels = [(_W_WIDE, _H_WIDE)]
+                    if _has_peg_sv or _has_salt_sv:
+                        _pls_panels.append((_W_WIDE, _H_WIDE))
+                    _row_specs.append((_pls_panels, _draw_pls_row))
                     _cap_pls = (
-                        f"PLS concentration profiles — {_safe_fn}. "
-                        f"a) Protein ({_unit_sv}), shaded band = ±{_cv_p_sv:.4f} {_unit_sv} CV RMSE."
+                        f"PLS concentration profiles \u2014 {_safe_fn}. "
+                        f"a) Protein ({_unit_sv}) \u00b1 {_cv_p_sv:.4f} {_unit_sv} CV RMSE."
                     )
                     if _has_peg_sv:
                         _cap_pls += (
-                            f" Twin y-axis (green): molecular crowder (wt%), "
-                            f"±{_pls_p_sv['cv_rmse_peg']:.4f} wt% CV RMSE. "
-                            f"b) Crowder vs protein co-localisation scatter."
+                            f" Twin axis (green): crowder (wt%) "
+                            f"\u00b1 {_pls_p_sv['cv_rmse_peg']:.4f} wt% CV RMSE. "
+                            f"b) Crowder vs protein; error bars = \u00b1CV RMSE."
                         )
                     elif _has_salt_sv:
                         _cap_pls += (
-                            f" b) Salt (mM), shaded band = ±{_pls_s_sv['cv_rmse']:.4f} mM CV RMSE."
+                            f" Twin axis (purple): salt (mM) "
+                            f"\u00b1 {_pls_s_sv['cv_rmse']:.4f} mM CV RMSE. "
+                            f"b) Salt vs protein; error bars = \u00b1CV RMSE."
                         )
                     _cap_parts.append(_cap_pls)
 
             # ── PLS calibration rows (once, model-level) ─────────────────
-            if _pls_p_sv is not None and not _dual_sv:
-                # Single protein PLS: scatter | RMSE | loadings
-                _wn_cal   = _pls_p_sv["wn"]
-                _vf_cal   = _pls_p_sv["valid_features"]
-                _wn_vld   = _wn_cal[_vf_cal] if _wn_cal is not None else None
+            def _rmse_row(ax, pp_or_ps, label="RMSE"):
+                """Draw CV/Train RMSE curve with overfitting shading."""
+                _comps  = list(range(1, len(pp_or_ps["rmse_cv_all"]) + 1))
+                ax.plot(_comps, pp_or_ps["rmse_cv_all"], "o-",
+                        color="red", lw=0.8, ms=3, label="CV")
+                ax.plot(_comps, pp_or_ps["rmse_train_all"], "o-",
+                        color="steelblue", lw=0.8, ms=3, label="Train")
+                ax.axvline(pp_or_ps["n_components"], color="black",
+                           lw=0.6, ls="--")
+                _nc_opt = pp_or_ps["n_components"]
+                _nc_max = len(pp_or_ps["rmse_cv_all"])
+                if _nc_max > _nc_opt:
+                    ax.axvspan(_nc_opt + 0.5, _nc_max + 0.5,
+                               color="red", alpha=0.10, lw=0)
+                ax.set_xlabel("Latent variables")
+                ax.set_ylabel(label)
+                ax.legend(fontsize=5, frameon=False)
+                _style_ax(ax)
 
-                def _draw_pls_single_cal(axs, pp=_pls_p_sv, unit=_unit_sv, wn_v=_wn_vld):
-                    # a) scatter
-                    _yt = pp["y_raw"]
-                    _yp = pp["y_pred_train"]
+            if _pls_p_sv is not None and not _dual_sv:
+                _wn_cal = _pls_p_sv["wn"]
+                _vf_cal = _pls_p_sv["valid_features"]
+                _wn_vld = _wn_cal[_vf_cal] if _wn_cal is not None else None
+                _nf_cal = len(_wn_vld) if _wn_vld is not None else 0
+                _wn_rng = (f"{_wn_vld[0]:.0f}\u2013{_wn_vld[-1]:.0f} cm\u207b\xb9"
+                           if _wn_vld is not None else "")
+
+                # Regression + RMSE
+                def _draw_pls1_reg_rmse(axs, pp=_pls_p_sv, unit=_unit_sv):
+                    _yt = pp["y_raw"]; _yp = pp["y_pred_train"]
                     axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
                                    edgecolors="black", linewidths=0.3, zorder=3)
                     _mn, _mx = _yt.min(), _yt.max()
@@ -3728,49 +3789,61 @@ with tab_download:
                     axs[0].set_xlabel(f"Actual ({unit})")
                     axs[0].set_ylabel(f"Predicted ({unit})")
                     _style_ax(axs[0])
-                    # b) CV / Train RMSE
-                    _comps = list(range(1, len(pp["rmse_cv_all"]) + 1))
-                    axs[1].plot(_comps, pp["rmse_cv_all"], "o-",
-                                color="red", lw=0.8, ms=3, label="CV")
-                    axs[1].plot(_comps, pp["rmse_train_all"], "o-",
-                                color="steelblue", lw=0.8, ms=3, label="Train")
-                    axs[1].axvline(pp["n_components"], color="black", lw=0.6, ls="--")
-                    axs[1].set_xlabel("Latent variables")
-                    axs[1].set_ylabel("RMSE")
-                    axs[1].legend(fontsize=5, frameon=False)
-                    _style_ax(axs[1])
-                    # c) loadings
+                    _rmse_row(axs[1], pp)
+
+                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                                   _draw_pls1_reg_rmse))
+                _cap_parts.append(
+                    f"PLS1 protein calibration ({_wn_rng}). "
+                    f"a) Predicted vs actual ({_unit_sv}); "
+                    f"R\u00b2 = {_pls_p_sv['r2_train']:.4f}. "
+                    f"b) CV RMSE (red) and training RMSE (blue) vs latent variables; "
+                    f"opt = {_pls_p_sv['n_components']}, "
+                    f"CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
+                    f"Red shading: overfitting region."
+                )
+
+                # Loadings + coefficients
+                def _draw_pls1_load_coef(axs, pp=_pls_p_sv, unit=_unit_sv,
+                                         wn_v=_wn_vld, nf=_nf_cal):
                     if wn_v is not None:
                         for _i in range(pp["n_components"]):
-                            axs[2].plot(wn_v, pp["model"].x_loadings_[:, _i],
-                                        color=_MCOLS[_i % len(_MCOLS)], lw=0.6,
-                                        label=f"LV{_i+1}")
-                        axs[2].axhline(0, color="black", lw=0.3, ls="--")
-                        axs[2].set_xlabel("Wavenumber (cm⁻¹)")
-                        axs[2].set_ylabel("Loading")
-                        axs[2].legend(fontsize=5, frameon=False)
-                    _style_ax(axs[2])
+                            axs[0].plot(wn_v, pp["model"].x_loadings_[:, _i],
+                                        color=_MCOLS[_i % len(_MCOLS)],
+                                        lw=0.6, label=f"LV{_i+1}")
+                        axs[0].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[0].set_ylabel("Loading")
+                        axs[0].set_xlim(wn_v[0], wn_v[-1])
+                        axs[0].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[0])
+                    if wn_v is not None and len(axs) > 1 and nf > 0:
+                        _coef = _pls_coef(pp["model"], nf)
+                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[0], lw=0.8)
+                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[1].set_ylabel(f"Coeff. ({unit})")
+                        axs[1].set_xlim(wn_v[0], wn_v[-1])
+                        _style_ax(axs[1])
 
-                _row_specs.append((3, _PH, _draw_pls_single_cal))
-                _wn_rng = (f"{_wn_vld[0]:.0f}–{_wn_vld[-1]:.0f} cm⁻¹"
-                           if _wn_vld is not None else "")
+                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
+                                   _draw_pls1_load_coef))
                 _cap_parts.append(
-                    f"PLS1 protein calibration ({_wn_rng}), "
-                    f"{_pls_p_sv['n_components']} latent variable(s). "
-                    f"a) Predicted vs actual ({_unit_sv}); train R² = {_pls_p_sv['r2_train']:.4f}. "
-                    f"b) CV RMSE (red) and training RMSE (blue) vs number of latent variables; "
-                    f"opt = {_pls_p_sv['n_components']}, CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
-                    f"c) X-loadings for each latent variable."
+                    f"PLS1 spectral features ({_wn_rng}). "
+                    f"a) X-loadings for each LV. "
+                    f"b) Regression coefficients for protein ({_unit_sv})."
                 )
 
             elif _pls_p_sv is not None and _dual_sv:
-                # Dual PLS row 1: protein scatter | crowder scatter | RMSE
-                _wn_cal   = _pls_p_sv["wn"]
-                _vf_cal   = _pls_p_sv["valid_features"]
-                _wn_vld   = _wn_cal[_vf_cal] if _wn_cal is not None else None
+                _wn_cal = _pls_p_sv["wn"]
+                _vf_cal = _pls_p_sv["valid_features"]
+                _wn_vld = _wn_cal[_vf_cal] if _wn_cal is not None else None
+                _nf_cal = len(_wn_vld) if _wn_vld is not None else 0
+                _wn_rng = (f"{_wn_vld[0]:.0f}\u2013{_wn_vld[-1]:.0f} cm\u207b\xb9"
+                           if _wn_vld is not None else "")
 
-                def _draw_dual_row1(axs, pp=_pls_p_sv, unit=_unit_sv):
-                    # a) protein scatter
+                # Protein scatter + crowder scatter
+                def _draw_dual_scatters(axs, pp=_pls_p_sv, unit=_unit_sv):
                     _ypt = pp["y_protein_train"]
                     _ypp = pp["y_pred_protein_train"]
                     axs[0].scatter(_ypt, _ypp, s=10, color=_MCOLS[0], alpha=0.8,
@@ -3780,7 +3853,6 @@ with tab_download:
                     axs[0].set_xlabel(f"Actual ({unit})")
                     axs[0].set_ylabel(f"Predicted ({unit})")
                     _style_ax(axs[0])
-                    # b) crowder scatter
                     _ygt = pp["y_peg_train"]
                     _ygp = pp["y_pred_peg_train"]
                     axs[1].scatter(_ygt, _ygp, s=10, color=_MCOLS[2], alpha=0.8,
@@ -3790,127 +3862,170 @@ with tab_download:
                     axs[1].set_xlabel("Actual (wt%)")
                     axs[1].set_ylabel("Predicted (wt%)")
                     _style_ax(axs[1])
-                    # c) RMSE
-                    _comps = list(range(1, len(pp["rmse_cv_all"]) + 1))
-                    axs[2].plot(_comps, pp["rmse_cv_all"], "o-",
-                                color="red", lw=0.8, ms=3, label="CV")
-                    axs[2].plot(_comps, pp["rmse_train_all"], "o-",
-                                color="steelblue", lw=0.8, ms=3, label="Train")
-                    axs[2].axvline(pp["n_components"], color="black", lw=0.6, ls="--")
-                    axs[2].set_xlabel("Latent variables")
-                    axs[2].set_ylabel("RMSE")
-                    axs[2].legend(fontsize=5, frameon=False)
-                    _style_ax(axs[2])
 
-                _row_specs.append((3, _PH, _draw_dual_row1))
+                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                                   _draw_dual_scatters))
                 _cap_parts.append(
-                    f"PLS2 dual calibration, {_pls_p_sv['n_components']} latent variable(s). "
+                    f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
                     f"a) Protein predicted vs actual ({_unit_sv}); "
-                    f"train R² = {_pls_p_sv['r2_protein_train']:.4f}, "
-                    f"CV RMSE = {_pls_p_sv['cv_rmse_protein']:.4f} {_unit_sv}. "
-                    f"b) Molecular crowder predicted vs actual (wt%); "
-                    f"train R² = {_pls_p_sv['r2_peg_train']:.4f}, "
-                    f"CV RMSE = {_pls_p_sv['cv_rmse_peg']:.4f} wt%. "
-                    f"c) CV RMSE (red) and training RMSE (blue) vs latent variables; "
-                    f"opt = {_pls_p_sv['n_components']}."
+                    f"R\u00b2 = {_pls_p_sv['r2_protein_train']:.4f}. "
+                    f"b) Crowder predicted vs actual (wt%); "
+                    f"R\u00b2 = {_pls_p_sv['r2_peg_train']:.4f}."
                 )
 
-                # Dual PLS row 2: loadings (1 square panel)
-                def _draw_dual_loadings(axs, pp=_pls_p_sv, wn_v=_wn_vld):
+                # RMSE
+                def _draw_dual_rmse(axs, pp=_pls_p_sv):
+                    _rmse_row(axs[0], pp)
+
+                _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_dual_rmse))
+                _cap_parts.append(
+                    f"PLS2 RMSE vs latent variables. "
+                    f"CV RMSE (red) and training RMSE (blue); "
+                    f"opt = {_pls_p_sv['n_components']}. "
+                    f"Red shading: overfitting region."
+                )
+
+                # Loadings + coefficients
+                def _draw_dual_load_coef(axs, pp=_pls_p_sv, unit=_unit_sv,
+                                          wn_v=_wn_vld, nf=_nf_cal):
                     if wn_v is not None:
                         for _i in range(pp["n_components"]):
                             axs[0].plot(wn_v, pp["model"].x_loadings_[:, _i],
-                                        color=_MCOLS[_i % len(_MCOLS)], lw=0.6,
-                                        label=f"LV{_i+1}")
+                                        color=_MCOLS[_i % len(_MCOLS)],
+                                        lw=0.6, label=f"LV{_i+1}")
                         axs[0].axhline(0, color="black", lw=0.3, ls="--")
-                        axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Loading")
+                        axs[0].set_xlim(wn_v[0], wn_v[-1])
                         axs[0].legend(fontsize=5, frameon=False)
                     _style_ax(axs[0])
+                    if wn_v is not None and len(axs) > 1 and nf > 0:
+                        _coef = _pls_coef(pp["model"], nf)
+                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[0],
+                                    lw=0.8, label=f"Protein ({unit})")
+                        if _coef.shape[1] > 1:
+                            axs[1].plot(wn_v, _coef[:, 1], color=_MCOLS[2],
+                                        lw=0.8, label="Crowder (wt%)")
+                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[1].set_ylabel("Coefficient")
+                        axs[1].set_xlim(wn_v[0], wn_v[-1])
+                        axs[1].legend(fontsize=5, frameon=False)
+                        _style_ax(axs[1])
 
-                _row_specs.append((1, _SH, _draw_dual_loadings))
-                _wn_rng2 = (f"{_wn_vld[0]:.0f}–{_wn_vld[-1]:.0f} cm⁻¹"
-                            if _wn_vld is not None else "")
+                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
+                                   _draw_dual_load_coef))
                 _cap_parts.append(
-                    f"PLS2 X-loadings ({_wn_rng2}) for each of the "
-                    f"{_pls_p_sv['n_components']} latent variable(s)."
+                    f"PLS2 spectral features ({_wn_rng}). "
+                    f"a) X-loadings. "
+                    f"b) Regression coefficients for protein ({_unit_sv}, blue) "
+                    f"and crowder (wt%, green)."
                 )
 
             # ── Salt PLS calibration ──────────────────────────────────────
             if _pls_s_sv is not None:
                 _wn_sv_s  = _pls_s_sv["wn"]
                 _vf_sv_s  = _pls_s_sv["valid_features"]
-                _wn_sv_sv = _wn_sv_s[_vf_sv_s] if _wn_sv_s is not None else None
+                _wn_sv_sv = (_wn_sv_s[_vf_sv_s] if _wn_sv_s is not None else None)
+                _nf_sv_s  = len(_wn_sv_sv) if _wn_sv_sv is not None else 0
+                _wn_s_rng = (f"{_wn_sv_sv[0]:.0f}\u2013{_wn_sv_sv[-1]:.0f} cm\u207b\xb9"
+                             if _wn_sv_sv is not None else "")
 
-                def _draw_salt_cal(axs, ps=_pls_s_sv, wn_sv=_wn_sv_sv):
-                    # a) training spectra
-                    _Xs = ps["X_train_proc"]
-                    _wn = ps["wn"]
+                def _draw_salt_spec(axs, ps=_pls_s_sv):
+                    _Xs = ps["X_train_proc"]; _wn = ps["wn"]
                     for _si in range(_Xs.shape[0]):
                         axs[0].plot(_wn, _Xs[_si],
                                     color="#aaaaaa", lw=0.3, alpha=0.5)
-                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
+                    axs[0].set_xlim(_wn[0], _wn[-1])
                     _style_ax(axs[0])
-                    # b) scatter
-                    _ys  = ps["y_raw"]
-                    _ysp = ps["y_pred_train"]
-                    axs[1].scatter(_ys, _ysp, s=10, color=_MCOLS[3], alpha=0.8,
-                                   edgecolors="black", linewidths=0.3, zorder=3)
-                    _mn, _mx = _ys.min(), _ys.max()
-                    axs[1].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
-                    axs[1].set_xlabel("Actual (mM)")
-                    axs[1].set_ylabel("Predicted (mM)")
-                    _style_ax(axs[1])
-                    # c) RMSE
-                    _comps = list(range(1, len(ps["rmse_cv_all"]) + 1))
-                    axs[2].plot(_comps, ps["rmse_cv_all"], "o-",
-                                color="red", lw=0.8, ms=3, label="CV")
-                    axs[2].plot(_comps, ps["rmse_train_all"], "o-",
-                                color="steelblue", lw=0.8, ms=3, label="Train")
-                    axs[2].axvline(ps["n_components"], color="black", lw=0.6, ls="--")
-                    axs[2].set_xlabel("Latent variables")
-                    axs[2].set_ylabel("RMSE (mM)")
-                    axs[2].legend(fontsize=5, frameon=False)
-                    _style_ax(axs[2])
 
-                _row_specs.append((3, _PH, _draw_salt_cal))
-                _wn_s_rng = (f"{_wn_sv_sv[0]:.0f}–{_wn_sv_sv[-1]:.0f} cm⁻¹"
-                             if _wn_sv_sv is not None else "")
+                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_spec))
                 _cap_parts.append(
-                    f"Salt PLS1 calibration ({_wn_s_rng}), "
-                    f"{_pls_s_sv['n_components']} latent variable(s). "
-                    f"a) Preprocessed salt standard spectra ({_pls_s_sv['X_train_proc'].shape[0]} spectra, grey). "
-                    f"b) Predicted vs actual salt concentration (mM); "
-                    f"train R² = {_pls_s_sv['r2_train']:.4f}. "
-                    f"c) CV RMSE (red) and training RMSE (blue) vs latent variables; "
-                    f"opt = {_pls_s_sv['n_components']}, "
-                    f"CV RMSE = {_pls_s_sv['cv_rmse']:.4f} mM."
+                    f"Salt PLS1 training spectra "
+                    f"({_pls_s_sv['X_train_proc'].shape[0]} spectra)."
                 )
 
-            # ── PCA row ──────────────────────────────────────────────────
+                def _draw_salt_reg_rmse(axs, ps=_pls_s_sv):
+                    _ys = ps["y_raw"]; _ysp = ps["y_pred_train"]
+                    axs[0].scatter(_ys, _ysp, s=10, color=_MCOLS[3], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn, _mx = _ys.min(), _ys.max()
+                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                    axs[0].set_xlabel("Actual (mM)")
+                    axs[0].set_ylabel("Predicted (mM)")
+                    _style_ax(axs[0])
+                    _rmse_row(axs[1], ps, label="RMSE (mM)")
+
+                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                                   _draw_salt_reg_rmse))
+                _cap_parts.append(
+                    f"Salt PLS1 calibration ({_wn_s_rng}). "
+                    f"a) Predicted vs actual (mM); "
+                    f"R\u00b2 = {_pls_s_sv['r2_train']:.4f}. "
+                    f"b) CV RMSE (red) and training RMSE (blue); "
+                    f"opt = {_pls_s_sv['n_components']}, "
+                    f"CV RMSE = {_pls_s_sv['cv_rmse']:.4f} mM. "
+                    f"Red shading: overfitting region."
+                )
+
+                def _draw_salt_load_coef(axs, ps=_pls_s_sv,
+                                          wn_v=_wn_sv_sv, nf=_nf_sv_s):
+                    if wn_v is not None:
+                        for _i in range(ps["n_components"]):
+                            axs[0].plot(wn_v, ps["model"].x_loadings_[:, _i],
+                                        color=_MCOLS[_i % len(_MCOLS)],
+                                        lw=0.6, label=f"LV{_i+1}")
+                        axs[0].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[0].set_ylabel("Loading")
+                        axs[0].set_xlim(wn_v[0], wn_v[-1])
+                        axs[0].legend(fontsize=5, frameon=False)
+                    _style_ax(axs[0])
+                    if wn_v is not None and len(axs) > 1 and nf > 0:
+                        _coef = _pls_coef(ps["model"], nf)
+                        axs[1].plot(wn_v, _coef[:, 0], color=_MCOLS[3], lw=0.8)
+                        axs[1].axhline(0, color="black", lw=0.3, ls="--")
+                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                        axs[1].set_ylabel("Coeff. (mM)")
+                        axs[1].set_xlim(wn_v[0], wn_v[-1])
+                        _style_ax(axs[1])
+
+                _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
+                                   _draw_salt_load_coef))
+                _cap_parts.append(
+                    f"Salt PLS1 spectral features ({_wn_s_rng}). "
+                    f"a) X-loadings. b) Regression coefficients (mM)."
+                )
+
+            # ── PCA row ───────────────────────────────────────────────────
             _pca_sv = st.session_state.get("pca_result")
             if _pca_sv:
                 def _draw_pca(axs, pr=_pca_sv):
-                    # a) scores
                     _sc = pr["scores"]
-                    _cv = _sc[:, 0]
-                    _sp = axs[0].scatter(_sc[:, 0], _sc[:, 1] if _sc.shape[1] > 1 else _sc[:, 0],
-                                         s=4, c=_cv, cmap="viridis", linewidths=0)
+                    _cv_c = _sc[:, 0]
+                    axs[0].scatter(
+                        _sc[:, 0],
+                        _sc[:, 1] if _sc.shape[1] > 1 else _sc[:, 0],
+                        s=4, c=_cv_c, cmap="viridis", linewidths=0,
+                    )
                     axs[0].set_xlabel(f"PC1 ({pr['var_exp'][0]:.1f}%)")
-                    axs[0].set_ylabel(f"PC2 ({pr['var_exp'][1]:.1f}%)" if _sc.shape[1] > 1 else "PC1")
+                    axs[0].set_ylabel(
+                        f"PC2 ({pr['var_exp'][1]:.1f}%)"
+                        if _sc.shape[1] > 1 else "PC1"
+                    )
                     _style_ax(axs[0])
-                    # b) loadings
                     for _k in range(pr["loadings"].shape[0]):
                         axs[1].plot(pr["wn"], pr["loadings"][_k],
-                                    color=_MCOLS[_k % len(_MCOLS)], lw=0.6,
-                                    label=f"PC{_k+1}")
-                    axs[1].set_xlabel("Wavenumber (cm⁻¹)")
-                    axs[1].set_ylabel("Loading")
-                    axs[1].legend(fontsize=6, frameon=False)
+                                    color=_MCOLS[_k % len(_MCOLS)],
+                                    lw=0.6, label=f"PC{_k+1}")
                     axs[1].axhline(0, color="black", lw=0.3, ls="--")
+                    axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                    axs[1].set_ylabel("Loading")
+                    axs[1].set_xlim(pr["wn"][0], pr["wn"][-1])
+                    axs[1].legend(fontsize=5, frameon=False)
                     _style_ax(axs[1])
-                    # c) explained variance
                     _ve = pr["var_exp"]
                     _xs = range(len(_ve))
                     axs[2].bar(_xs, _ve, color=_MCOLS[0], width=0.6, alpha=0.8)
@@ -3918,24 +4033,31 @@ with tab_download:
                     _ax3b.plot(_xs, np.cumsum(_ve), "o-",
                                color=_MCOLS[1], ms=3, lw=0.8)
                     axs[2].set_xticks(list(_xs))
-                    axs[2].set_xticklabels([f"PC{_i+1}" for _i in _xs], fontsize=_TS)
+                    axs[2].set_xticklabels(
+                        [f"PC{_i+1}" for _i in _xs], fontsize=_TS
+                    )
                     axs[2].set_ylabel("Variance (%)")
                     _ax3b.set_ylabel("Cumulative (%)", fontsize=_LS)
                     _ax3b.tick_params(labelsize=_TS)
+                    for _sp in _ax3b.spines.values():
+                        _sp.set_linewidth(0.5)
                     _style_ax(axs[2])
 
-                _row_specs.append((3, _PH, _draw_pca))
+                _row_specs.append((
+                    [(_W_SPEC, _H_WIDE), (_W_SPEC, _H_SPEC), (_W_SPEC, _H_WIDE)],
+                    _draw_pca,
+                ))
                 _npc = _pca_sv["scores"].shape[1]
                 _cap_parts.append(
                     f"PCA of {_pca_sv['scores'].shape[0]} spectra "
-                    f"({_pca_sv['wn'][0]:.0f}–{_pca_sv['wn'][-1]:.0f} cm⁻¹). "
-                    f"a) Score plot (PC1 vs PC2) coloured by PC1 score. "
+                    f"({_pca_sv['wn'][0]:.0f}\u2013{_pca_sv['wn'][-1]:.0f} cm\u207b\xb9). "
+                    f"a) Score plot coloured by PC1. "
                     f"b) PC loadings ({_npc} components). "
-                    f"c) Individual (bars) and cumulative (line) explained variance; "
-                    f"{_npc} PCs capture {sum(_pca_sv['var_exp']):.1f}% of total variance."
+                    f"c) Explained variance (bars) and cumulative (line); "
+                    f"{_npc} PCs = {sum(_pca_sv['var_exp']):.1f}% total variance."
                 )
 
-            # ── Amide I row (square panel) ────────────────────────────────
+            # ── Amide I row ───────────────────────────────────────────────
             _amide_sv = st.session_state.get("amide_result")
             if _amide_sv and _amide_sv.get("popt") is not None:
                 def _draw_amide(axs, ar=_amide_sv):
@@ -3943,50 +4065,56 @@ with tab_download:
                     _sp  = ar["mean_sp"]
                     _p   = ar["popt"]
                     _ng  = ar["n_gauss"]
-                    _lbs = ar.get("g_labels", [f"G{_k+1}" for _k in range(_ng)])
-                    axs[0].plot(_wn, _sp, color="black", lw=0.8, label="Mean", zorder=3)
+                    _lbs = ar.get("g_labels",
+                                  [f"G{_k+1}" for _k in range(_ng)])
+                    _wn_lo, _wn_hi = float(_wn.min()), float(_wn.max())
+                    axs[0].plot(_wn, _sp, color="black", lw=0.8,
+                                label="Mean", zorder=3)
                     _ytot = np.zeros_like(_sp, dtype=float)
                     for _gi in range(_ng):
-                        _A, _mu, _sig = _p[3*_gi], _p[3*_gi+1], _p[3*_gi+2]
+                        _A, _mu, _sig = (_p[3*_gi], _p[3*_gi+1], _p[3*_gi+2])
                         _yi = _A * np.exp(-0.5*((_wn - _mu)/_sig)**2)
                         _ytot += _yi
                         _col = _MCOLS[_gi % len(_MCOLS)]
                         axs[0].fill_between(_wn, _yi, alpha=0.25, color=_col)
                         axs[0].plot(_wn, _yi, color=_col, lw=0.6,
                                     label=f"{_lbs[_gi]} ({_mu:.0f})")
-                    axs[0].plot(_wn, _ytot, color="red", lw=0.8, ls="--", label="Fit")
-                    axs[0].set_xlabel("Wavenumber (cm⁻¹)")
+                    axs[0].plot(_wn, _ytot, color="red", lw=0.8,
+                                ls="--", label="Fit")
+                    axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
-                    axs[0].yaxis.set_major_formatter(_mticker.FormatStrFormatter("%.4f"))
+                    axs[0].set_xlim(_wn_lo, _wn_hi)
+                    axs[0].yaxis.set_major_formatter(
+                        _mticker.FormatStrFormatter("%.4f")
+                    )
                     axs[0].legend(fontsize=5, frameon=False, loc="upper left")
                     _style_ax(axs[0])
 
-                _row_specs.append((1, _SH, _draw_amide))
+                _row_specs.append(([(_W_SQ, _H_SQ)], _draw_amide))
                 _cap_parts.append(
                     f"Amide I band deconvolution "
-                    f"({_amide_sv['wn'][0]:.0f}–{_amide_sv['wn'][-1]:.0f} cm⁻¹). "
-                    f"Mean spectrum (black) with {_amide_sv['n_gauss']} Gaussian components "
-                    f"(coloured fills, labelled by centre position) and total fit (red dashed). "
-                    f"Component labels: {', '.join(_amide_sv.get('g_labels', []))}."
+                    f"({_amide_sv['wn'][0]:.0f}\u2013"
+                    f"{_amide_sv['wn'][-1]:.0f} cm\u207b\xb9). "
+                    f"Mean spectrum (black) with {_amide_sv['n_gauss']} "
+                    f"Gaussian components (coloured fills) and total fit "
+                    f"(red dashed). Labels: "
+                    f"{', '.join(_amide_sv.get('g_labels', []))}."
                 )
 
             # ── Peak ratio row ────────────────────────────────────────────
             _ratio_sv = st.session_state.get("ratio_result")
             if _ratio_sv:
-                _rr_lk  = _ratio_sv.get("label_key", "")
-                _rr_lv  = _ratio_sv.get("label_vals")
-                _n_rcols = 2 if _rr_lv is not None else 1
+                _rr_lk = _ratio_sv.get("label_key", "")
+                _rr_lv = _ratio_sv.get("label_vals")
 
                 def _draw_ratio(axs, rr=_ratio_sv, lk=_rr_lk, lv=_rr_lv):
-                    _rat = np.array(rr["ratio"])
+                    _rat   = np.array(rr["ratio"])
                     _dists = np.array(rr["distances"])
-                    # a) spatial profile
                     axs[0].plot(_dists, _rat, "o", ms=2,
                                 color=_MCOLS[0], alpha=0.7)
                     axs[0].set_xlabel(_dlbl_sv)
                     axs[0].set_ylabel(f"I({rr['pk1']})/I({rr['pk2']})")
                     _style_ax(axs[0])
-                    # b) scatter vs label
                     if lv is not None and len(axs) > 1:
                         axs[1].scatter(np.array(lv), _rat, s=4,
                                        color=_MCOLS[0], alpha=0.6,
@@ -3995,68 +4123,89 @@ with tab_download:
                         axs[1].set_ylabel(f"I({rr['pk1']})/I({rr['pk2']})")
                         _style_ax(axs[1])
 
-                _row_specs.append((_n_rcols, _PH, _draw_ratio))
+                _ratio_panels = [(_W_WIDE, _H_WIDE)]
+                if _rr_lv is not None:
+                    _ratio_panels.append((_W_WIDE, _H_WIDE))
+                _row_specs.append((_ratio_panels, _draw_ratio))
                 _cap_parts.append(
-                    f"Peak intensity ratio I({_ratio_sv['pk1']} cm⁻¹) / "
-                    f"I({_ratio_sv['pk2']} cm⁻¹), "
-                    f"integrated over ±{_ratio_sv['hw']} cm⁻¹ windows "
+                    f"Peak intensity ratio I({_ratio_sv['pk1']} cm\u207b\xb9) / "
+                    f"I({_ratio_sv['pk2']} cm\u207b\xb9), "
+                    f"\u00b1{_ratio_sv['hw']} cm\u207b\xb9 windows "
                     f"({len(_ratio_sv['ratio'])} spectra). "
-                    f"a) Ratio as a function of position along the linescan. "
-                    + (f"b) Ratio vs {_rr_lk}." if _rr_lv is not None else "")
+                    f"a) Ratio vs position."
+                    + (f" b) Ratio vs {_rr_lk}." if _rr_lv is not None else "")
                 )
 
             # ── Assemble figure ───────────────────────────────────────────
-            _height_ratios = [spec[1] / _PH for spec in _row_specs]
-            _total_h = sum(spec[1] for spec in _row_specs)
+            if not _row_specs:
+                st.info("No figures to export yet.")
+            else:
+                # Compute figure size from panel sizes + spacing
+                _rw_in = [
+                    sum(w for w, h in ps) + max(0, len(ps) - 1) * _HPAD
+                    for ps, _ in _row_specs
+                ]
+                _rh_in = [max(h for w, h in ps) for ps, _ in _row_specs]
+                _fig_w_in = max(_rw_in) + _ML + _MR
+                _fig_h_in = (sum(_rh_in)
+                             + max(0, len(_rh_in) - 1) * _VPAD
+                             + _MT + _MB)
 
-            _fig_pub = plt.figure(figsize=(_FW, _total_h))
-            _gs_pub  = _mgs.GridSpec(
-                len(_row_specs), _NCOLS,
-                figure=_fig_pub,
-                height_ratios=_height_ratios,
-                hspace=0.9, wspace=0.55,
-            )
+                _fig_pub = plt.figure(figsize=(_fig_w_in, _fig_h_in))
 
-            for _ri, (_ncols_r, _h_r, _draw_fn) in enumerate(_row_specs):
-                _axs_r = [_fig_pub.add_subplot(_gs_pub[_ri, _ci])
-                          for _ci in range(_ncols_r)]
-                # hide unused columns in this row
-                for _ci in range(_ncols_r, _NCOLS):
-                    _dummy = _fig_pub.add_subplot(_gs_pub[_ri, _ci])
-                    _dummy.set_visible(False)
-                try:
-                    _draw_fn(_axs_r)
-                except Exception as _draw_err:
-                    _axs_r[0].text(0.5, 0.5, f"Error:\n{_draw_err}",
-                                   ha="center", va="center",
-                                   transform=_axs_r[0].transAxes, fontsize=6)
+                _y_top = _fig_h_in - _MT
+                for _ri, (panels, draw_fn) in enumerate(_row_specs):
+                    _rh = _rh_in[_ri]
+                    _y_bot = _y_top - _rh
+                    _x = _ML
+                    _axs_r = []
+                    for _w, _h in panels:
+                        _ax = _fig_pub.add_axes([
+                            _x / _fig_w_in,
+                            _y_bot / _fig_h_in,
+                            _w / _fig_w_in,
+                            _h / _fig_h_in,
+                        ])
+                        _axs_r.append(_ax)
+                        _x += _w + _HPAD
+                    try:
+                        draw_fn(_axs_r)
+                    except Exception as _draw_err:
+                        if _axs_r:
+                            _axs_r[0].text(
+                                0.5, 0.5, f"Error:\n{_draw_err}",
+                                ha="center", va="center",
+                                transform=_axs_r[0].transAxes, fontsize=6,
+                            )
+                    _y_top -= _rh + _VPAD
 
-            _svg_buf = _mio.BytesIO()
-            _fig_pub.savefig(_svg_buf, format="svg", bbox_inches="tight")
-            plt.close(_fig_pub)
-            _svg_bytes = _svg_buf.getvalue()
+                _svg_buf = _mio.BytesIO()
+                _fig_pub.savefig(_svg_buf, format="svg", bbox_inches="tight")
+                plt.close(_fig_pub)
+                _svg_bytes = _svg_buf.getvalue()
 
-            _cap_txt = "\n\n".join(
-                f"Figure {_fi+1}. {_c}" for _fi, _c in enumerate(_cap_parts)
-            )
+                _cap_txt = "\n\n".join(
+                    f"Figure {_fi+1}. {_c}"
+                    for _fi, _c in enumerate(_cap_parts)
+                )
 
-            _pub_c1, _pub_c2 = st.columns(2)
-            _pub_c1.download_button(
-                "⬇  Download figures (.svg)",
-                data=_svg_bytes,
-                file_name="de_condensate_figures.svg",
-                mime="image/svg+xml",
-                use_container_width=True,
-                key="dl_pub_svg",
-            )
-            _pub_c2.download_button(
-                "⬇  Download captions (.txt)",
-                data=_cap_txt.encode("utf-8"),
-                file_name="de_condensate_captions.txt",
-                mime="text/plain",
-                use_container_width=True,
-                key="dl_pub_cap",
-            )
+                _pub_c1, _pub_c2 = st.columns(2)
+                _pub_c1.download_button(
+                    "\u2b07  Download figures (.svg)",
+                    data=_svg_bytes,
+                    file_name="de_condensate_figures.svg",
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                    key="dl_pub_svg",
+                )
+                _pub_c2.download_button(
+                    "\u2b07  Download captions (.txt)",
+                    data=_cap_txt.encode("utf-8"),
+                    file_name="de_condensate_captions.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                    key="dl_pub_cap",
+                )
 
 
 # ── Tutorial ───────────────────────────────────────────────────────────────────
