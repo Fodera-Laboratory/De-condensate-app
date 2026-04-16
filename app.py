@@ -2475,15 +2475,15 @@ with tab_further:
         # ── PDB-informed area priors ───────────────────────────────────
         _pc1, _pc2, _pc3 = st.columns([1, 1.2, 3])
         _use_pdb = _pc1.toggle("PDB area priors", value=False, key="use_pdb",
-                               help="Use secondary structure fractions from a PDB entry as a soft "
-                                    "regularisation constraint during fitting. Helix, sheet, and loop "
-                                    "fractions are fetched from the PDBe REST API and converted to "
-                                    "target area fractions for the 6 preset Gaussian components. "
-                                    "The optimiser then minimises spectral residual + λ × (area "
-                                    "fraction deviation from PDB target)², so the fitted component "
-                                    "areas are pulled toward the crystal-structure proportions while "
-                                    "still fitting the spectrum. Without PDB priors, standard "
-                                    "curve_fit is used with equal-area initial guesses.")
+                               help="Use secondary structure fractions from a PDB entry to set "
+                                    "physically motivated starting amplitudes (p₀) for the Gaussian "
+                                    "components. Helix, sheet, and loop fractions are fetched from "
+                                    "the PDBe REST API and converted to area fractions, from which "
+                                    "amplitudes are derived as A₀ = f × total_area / (σ₀ × √2π). "
+                                    "The optimiser then fits the spectrum freely within the FWHM "
+                                    "bounds — the PDB values influence where the search starts, "
+                                    "not where it ends. Without PDB priors, equal-area starting "
+                                    "amplitudes are used.")
         _pdb_id_in = _pc2.text_input("PDB ID", value="4INS", key="pdb_id_inp",
                                      label_visibility="collapsed", disabled=not _use_pdb)
         _amp_priors = [1.0 / _n_gauss] * _n_gauss  # flat default
@@ -2543,71 +2543,22 @@ with tab_further:
                     _blo += [0,   max(float(_wn_am[0]),  _cen - _tol), _smin]
                     _bhi += [1.5, min(float(_wn_am[-1]), _cen + _tol), _smax]
 
-                # ── Fitting helpers ───────────────────────────────────────
-                # Target area fractions from PDB (or flat). Used as soft
-                # regularisation when _use_pdb is True.
-                _area_targets = np.array(_amp_priors, dtype=float)  # already normalised
-
-                def _fit_spectrum(y, p0_init, use_penalty=False, lam=10.0):
-                    """Fit one spectrum. When use_penalty=True, adds a regularisation
-                    term that penalises area fractions deviating from _area_targets.
-                    lam controls penalty strength relative to spectral residual.
-                    Falls back to curve_fit when penalty is off."""
-                    if not use_penalty:
-                        po, _ = _curve_fit(_multi_gauss, _wn_am, y,
-                                           p0=p0_init,
-                                           bounds=(_blo, _bhi),
-                                           maxfev=20000)
-                        return po
-
-                    from scipy.optimize import minimize as _minimize
-                    from scipy.optimize import Bounds as _Bounds
-
-                    _sp_area = float(np.trapezoid(y, _wn_am))
-                    if _sp_area <= 0:
-                        _sp_area = 1.0
-
-                    def _objective(p):
-                        # Spectral residual (normalised by n_points)
-                        y_fit = _multi_gauss(_wn_am, *p)
-                        resid = float(np.mean((y - y_fit) ** 2))
-                        # Area fractions of each Gaussian: A*sigma*sqrt(2pi) / total
-                        areas = np.array([
-                            p[3*_gi] * abs(p[3*_gi+2]) * np.sqrt(2*np.pi)
-                            for _gi in range(_n_gauss)
-                        ])
-                        total_fit_area = areas.sum()
-                        fracs = areas / total_fit_area if total_fit_area > 0 else areas
-                        # Penalty: sum of squared deviations from PDB area targets
-                        penalty = float(np.sum((fracs - _area_targets) ** 2))
-                        return resid + lam * penalty
-
-                    _bounds_min = list(_blo)
-                    _bounds_max = list(_bhi)
-                    # Clip p0 to be within bounds
-                    p0_clipped = np.clip(p0_init, _bounds_min, _bounds_max)
-                    res = _minimize(
-                        _objective, p0_clipped,
-                        method="L-BFGS-B",
-                        bounds=list(zip(_bounds_min, _bounds_max)),
-                        options={"maxiter": 5000, "ftol": 1e-12, "gtol": 1e-8},
-                    )
-                    return res.x
-
                 try:
-                    # Fit mean spectrum (for display reference)
+                    # Fit mean spectrum first (warm start for individual fits)
                     with st.spinner("Fitting mean spectrum…"):
-                        _popt_mean = _fit_spectrum(
-                            _mean_sp, _p0, use_penalty=_use_pdb, lam=10.0
+                        _popt_mean, _ = _curve_fit(
+                            _multi_gauss, _wn_am, _mean_sp,
+                            p0=_p0, bounds=(_blo, _bhi), maxfev=20000,
                         )
-                    # Fit each individual spectrum; track successful indices
+                    # Fit each individual spectrum using mean fit as p0
                     _ind_params, _ind_ok, _ind_r2 = [], [], []
                     with st.spinner(f"Fitting {_X_am.shape[0]} individual spectra…"):
                         for _si in range(_X_am.shape[0]):
                             try:
-                                _po = _fit_spectrum(
-                                    _X_am[_si], _popt_mean,
-                                    use_penalty=_use_pdb, lam=10.0,
+                                _po, _ = _curve_fit(
+                                    _multi_gauss, _wn_am, _X_am[_si],
+                                    p0=_popt_mean, bounds=(_blo, _bhi),
+                                    maxfev=5000,
                                 )
                                 _ss_res = np.sum(
                                     (_X_am[_si] - _multi_gauss(_wn_am, *_po)) ** 2
