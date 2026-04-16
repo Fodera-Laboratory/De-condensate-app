@@ -2600,7 +2600,11 @@ with tab_further:
             # Derive concentrations from live _prot so unit changes are reflected
             _ind_ok_stored = _ar.get("ind_ok", [])
             if _prot is not None and _ind_ok_stored:
-                _ind_prot = np.array([float(_prot[_i]) for _i in _ind_ok_stored])
+                _prot_len = len(_prot)
+                _ind_prot = np.array([
+                    float(_prot[_i]) if _i < _prot_len else float("nan")
+                    for _i in _ind_ok_stored
+                ])
             else:
                 _ind_prot = np.array(_ar.get("ind_prot", [float("nan")] * _n_fitted))
             _r2_thresh = st.slider(
