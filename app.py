@@ -2522,7 +2522,7 @@ with tab_further:
                 # so that the initialised Gaussian areas are proportional to
                 # the secondary structure fractions reported in the literature
                 # (or flat equal fractions when no PDB prior is used).
-                _total_am_area = float(np.trapz(_mean_sp, _wn_am))
+                _total_am_area = float(np.trapezoid(_mean_sp, _wn_am))
                 if _total_am_area <= 0:
                     _total_am_area = 1.0   # guard against non-positive spectra
 
