@@ -2471,6 +2471,11 @@ with tab_further:
                 _g_fwhm_max.append(st.number_input("FWHM max (cm⁻¹)", value=_pr_gi["fwhm_max"], min_value=2, step=1,
                                                     key=f"g{_gi}_fwhm_max_b",
                                                     help="Upper bound on FWHM."))
+                st.number_input("Init. area (%)", value=0.0, min_value=0.0, max_value=100.0, step=1.0,
+                                key=f"g{_gi}_init_pct_b",
+                                help="Manual initial area fraction (%). Set all components to override "
+                                     "the automatic (flat or PDB) prior. Leave all at 0 to use the "
+                                     "automatic prior.")
 
         # ── PDB-informed area priors ───────────────────────────────────
         _pc1, _pc2, _pc3 = st.columns([1, 1.2, 3])
@@ -2499,6 +2504,17 @@ with tab_further:
                 )
             except Exception as _pdb_err:
                 _pc3.warning(f"PDB fetch failed: {_pdb_err}")
+
+        # ── Manual initial area override ──────────────────────────────────
+        _manual_pct = [
+            float(st.session_state.get(f"g{_gi}_init_pct_b", 0.0))
+            for _gi in range(_n_gauss)
+        ]
+        _manual_total = sum(_manual_pct)
+        if _manual_total > 0:
+            # Any component with a non-zero entry activates manual mode;
+            # zeros are treated as equal shares of the remaining fraction.
+            _amp_priors = [v / _manual_total for v in _manual_pct]
 
         _run_amide = st.button("▶ Run deconvolution", key="btn_amide", on_click=_goto_further)
 
@@ -4425,12 +4441,30 @@ with tab_tutorial:
             "- **PCA on LFR** — Spectral cut (−300 to 300) → Spike removal → Endpoint → "
             "Spectral cut (8 to 300) → SNV\n"
             "- **Amide I band deconvolution** — Spectral cut → Spike removal → "
-            "Spectral cut (1580–1720) → Savitzky-Golay → Area → Endpoint\n"
+            "Spectral cut (1600–1700) → Savitzky-Golay → Area → Endpoint\n"
             "- **Peak ratio (rubberband only)** — Spectral cut → Spike removal → Rubberband\n\n"
             "- **a. PCA** — number of PCs selectable (2–10); score plots coloured by Distance, "
             "Spectrum index, PLS, or MCR scores; loadings and explained-variance chart shown.\n"
             "- **b. Amide I band deconvolution** — fits Gaussians to the amide I region "
-            "spectrum-by-spectrum; reports distributions of centre, FWHM, and relative area.\n"
+            "spectrum-by-spectrum; reports distributions of centre, FWHM, and relative area. "
+            "Up to 6 Gaussian components can be assigned, each with a literature-grounded "
+            "centre, position tolerance, and FWHM bounds (Tuma 2005 *J. Raman Spectrosc.*; "
+            "Barth 2007 *BBA*; Kong & Yu 2007 *Acta Biochim. Biophys. Sin.*). "
+            "Raman amide I bands are narrower than their IR counterparts (≈ 8–30 cm⁻¹ vs "
+            "20–40 cm⁻¹), so the FWHM windows are tighter than is common in IR literature. "
+            "**Initial amplitude** — the optimiser starting amplitude for each component is "
+            "derived from an *area fraction* via A₀ = f × total_area / (σ₀ × √2π), ensuring "
+            "that the initialised Gaussians integrate to the expected fraction of the total "
+            "spectral area. Three ways to set these fractions: "
+            "(1) *Flat prior* (default) — equal fractions across all components; "
+            "(2) *PDB area priors* — secondary structure fractions (α-helix, β-sheet, other) "
+            "are fetched from the PDBe REST API for a given PDB entry and mapped to the six "
+            "preset components; "
+            "(3) *Manual* — enter an **Init. area (%)** value for each component; if any "
+            "non-zero value is entered, all components are normalised to sum to 100 % and the "
+            "manual values override both flat and PDB priors. "
+            "In all cases, the PDB / manual values are *starting points only* — the optimiser "
+            "fits the spectrum freely within the FWHM and centre-tolerance bounds.\n"
             "- **c. Peak ratio** — integrates two band windows and plots their ratio spatially "
             "and against any available score.\n\n"
 
