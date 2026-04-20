@@ -67,11 +67,12 @@ def process_linescan(
         C_mcr, ST_mcr, mcr_n_iter = run_mcr(
             X_proc, ST_init, n_components, **mcr_params
         )
-        mcr_ratio = np.divide(
-            C_mcr[:, 0], C_mcr[:, 1],
-            out=np.zeros_like(C_mcr[:, 0]),
-            where=C_mcr[:, 1] != 0,
-        )
+        if C_mcr.shape[1] >= 2:
+            mcr_ratio = np.divide(
+                C_mcr[:, 0], C_mcr[:, 1],
+                out=np.zeros_like(C_mcr[:, 0]),
+                where=C_mcr[:, 1] != 0,
+            )
 
     # Protein (and optionally molecular crowder) PLS (optional)
     # Preprocess with pls_settings to match the normalization used during training

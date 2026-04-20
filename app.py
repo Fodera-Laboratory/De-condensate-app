@@ -57,9 +57,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-COLORS      = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41"]
+COLORS      = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
+               "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
 COLORS_FILL = ["rgba(27,133,184,0.15)", "rgba(90,82,85,0.15)",
-               "rgba(85,158,131,0.15)", "rgba(174,90,65,0.15)"]
+               "rgba(85,158,131,0.15)", "rgba(174,90,65,0.15)",
+               "rgba(255,161,90,0.15)", "rgba(25,211,243,0.15)",
+               "rgba(255,102,146,0.15)", "rgba(182,232,128,0.15)"]
 COMP_LABELS = ["Protein", "Water", "Glass", "Salt"]
 
 TRAINING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "training_data")
@@ -622,9 +625,12 @@ with tab_mcr:
             help="Maximum number of ALS iterations. Default: 2000.",
         )
         mcr_tol = st.number_input(
-            "Convergence tolerance", min_value=1e-6, max_value=1.0, value=1e-2,
+            "Divergence tolerance", min_value=1e-6, max_value=1.0, value=1e-2,
             format="%.2e",
-            help="Relative change in fit residual below which MCR-ALS is considered converged. Default: 0.01.",
+            help="Fraction by which the fit residual is allowed to increase between iterations "
+                 "before MCR-ALS stops. This is a divergence guard, not a convergence criterion — "
+                 "increase it if the algorithm exits too early; decrease it to stop sooner on "
+                 "diverging fits. Default: 0.01.",
         )
         _mr1, _mr2 = st.columns(2)
         mcr_c_regr = _mr1.selectbox(
@@ -4558,7 +4564,7 @@ with tab_tutorial:
             "Spectrum index, PLS, or MCR scores; loadings and explained-variance chart shown.\n"
             "- **b. Amide I band deconvolution** — fits Gaussians to the amide I region "
             "spectrum-by-spectrum; reports distributions of centre, FWHM, and relative area. "
-            "Up to 6 Gaussian components can be assigned, each with a literature-grounded "
+            "2–8 Gaussian components can be assigned. The first 6 use literature-based centre and FWHM presets; additional components use auto-generated defaults. Each component has a literature-grounded "
             "centre, position tolerance, and FWHM bounds (Tuma 2005 *J. Raman Spectrosc.*; "
             "Barth 2007 *BBA*; Kong & Yu 2007 *Acta Biochim. Biophys. Sin.*). "
             "Raman amide I bands are narrower than their IR counterparts (≈ 8–30 cm⁻¹ vs "
@@ -4629,7 +4635,7 @@ with tab_tutorial:
             "spectra with crowder = 0, crowder spectra with protein = 0) and predicts both "
             "concentrations simultaneously.\n\n"
             "**Salt PLS** — a separate model trained on the fingerprint region "
-            "(default 900–980 cm⁻¹) to quantify ion concentrations independently "
+            "(default 900–1000 cm⁻¹) to quantify ion concentrations independently "
             "of the protein signal."
         )
 
@@ -4677,9 +4683,9 @@ with tab_tutorial:
             "**b. Amide I band deconvolution**  \n"
             "The default preset (**Amide I band deconvolution**) applies: "
             "Spectral cut (700–3900, gap excluded) → Spike removal → "
-            "Spectral cut (1580–1720) → Savitzky-Golay → Area normalisation → Endpoint subtraction. "
+            "Spectral cut (1600–1700) → Savitzky-Golay → Area normalisation → Endpoint subtraction. "
             "The Endpoint step is deferred until after the final spectral cut so the "
-            "edges of the 1580–1720 cm⁻¹ window are anchored to zero. "
+            "edges of the 1600–1700 cm⁻¹ window are anchored to zero. "
             "A user-defined number of Gaussians is fitted to each spectrum individually, "
             "yielding distributions of peak centres, widths, and relative areas. "
             "An individual spectrum viewer shows any single fit with its R² value. "
