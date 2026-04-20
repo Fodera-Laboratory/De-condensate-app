@@ -2993,61 +2993,61 @@ with tab_further:
                     st.warning(f"Poor fit: R² = {_r2v:.4f} < {_r2_thresh:.2f}")
 
             # ── Summary table (individual fits, area in %) ───────────────
-            _mc_f = _mc[_valid_idx] if (_mc is not None and _n_valid > 2) else None
-            if _mc_f is not None:
+            if _mc is not None and _n_valid >= 1:
+                _mc_f   = _mc[_valid_idx]
                 _n_poor = int(np.sum(_ind_r2 < _r2_thresh)) if len(_ind_r2) == _n_fitted else 0
+                # Per-spectrum total areas (computed once, reused per component)
+                _tot_per_spec = np.array([
+                    sum(_mc_f[_si, 3*_gj] * _mc_f[_si, 3*_gj+2] * np.sqrt(2*np.pi)
+                        for _gj in range(_ng))
+                    for _si in range(len(_mc_f))
+                ])
                 _rows = []
                 for _gi in range(_ng):
                     _cts  = _mc_f[:, 3*_gi+1]
                     _wds  = _mc_f[:, 3*_gi+2]
                     _ars  = _mc_f[:, 3*_gi] * _wds * np.sqrt(2 * np.pi)
-                    # Per-spectrum total area for percentage normalisation
-                    _tot_per_spec = np.array([
-                        sum(_mc_f[_si, 3*_gj] * _mc_f[_si, 3*_gj+2] * np.sqrt(2*np.pi)
-                            for _gj in range(_ng))
-                        for _si in range(len(_mc_f))
-                    ])
-                    _pct_per_spec = np.where(_tot_per_spec > 0, _ars / _tot_per_spec * 100, np.nan)
+                    _pct  = np.where(_tot_per_spec > 0, _ars / _tot_per_spec * 100, np.nan)
+                    _sd_str = lambda v: f" ± {np.nanstd(v):.1f}" if _n_valid > 1 else ""
                     _rows.append({
                         "Component":     _glbls[_gi] if _gi < len(_glbls) else f"G{_gi+1}",
-                        "Centre (cm⁻¹)": f"{_cts.mean():.1f} ± {_cts.std():.1f}",
-                        "FWHM (cm⁻¹)":  f"{(2.355*_wds).mean():.1f} ± {(2.355*_wds).std():.1f}",
-                        "Area (%)":      f"{np.nanmean(_pct_per_spec):.1f} ± {np.nanstd(_pct_per_spec):.1f}",
+                        "Centre (cm⁻¹)": f"{_cts.mean():.1f}{_sd_str(_cts)}",
+                        "FWHM (cm⁻¹)":  f"{(2.355*_wds).mean():.1f}{_sd_str(2.355*_wds)}",
+                        "Area (%)":      f"{np.nanmean(_pct):.1f}{_sd_str(_pct)}",
                     })
+                _sd_note = " (mean ± SD)" if _n_valid > 1 else ""
                 _fig_caption(
                     f"Summary statistics for {_n_valid} of {_n_fitted} fitted spectra "
                     f"passing the R² ≥ {_r2_thresh:.2f} quality threshold "
-                    f"({_n_poor} spectra excluded). "
-                    f"Centre and FWHM show mean ± SD; area is the per-spectrum percentage of total fitted area (mean ± SD). "
-                    f"Histograms below show the distribution of fitted peak centres across all valid spectra."
+                    f"({_n_poor} excluded). "
+                    f"Centre and FWHM{_sd_note}; area is the per-spectrum percentage of total fitted area{_sd_note}."
                 )
                 st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
 
-                _hist_titles = [
-                    f"{chr(ord('a') + _gi)})  {_glbls[_gi] if _gi < len(_glbls) else f'G{_gi+1}'}"
-                    for _gi in range(_ng)
-                ]
-                _fig_hist = make_subplots(
-                    rows=1, cols=_ng,
-                    subplot_titles=_hist_titles,
-                )
-                for _gi in range(_ng):
-                    _fig_hist.add_trace(go.Histogram(
-                        x=_mc_f[:, 3*_gi+1], name=_glbls[_gi] if _gi < len(_glbls) else f"G{_gi+1}",
-                        marker_color=COLORS[_gi % len(COLORS)], opacity=0.7,
-                        showlegend=False,
-                    ), row=1, col=_gi+1)
-                    _fig_hist.update_xaxes(title_text="Peak centre (cm⁻¹)", row=1, col=_gi+1)
-                    _fig_hist.update_yaxes(title_text="Count" if _gi == 0 else "", row=1, col=_gi+1)
-                _fig_hist.update_layout(height=260, margin=dict(t=40))
-                st.plotly_chart(_fig_hist, use_container_width=True)
-                st.caption(
-                    f"Histograms of fitted peak centre positions for each Gaussian component "
-                    f"({_ng} components, {_wn_am[0]:.0f}–{_wn_am[-1]:.0f} cm⁻¹) "
-                    f"across {_n_valid} spectra with R² ≥ {_r2_thresh:.2f}. "
-                    f"Narrow, symmetric distributions indicate stable peak positions consistent with a single secondary structure element; "
-                    f"broad or skewed distributions suggest heterogeneity or model instability for that component."
-                )
+                if _n_valid >= 3:
+                    _hist_titles = [
+                        f"{chr(ord('a') + _gi)})  {_glbls[_gi] if _gi < len(_glbls) else f'G{_gi+1}'}"
+                        for _gi in range(_ng)
+                    ]
+                    _fig_hist = make_subplots(rows=1, cols=_ng, subplot_titles=_hist_titles)
+                    for _gi in range(_ng):
+                        _fig_hist.add_trace(go.Histogram(
+                            x=_mc_f[:, 3*_gi+1],
+                            name=_glbls[_gi] if _gi < len(_glbls) else f"G{_gi+1}",
+                            marker_color=COLORS[_gi % len(COLORS)], opacity=0.7,
+                            showlegend=False,
+                        ), row=1, col=_gi+1)
+                        _fig_hist.update_xaxes(title_text="Peak centre (cm⁻¹)", row=1, col=_gi+1)
+                        _fig_hist.update_yaxes(title_text="Count" if _gi == 0 else "", row=1, col=_gi+1)
+                    _fig_hist.update_layout(height=260, margin=dict(t=40))
+                    st.plotly_chart(_fig_hist, use_container_width=True)
+                    st.caption(
+                        f"Histograms of fitted peak centre positions for each Gaussian component "
+                        f"({_ng} components, {_wn_am[0]:.0f}–{_wn_am[-1]:.0f} cm⁻¹) "
+                        f"across {_n_valid} spectra with R² ≥ {_r2_thresh:.2f}. "
+                        f"Narrow, symmetric distributions indicate stable peak positions; "
+                        f"broad or skewed distributions suggest heterogeneity or model instability."
+                    )
 
         # ── c. Peak ratio ─────────────────────────────────────────────────
         st.divider()
