@@ -2801,96 +2801,7 @@ with tab_further:
             _valid_idx = np.where(_r2_mask)[0]
             _n_valid   = len(_valid_idx)
 
-            # ── Slider: single-spectrum view ──────────────────────────────
-            if _n_fitted > 0:
-                if _n_valid == 0:
-                    st.warning("No spectra pass the current R² threshold. Lower the threshold to view fits.")
-                    _sel_pos, _sel = 0, 0
-                elif _n_valid == 1:
-                    st.info("1 spectrum passes the R² threshold.")
-                    _sel_pos, _sel = 0, int(_valid_idx[0])
-                else:
-                    _sel_pos = st.slider("Spectrum #", 0, _n_valid - 1, 0, key="amide_slider")
-                    _sel = int(_valid_idx[_sel_pos])
-                _popt_sel = _mc[_sel]
-                _fn  = _ind_fn[_sel]   if _sel < len(_ind_fn)   else "—"
-                _dt  = _ind_dt[_sel]   if _sel < len(_ind_dt)   else float("nan")
-                _cp  = _ind_prot[_sel] if _sel < len(_ind_prot) else float("nan")
-                _r2v = float(_ind_r2[_sel]) if _sel < len(_ind_r2) else float("nan")
-                _r2_ok = _r2v >= _r2_thresh
-                _r2c   = ("green" if _r2v >= 0.95 else
-                          ("darkorange" if _r2v >= _r2_thresh else "red"))
-                _title_ind = (
-                    f"Spectrum #{_sel} &nbsp;·&nbsp; {_fn}"
-                    f" &nbsp;·&nbsp; {_dt:.2f} µm"
-                    f" &nbsp;·&nbsp; {_cp:.2f} {unit}"
-                    f" &nbsp;·&nbsp; <span style='color:{_r2c}'>R² = {_r2v:.4f}</span>"
-                )
-                # Compute average spectrum for overlay (reuse conc filter if available)
-                _avg_for_overlay = None
-                if _ind_sp is not None and len(_ind_sp) > 0:
-                    if _global_conc_lo is not None:
-                        _ov_idx = np.where(
-                            (np.array(_ind_prot) >= _global_conc_lo) &
-                            (np.array(_ind_prot) <= _global_conc_hi)
-                        )[0]
-                    else:
-                        _ov_idx = np.arange(len(_ind_sp))
-                    if len(_ov_idx) > 0:
-                        _avg_for_overlay = _ind_sp[_ov_idx].mean(axis=0)
-
-                _fig_single = go.Figure()
-                # Average spectrum as grey reference line
-                if _avg_for_overlay is not None:
-                    _fig_single.add_trace(go.Scatter(
-                        x=_wn_am, y=_avg_for_overlay, mode="lines",
-                        name="Average spectrum",
-                        line=dict(color="#aaaaaa", width=1.5, dash="dot"),
-                    ))
-                _fig_single.add_trace(go.Scatter(
-                    x=_wn_am, y=_ind_sp[_sel], mode="lines",
-                    name="This spectrum", line=dict(color="black", width=2),
-                ))
-                _fig_single.add_trace(go.Scatter(
-                    x=_wn_am, y=_mg_plot(_wn_am, *_popt_sel), mode="lines",
-                    name=f"Total fit (R²={_r2v:.3f})",
-                    line=dict(color="red", dash="dash", width=2),
-                ))
-                _to_rgb = __import__("matplotlib.colors", fromlist=["to_rgb"]).to_rgb
-                for _gi in range(_ng):
-                    _a, _c, _s = _popt_sel[3*_gi], _popt_sel[3*_gi+1], _popt_sel[3*_gi+2]
-                    _fwhm_i = 2.355 * _s
-                    _col_i  = COLORS[_gi % len(COLORS)]
-                    _fill_i = "rgba({},{},{},0.15)".format(
-                        *[int(v*255) for v in _to_rgb(_col_i)])
-                    _fig_single.add_trace(go.Scatter(
-                        x=_wn_am,
-                        y=_a * np.exp(-((_wn_am - _c)**2) / (2*_s**2)),
-                        mode="lines", fill="tozeroy",
-                        name=f"{_glbls[_gi]} ({_c:.0f} cm⁻¹, FWHM {_fwhm_i:.1f})",
-                        line=dict(color=_col_i, width=1.5),
-                        fillcolor=_fill_i,
-                    ))
-                _fig_single.update_layout(
-                    title=dict(text=_title_ind, font=dict(size=12)),
-                    xaxis_title="Wavenumber (cm⁻¹)", yaxis_title="Intensity (a.u.)",
-                    yaxis=dict(tickformat="g"),
-                    height=400, margin=dict(t=55),
-                    legend=dict(orientation="v", x=1.02, xanchor="left"),
-                )
-                st.plotly_chart(_fig_single, use_container_width=True)
-                st.caption(
-                    f"Individual Gaussian decomposition of spectrum #{_sel} from {_fn}, "
-                    f"acquired at {_dt:.2f} µm (protein: {_cp:.2f} {unit}). "
-                    f"Black: this spectrum; grey dotted: average of {len(_ov_idx) if _avg_for_overlay is not None else 0} "
-                    f"concentration-filtered spectra; red dashed: total Gaussian fit (R² = {_r2v:.4f}); "
-                    f"coloured fills: individual components with their fitted centre positions. "
-                    f"Amide I region: {_wn_am[0]:.0f}–{_wn_am[-1]:.0f} cm⁻¹."
-                )
-                if not _r2_ok:
-                    st.warning(f"Poor fit: R² = {_r2v:.4f} < {_r2_thresh:.2f}")
-
-            # ── Average spectrum fit (concentration-filtered) ────────────
+            # ── Average spectrum fit (concentration-filtered) — shown first ──
             st.markdown("#### Average spectrum fit")
             if _ind_sp is not None and len(_ind_sp) > 0:
                 def _multi_gauss_disp(x, *p):
@@ -2924,7 +2835,6 @@ with tab_further:
                     _r2_avg = float(1 - _ss_res_avg / _ss_tot_avg) if _ss_tot_avg > 0 else 0.0
 
                     _fig_avg = go.Figure()
-                    # Shaded ±1 SD region
                     _fig_avg.add_trace(go.Scatter(
                         x=np.concatenate([_wn_am, _wn_am[::-1]]),
                         y=np.concatenate([_avg_sp + _std_sp, (_avg_sp - _std_sp)[::-1]]),
@@ -2972,12 +2882,11 @@ with tab_further:
                         f"coloured fills: individual components with fitted centre and FWHM shown in the legend. "
                         f"Component areas as fractions of the total fitted area are listed in the table below."
                     )
-                    # Area percentages
                     _areas_avg = np.array([
                         _popt_avg[3*_gi] * _popt_avg[3*_gi+2] * np.sqrt(2 * np.pi)
                         for _gi in range(_ng)
                     ])
-                    _total_area = _areas_avg.sum()
+                    _total_area_avg = _areas_avg.sum()
                     _pct_rows = []
                     for _gi in range(_ng):
                         _lbl_a = _glbls[_gi] if _gi < len(_glbls) else f"G{_gi+1}"
@@ -2985,7 +2894,7 @@ with tab_further:
                             "Component":       _lbl_a,
                             "Centre (cm⁻¹)":   f"{_popt_avg[3*_gi+1]:.1f}",
                             "FWHM (cm⁻¹)":    f"{2.355 * _popt_avg[3*_gi+2]:.1f}",
-                            "Fitted area (%)": f"{100 * _areas_avg[_gi] / _total_area:.1f}",
+                            "Fitted area (%)": f"{100 * _areas_avg[_gi] / _total_area_avg:.1f}",
                         }
                         if _pdb_fracs_display is not None and _gi < len(_pdb_fracs_display):
                             _row["PDB area prior (%)"] = f"{100 * _pdb_fracs_display[_gi]:.1f}"
@@ -2996,26 +2905,120 @@ with tab_further:
             else:
                 st.info("No fitted spectra available. Run decomposition first.")
 
-            # ── Summary table + per-component histograms (filtered) ───────
+            # ── Individual spectrum viewer ────────────────────────────────
+            st.markdown("#### Individual spectrum fit")
+            if _n_fitted > 0:
+                if _n_valid == 0:
+                    st.warning("No spectra pass the current R² threshold. Lower the threshold to view fits.")
+                    _sel_pos, _sel = 0, 0
+                elif _n_valid == 1:
+                    st.info("1 spectrum passes the R² threshold.")
+                    _sel_pos, _sel = 0, int(_valid_idx[0])
+                else:
+                    _sel_pos = st.slider("Spectrum #", 0, _n_valid - 1, 0, key="amide_slider")
+                    _sel = int(_valid_idx[_sel_pos])
+                _popt_sel = _mc[_sel]
+                _fn  = _ind_fn[_sel]   if _sel < len(_ind_fn)   else "—"
+                _dt  = _ind_dt[_sel]   if _sel < len(_ind_dt)   else float("nan")
+                _cp  = _ind_prot[_sel] if _sel < len(_ind_prot) else float("nan")
+                _r2v = float(_ind_r2[_sel]) if _sel < len(_ind_r2) else float("nan")
+                _r2_ok = _r2v >= _r2_thresh
+                _r2c   = ("green" if _r2v >= 0.95 else
+                          ("darkorange" if _r2v >= _r2_thresh else "red"))
+                _title_ind = (
+                    f"Spectrum #{_sel} &nbsp;·&nbsp; {_fn}"
+                    f" &nbsp;·&nbsp; {_dt:.2f} µm"
+                    f" &nbsp;·&nbsp; {_cp:.2f} {unit}"
+                    f" &nbsp;·&nbsp; <span style='color:{_r2c}'>R² = {_r2v:.4f}</span>"
+                )
+                _avg_for_overlay = None
+                if _ind_sp is not None and len(_ind_sp) > 0:
+                    if _global_conc_lo is not None:
+                        _ov_idx = np.where(
+                            (np.array(_ind_prot) >= _global_conc_lo) &
+                            (np.array(_ind_prot) <= _global_conc_hi)
+                        )[0]
+                    else:
+                        _ov_idx = np.arange(len(_ind_sp))
+                    if len(_ov_idx) > 0:
+                        _avg_for_overlay = _ind_sp[_ov_idx].mean(axis=0)
+
+                _fig_single = go.Figure()
+                if _avg_for_overlay is not None:
+                    _fig_single.add_trace(go.Scatter(
+                        x=_wn_am, y=_avg_for_overlay, mode="lines",
+                        name="Average spectrum",
+                        line=dict(color="#aaaaaa", width=1.5, dash="dot"),
+                    ))
+                _fig_single.add_trace(go.Scatter(
+                    x=_wn_am, y=_ind_sp[_sel], mode="lines",
+                    name="This spectrum", line=dict(color="black", width=2),
+                ))
+                _fig_single.add_trace(go.Scatter(
+                    x=_wn_am, y=_mg_plot(_wn_am, *_popt_sel), mode="lines",
+                    name=f"Total fit (R²={_r2v:.3f})",
+                    line=dict(color="red", dash="dash", width=2),
+                ))
+                _to_rgb = __import__("matplotlib.colors", fromlist=["to_rgb"]).to_rgb
+                for _gi in range(_ng):
+                    _a, _c, _s = _popt_sel[3*_gi], _popt_sel[3*_gi+1], _popt_sel[3*_gi+2]
+                    _fwhm_i = 2.355 * _s
+                    _col_i  = COLORS[_gi % len(COLORS)]
+                    _fill_i = "rgba({},{},{},0.15)".format(*[int(v*255) for v in _to_rgb(_col_i)])
+                    _fig_single.add_trace(go.Scatter(
+                        x=_wn_am,
+                        y=_a * np.exp(-((_wn_am - _c)**2) / (2*_s**2)),
+                        mode="lines", fill="tozeroy",
+                        name=f"{_glbls[_gi]} ({_c:.0f} cm⁻¹, FWHM {_fwhm_i:.1f})",
+                        line=dict(color=_col_i, width=1.5),
+                        fillcolor=_fill_i,
+                    ))
+                _fig_single.update_layout(
+                    title=dict(text=_title_ind, font=dict(size=12)),
+                    xaxis_title="Wavenumber (cm⁻¹)", yaxis_title="Intensity (a.u.)",
+                    yaxis=dict(tickformat="g"),
+                    height=400, margin=dict(t=55),
+                    legend=dict(orientation="v", x=1.02, xanchor="left"),
+                )
+                st.plotly_chart(_fig_single, use_container_width=True)
+                st.caption(
+                    f"Individual Gaussian decomposition of spectrum #{_sel} from {_fn}, "
+                    f"acquired at {_dt:.2f} µm (protein: {_cp:.2f} {unit}). "
+                    f"Black: this spectrum; grey dotted: average of {len(_ov_idx) if _avg_for_overlay is not None else 0} "
+                    f"concentration-filtered spectra; red dashed: total Gaussian fit (R² = {_r2v:.4f}); "
+                    f"coloured fills: individual components with their fitted centre positions. "
+                    f"Amide I region: {_wn_am[0]:.0f}–{_wn_am[-1]:.0f} cm⁻¹."
+                )
+                if not _r2_ok:
+                    st.warning(f"Poor fit: R² = {_r2v:.4f} < {_r2_thresh:.2f}")
+
+            # ── Summary table (individual fits, area in %) ───────────────
             _mc_f = _mc[_valid_idx] if (_mc is not None and _n_valid > 2) else None
             if _mc_f is not None:
+                _n_poor = int(np.sum(_ind_r2 < _r2_thresh)) if len(_ind_r2) == _n_fitted else 0
                 _rows = []
                 for _gi in range(_ng):
-                    _cts = _mc_f[:, 3*_gi+1]
-                    _wds = _mc_f[:, 3*_gi+2]
-                    _ars = _mc_f[:, 3*_gi] * _wds * np.sqrt(2 * np.pi)
+                    _cts  = _mc_f[:, 3*_gi+1]
+                    _wds  = _mc_f[:, 3*_gi+2]
+                    _ars  = _mc_f[:, 3*_gi] * _wds * np.sqrt(2 * np.pi)
+                    # Per-spectrum total area for percentage normalisation
+                    _tot_per_spec = np.array([
+                        sum(_mc_f[_si, 3*_gj] * _mc_f[_si, 3*_gj+2] * np.sqrt(2*np.pi)
+                            for _gj in range(_ng))
+                        for _si in range(len(_mc_f))
+                    ])
+                    _pct_per_spec = np.where(_tot_per_spec > 0, _ars / _tot_per_spec * 100, np.nan)
                     _rows.append({
                         "Component":     _glbls[_gi] if _gi < len(_glbls) else f"G{_gi+1}",
                         "Centre (cm⁻¹)": f"{_cts.mean():.1f} ± {_cts.std():.1f}",
                         "FWHM (cm⁻¹)":  f"{(2.355*_wds).mean():.1f} ± {(2.355*_wds).std():.1f}",
-                        "Area (a.u.)":   f"{_ars.mean():.3f} ± {_ars.std():.3f}",
+                        "Area (%)":      f"{np.nanmean(_pct_per_spec):.1f} ± {np.nanstd(_pct_per_spec):.1f}",
                     })
-                _n_poor = int(np.sum(_ind_r2 < _r2_thresh)) if len(_ind_r2) == _n_fitted else 0
                 _fig_caption(
                     f"Summary statistics for {_n_valid} of {_n_fitted} fitted spectra "
                     f"passing the R² ≥ {_r2_thresh:.2f} quality threshold "
                     f"({_n_poor} spectra excluded). "
-                    f"Centre and FWHM values show mean ± SD; areas are in absolute units. "
+                    f"Centre and FWHM show mean ± SD; area is the per-spectrum percentage of total fitted area (mean ± SD). "
                     f"Histograms below show the distribution of fitted peak centres across all valid spectra."
                 )
                 st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
