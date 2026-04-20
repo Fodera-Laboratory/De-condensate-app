@@ -57,6 +57,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+import psutil as _psutil, os as _os_ram
+_ram_mb  = _psutil.Process(_os_ram.getpid()).memory_info().rss / 1e6
+_ram_pct = _ram_mb / 1000 * 100
+_ram_col = "#d9534f" if _ram_mb > 900 else "#f0ad4e" if _ram_mb > 700 else "#5a5255"
+st.markdown(
+    f"""<div style="position:fixed;top:12px;right:18px;z-index:9999;
+        background:rgba(255,255,255,0.88);border:1px solid #ddd;border-radius:6px;
+        padding:4px 10px;font-size:12px;font-family:Arial,sans-serif;line-height:1.5;">
+        <span style="color:{_ram_col};font-weight:600;">RAM {_ram_mb:.0f} MB</span>
+        <span style="color:#888;"> / 1 GB limit</span>
+    </div>""",
+    unsafe_allow_html=True,
+)
+
 COLORS      = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
                "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
 COLORS_FILL = ["rgba(27,133,184,0.15)", "rgba(90,82,85,0.15)",
@@ -4830,5 +4844,3 @@ with tab_about:
         "| [streamlit-sortables](https://github.com/ohtaman/streamlit-sortables) | Drag-and-drop pipeline reordering | Ohta, 2022 |\n"
     )
 
-    import psutil, os as _os
-    st.caption(f"RAM used: {psutil.Process(_os.getpid()).memory_info().rss / 1e6:.0f} MB")
