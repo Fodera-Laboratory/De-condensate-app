@@ -181,6 +181,26 @@ def _pls_coef(model, n_features):
     return coef
 
 
+def _pls_x_variance(model, X_train, valid_features):
+    """
+    Compute individual and cumulative X-variance explained (%) per LV.
+
+    PLSRegression(scale=False) centers X but does not scale. The variance
+    explained by LV k is the squared Frobenius norm of the rank-1 reconstruction
+    T_k P_k^T divided by the total sum-of-squares of the centred training matrix.
+    """
+    X_v  = X_train[:, valid_features]
+    X_c  = X_v - X_v.mean(axis=0)
+    T    = model.x_scores_
+    P    = model.x_loadings_
+    ss   = float(np.sum(X_c ** 2)) or 1.0
+    vexp = []
+    for k in range(T.shape[1]):
+        recon = T[:, k : k + 1] @ P[:, k : k + 1].T
+        vexp.append(float(np.sum(recon ** 2) / ss * 100))
+    return vexp, list(np.cumsum(vexp))
+
+
 def _std_picker(label, caption, key_prefix, subdir, optional=False):
     """
     Render a standard-CSV picker with Upload / Training library (/ None) radio.
@@ -1123,6 +1143,35 @@ with tab_calib:
                         f"Peaks in the protein vector reflect protein-specific Raman bands."
                     )
 
+            with st.expander("X-variance explained per LV"):
+                _vexp2, _vcum2 = _pls_x_variance(
+                    pls_p["model"], pls_p["X_train_proc"], pls_p["valid_features"]
+                )
+                _lv_labels2 = [f"LV{k+1}" for k in range(len(_vexp2))]
+                _fig_var2 = go.Figure()
+                _fig_var2.add_trace(go.Bar(
+                    x=_lv_labels2, y=_vexp2, name="Individual",
+                    marker_color=COLORS[0], opacity=0.8,
+                ))
+                _fig_var2.add_trace(go.Scatter(
+                    x=_lv_labels2, y=_vcum2, mode="lines+markers",
+                    name="Cumulative", line=dict(color="black", dash="dot"), marker_size=7,
+                    yaxis="y2",
+                ))
+                _fig_var2.update_layout(
+                    xaxis_title="Latent variable",
+                    yaxis_title="Variance explained (%)",
+                    yaxis2=dict(title="Cumulative (%)", overlaying="y", side="right",
+                                range=[0, 105], showgrid=False),
+                    height=300, legend=dict(orientation="h", y=-0.25),
+                )
+                st.plotly_chart(_fig_var2, use_container_width=True)
+                st.caption(
+                    f"Individual (bars) and cumulative (line, right axis) variance in the "
+                    f"preprocessed training spectra explained by each PLS2 latent variable. "
+                    f"{len(_vexp2)} LVs capture {_vcum2[-1]:.1f}% of total X-variance."
+                )
+
             # Preprocessed training spectra — separate plots
             with st.expander("Training spectra"):
                 X_tr_all = pls_p["X_train_proc"]
@@ -1290,6 +1339,38 @@ with tab_calib:
                     f"the magnitude reflects relative contribution to the prediction."
                 )
 
+            with st.expander("X-variance explained per LV"):
+                _vexp, _vcum = _pls_x_variance(
+                    pls_p["model"], pls_p["X_train_proc"], pls_p["valid_features"]
+                )
+                _lv_labels = [f"LV{k+1}" for k in range(len(_vexp))]
+                _fig_var = go.Figure()
+                _fig_var.add_trace(go.Bar(
+                    x=_lv_labels, y=_vexp, name="Individual",
+                    marker_color=COLORS[0], opacity=0.8,
+                ))
+                _fig_var.add_trace(go.Scatter(
+                    x=_lv_labels, y=_vcum, mode="lines+markers",
+                    name="Cumulative", line=dict(color="black", dash="dot"), marker_size=7,
+                    yaxis="y2",
+                ))
+                _fig_var.update_layout(
+                    xaxis_title="Latent variable",
+                    yaxis_title="Variance explained (%)",
+                    yaxis2=dict(title="Cumulative (%)", overlaying="y", side="right",
+                                range=[0, 105], showgrid=False),
+                    height=300, legend=dict(orientation="h", y=-0.25),
+                )
+                st.plotly_chart(_fig_var, use_container_width=True)
+                st.caption(
+                    f"Individual (bars) and cumulative (line, right axis) variance in the "
+                    f"preprocessed training spectra explained by each PLS latent variable. "
+                    f"{len(_vexp)} LVs capture {_vcum[-1]:.1f}% of total X-variance. "
+                    f"Note that PLS latent variables are chosen to maximise covariance with "
+                    f"concentration, not X-variance (unlike PCA), so later LVs may explain "
+                    f"more predictive variance than a PCA component at the same rank."
+                )
+
         # ── Salt ─────────────────────────────────────────────
         if pls_s:
             st.divider()
@@ -1390,6 +1471,36 @@ with tab_calib:
                     f"{wn_s_valid[0]:.0f}–{wn_s_valid[-1]:.0f} cm⁻¹ (sulfate ν₁ band region). "
                     f"**b)** Regression coefficient vector for salt (mM); "
                     f"the dominant positive feature corresponds to the sulfate stretching mode near 981 cm⁻¹."
+                )
+
+            with st.expander("X-variance explained per LV (salt)"):
+                _vexps, _vcums = _pls_x_variance(
+                    pls_s["model"], pls_s["X_train_proc"], pls_s["valid_features"]
+                )
+                _lv_labels_s = [f"LV{k+1}" for k in range(len(_vexps))]
+                _fig_vars = go.Figure()
+                _fig_vars.add_trace(go.Bar(
+                    x=_lv_labels_s, y=_vexps, name="Individual",
+                    marker_color=COLORS[3], opacity=0.8,
+                ))
+                _fig_vars.add_trace(go.Scatter(
+                    x=_lv_labels_s, y=_vcums, mode="lines+markers",
+                    name="Cumulative", line=dict(color="black", dash="dot"), marker_size=7,
+                    yaxis="y2",
+                ))
+                _fig_vars.update_layout(
+                    xaxis_title="Latent variable",
+                    yaxis_title="Variance explained (%)",
+                    yaxis2=dict(title="Cumulative (%)", overlaying="y", side="right",
+                                range=[0, 105], showgrid=False),
+                    height=300, legend=dict(orientation="h", y=-0.25),
+                )
+                st.plotly_chart(_fig_vars, use_container_width=True)
+                st.caption(
+                    f"Individual (bars) and cumulative (line, right axis) X-variance explained "
+                    f"by each salt PLS latent variable. "
+                    f"{len(_vexps)} LV(s) capture {_vcums[-1]:.1f}% of total variance in the "
+                    f"sulfate band training spectra."
                 )
 
 
