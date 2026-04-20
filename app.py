@@ -2338,6 +2338,13 @@ with tab_further:
             _prot_min_g = float(np.nanmin(_prot))
             _prot_max_g = float(np.nanmax(_prot))
             _prot_step  = max((_prot_max_g - _prot_min_g) / 200, 1e-6)
+            # Clear stale slider value if it falls outside the current data range
+            _cv = st.session_state.get("global_conc_thresh")
+            if _cv is not None and (
+                _cv[0] < _prot_min_g or _cv[1] > _prot_max_g
+                or _cv[0] > _cv[1]
+            ):
+                st.session_state.pop("global_conc_thresh", None)
             _global_conc_range = st.slider(
                 f"Protein concentration range ({unit})",
                 min_value=_prot_min_g, max_value=_prot_max_g,
@@ -2376,14 +2383,26 @@ with tab_further:
             _mcr_col       = _mcr_C[:, _mcr_filt_idx]
             _mcr_lo, _mcr_hi = float(_mcr_col.min()), float(_mcr_col.max())
             _mcr_step = max((_mcr_hi - _mcr_lo) / 200, 1e-6)
-            _mcr_range = _mf2.slider(
-                f"MCR score range — {_mcr_filt_comp}",
-                min_value=_mcr_lo, max_value=_mcr_hi,
-                value=(_mcr_lo, _mcr_hi),
-                step=_mcr_step,
-                key="mcr_score_range",
-                help="Keep only spectra whose MCR score for the selected component falls within this range.",
-            )
+            # Clear stale slider value if it falls outside the current MCR data range
+            _mcv = st.session_state.get("mcr_score_range")
+            if _mcr_lo == _mcr_hi or (
+                _mcv is not None and (
+                    _mcv[0] < _mcr_lo or _mcv[1] > _mcr_hi or _mcv[0] > _mcv[1]
+                )
+            ):
+                st.session_state.pop("mcr_score_range", None)
+            if _mcr_lo == _mcr_hi:
+                _mcr_range = (_mcr_lo, _mcr_hi)
+                _mf2.caption(f"MCR score range — {_mcr_filt_comp}: all values equal {_mcr_lo:.4f} (no filtering applied).")
+            else:
+                _mcr_range = _mf2.slider(
+                    f"MCR score range — {_mcr_filt_comp}",
+                    min_value=_mcr_lo, max_value=_mcr_hi,
+                    value=(_mcr_lo, _mcr_hi),
+                    step=_mcr_step,
+                    key="mcr_score_range",
+                    help="Keep only spectra whose MCR score for the selected component falls within this range.",
+                )
             _mmask      = (_mcr_col >= _mcr_range[0]) & (_mcr_col <= _mcr_range[1])
             _midx       = np.where(_mmask)[0]
             _X_all      = _X_all[_mmask]
