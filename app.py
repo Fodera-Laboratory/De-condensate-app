@@ -4811,3 +4811,5 @@ with tab_about:
         "| [streamlit-sortables](https://github.com/ohtaman/streamlit-sortables) | Drag-and-drop pipeline reordering | Ohta, 2022 |\n"
     )
 
+    import psutil, os as _os
+    st.caption(f"RAM used: {psutil.Process(_os.getpid()).memory_info().rss / 1e6:.0f} MB")
