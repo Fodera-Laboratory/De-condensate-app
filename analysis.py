@@ -131,7 +131,8 @@ def results_to_excel_bytes(
         n_comp = results["C_mcr"].shape[1]
         for k in range(n_comp):
             data[f"MCR_Comp{k + 1}"] = results["C_mcr"][:, k].astype(float)
-        data["MCR_Ratio_Comp1_Comp2"] = results["mcr_ratio"].astype(float)
+        if results["mcr_ratio"] is not None:
+            data["MCR_Ratio_Comp1_Comp2"] = results["mcr_ratio"].astype(float)
 
     if results.get("pls_protein") is not None:
         prot_col = f"PLS_Protein_{protein_unit.replace('/', '_per_')}"
