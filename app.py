@@ -62,9 +62,10 @@ _ram_mb  = _psutil.Process(_os_ram.getpid()).memory_info().rss / 1e6
 _ram_pct = _ram_mb / 1000 * 100
 _ram_col = "#d9534f" if _ram_mb > 900 else "#f0ad4e" if _ram_mb > 700 else "#5a5255"
 st.markdown(
-    f"""<div style="position:fixed;top:12px;right:18px;z-index:9999;
-        background:rgba(255,255,255,0.88);border:1px solid #ddd;border-radius:6px;
-        padding:4px 10px;font-size:12px;font-family:Arial,sans-serif;line-height:1.5;">
+    f"""<div style="position:fixed;top:55px;right:18px;z-index:2147483647;
+        background:rgba(255,255,255,0.92);border:1px solid #ddd;border-radius:6px;
+        padding:4px 10px;font-size:12px;font-family:Arial,sans-serif;line-height:1.5;
+        box-shadow:0 1px 4px rgba(0,0,0,0.10);">
         <span style="color:{_ram_col};font-weight:600;">RAM {_ram_mb:.0f} MB</span>
         <span style="color:#888;"> / 1 GB limit</span>
     </div>""",
