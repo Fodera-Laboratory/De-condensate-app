@@ -3597,19 +3597,41 @@ with tab_image:
                 _svg_buf  = _io_ov.BytesIO()
 
                 if _ov_sm == "z":
-                    # Score vs depth scatter
-                    _mfig, _max = _mplt.subplots(figsize=(4, 5))
+                    # Image with single dot marker (left) + depth chart (right)
+                    _asp_z  = _img_h_px_c / max(_img_w_px_c, 1)
+                    _mfig, (_max_img, _max_d) = _mplt.subplots(
+                        1, 2, figsize=(10, 5 * _asp_z + 0.6),
+                        gridspec_kw={"width_ratios": [2, 1]},
+                    )
+                    _max_img.imshow(_img_arr,
+                                    extent=[0, _img_w_px_c, _img_h_px_c, 0],
+                                    aspect="equal", interpolation="bilinear")
                     _norm_z = _Norm(vmin=float(_ov_scores.min()), vmax=float(_ov_scores.max()))
-                    _sc_z   = _max.scatter(_ov_scores, _ov_dist,
+                    _max_img.scatter([_scan_x_px], [_scan_y_px],
+                                     c=[_dot_color_mean], cmap=_mpl_cmap, norm=_norm_z,
+                                     s=max(10, _ov_dot_size * 2) ** 2 * 0.5,
+                                     marker="o", linewidths=1.5, edgecolors="white", zorder=3)
+                    # Scale bar on image
+                    _max_img.plot([_sb_x0, _sb_x0 + _sb_px], [_sb_y0, _sb_y0],
+                                  color="white", lw=2, zorder=4)
+                    _max_img.text(_sb_x0 + _sb_px / 2, _sb_y0 - 0.04 * _img_h_px_c,
+                                  f"{_sb_um:.0f} µm", color="white", ha="center",
+                                  fontsize=8, zorder=4)
+                    _max_img.set_xlim(0, _img_w_px_c)
+                    _max_img.set_ylim(_img_h_px_c, 0)
+                    _max_img.axis("off")
+                    _max_img.set_title(f"Image — {_ov_scan_select}", fontsize=10)
+                    # Depth chart
+                    _sc_z = _max_d.scatter(_ov_scores, _ov_dist,
                                            c=_ov_scores, cmap=_mpl_cmap, norm=_norm_z,
-                                           s=_ov_dot_size**2 * 0.5,
+                                           s=_ov_dot_size ** 2 * 0.5,
                                            linewidths=0.4, edgecolors="black")
-                    _mplt.colorbar(_sc_z, ax=_max, label=_ov_score_label)
-                    _max.set_xlabel(_ov_score_label)
-                    _max.set_ylabel("Depth (µm)")
-                    _max.set_title(f"{_ov_score_label} vs Depth")
+                    _mplt.colorbar(_sc_z, ax=_max_d, label=_ov_score_label, fraction=0.05)
+                    _max_d.set_xlabel(_ov_score_label, fontsize=9)
+                    _max_d.set_ylabel("Depth (µm)", fontsize=9)
+                    _max_d.set_title(f"{_ov_score_label} vs Depth", fontsize=10)
                     _mfig.tight_layout()
-                    _mfig.savefig(_svg_buf, format="svg")
+                    _mfig.savefig(_svg_buf, format="svg", bbox_inches="tight")
                     _mplt.close(_mfig)
                 else:
                     # XY image overlay
