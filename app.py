@@ -3588,8 +3588,10 @@ with tab_image:
             try:
                 import plotly.io as _pio
                 st.session_state["overlay_fig_pdf"] = _pio.to_image(_fig_ov, format="pdf")
-            except Exception:
+                st.session_state["overlay_fig_pdf_err"] = None
+            except Exception as _pdf_exc:
                 st.session_state["overlay_fig_pdf"] = None
+                st.session_state["overlay_fig_pdf_err"] = str(_pdf_exc)
 
         elif _img_file is None:
             st.info("Upload a microscopy image above to display the overlay.")
@@ -3782,7 +3784,8 @@ with tab_download:
                     use_container_width=True,
                 )
             else:
-                _dl_c2.info("PDF export requires the `kaleido` package (`pip install kaleido`).")
+                _pdf_err = st.session_state.get("overlay_fig_pdf_err")
+                _dl_c2.warning(f"PDF export failed: {_pdf_err}" if _pdf_err else "PDF export unavailable.")
             st.caption(
                 f"**{_ov_scan} — {_ov_label}**. "
                 "HTML: interactive, zoomable in any browser. "

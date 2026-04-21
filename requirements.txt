@@ -2,7 +2,7 @@ streamlit
 numpy
 pandas
 plotly
-kaleido
+kaleido==0.1.0.post1
 scikit-learn
 scipy
 matplotlib
