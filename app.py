@@ -3585,12 +3585,63 @@ with tab_image:
             st.session_state["overlay_fig_html"] = _fig_ov.to_html(include_plotlyjs="cdn", full_html=True)
             st.session_state["overlay_fig_label"] = _ov_score_label
             st.session_state["overlay_fig_scan"]  = _ov_scan_select
+
+            # Build matplotlib SVG (no kaleido / Chrome needed)
             try:
-                import plotly.io as _pio
-                st.session_state["overlay_fig_svg"] = _pio.to_image(_fig_ov, format="svg")
+                import matplotlib.pyplot as _mplt
+                import matplotlib.cm as _mcm
+                from matplotlib.colors import Normalize as _Norm
+                import io as _io_ov
+
+                _mpl_cmap = _ov_cmap.lower()
+                _svg_buf  = _io_ov.BytesIO()
+
+                if _ov_sm == "z":
+                    # Score vs depth scatter
+                    _mfig, _max = _mplt.subplots(figsize=(4, 5))
+                    _norm_z = _Norm(vmin=float(_ov_scores.min()), vmax=float(_ov_scores.max()))
+                    _sc_z   = _max.scatter(_ov_scores, _ov_dist,
+                                           c=_ov_scores, cmap=_mpl_cmap, norm=_norm_z,
+                                           s=_ov_dot_size**2 * 0.5,
+                                           linewidths=0.4, edgecolors="black")
+                    _mplt.colorbar(_sc_z, ax=_max, label=_ov_score_label)
+                    _max.set_xlabel(_ov_score_label)
+                    _max.set_ylabel("Depth (µm)")
+                    _max.set_title(f"{_ov_score_label} vs Depth")
+                    _mfig.tight_layout()
+                    _mfig.savefig(_svg_buf, format="svg")
+                    _mplt.close(_mfig)
+                else:
+                    # XY image overlay
+                    _asp    = _img_h_px_c / _img_w_px_c
+                    _mfig, _max = _mplt.subplots(figsize=(7, 7 * _asp + 0.6))
+                    _max.imshow(_img_arr, extent=[0, _img_w_px_c, _img_h_px_c, 0],
+                                aspect="equal", interpolation="bilinear")
+                    _norm_xy = _Norm(vmin=float(_ov_scores.min()), vmax=float(_ov_scores.max()))
+                    _sc_xy   = _max.scatter(_x_px_2d, _y_px_2d,
+                                            c=_ov_scores, cmap=_mpl_cmap, norm=_norm_xy,
+                                            s=_ov_dot_size**2 * 0.5,
+                                            linewidths=0.4, edgecolors="black", zorder=3)
+                    _cb = _mplt.colorbar(_sc_xy, ax=_max, fraction=0.03, pad=0.02)
+                    _cb.set_label(_ov_score_label, fontsize=9)
+                    # Scale bar
+                    _max.plot([_bar_x0, _bar_x0 + _bar_px], [_bar_y0, _bar_y0],
+                              color="white", lw=2, zorder=4)
+                    _max.text(_bar_x0 + _bar_px / 2, _bar_y0 - 0.04 * _img_h_px_c,
+                              f"{_bar_um:.0f} µm", color="white", ha="center",
+                              fontsize=8, zorder=4)
+                    _max.set_xlim(0, _img_w_px_c)
+                    _max.set_ylim(_img_h_px_c, 0)
+                    _max.axis("off")
+                    _max.set_title(f"{_ov_scan_select} — {_ov_score_label}", fontsize=10)
+                    _mfig.tight_layout()
+                    _mfig.savefig(_svg_buf, format="svg", bbox_inches="tight")
+                    _mplt.close(_mfig)
+
+                st.session_state["overlay_fig_svg"]     = _svg_buf.getvalue()
                 st.session_state["overlay_fig_svg_err"] = None
             except Exception as _svg_exc:
-                st.session_state["overlay_fig_svg"] = None
+                st.session_state["overlay_fig_svg"]     = None
                 st.session_state["overlay_fig_svg_err"] = str(_svg_exc)
 
         elif _img_file is None:
