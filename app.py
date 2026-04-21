@@ -3278,14 +3278,28 @@ with tab_image:
             for _ci in range(_n_mcr):
                 _ov_score_opts[f"MCR component {_ci+1}"] = ("C_mcr", _ci)
 
+        _ov_sm_early = st.session_state.get("scan_mode", "xy")
+
         _ov_col1, _ov_col2 = st.columns([2, 1])
         _ov_score_label = _ov_col1.selectbox(
-            "Score", list(_ov_score_opts.keys()), key="ov_score_label",
+            "Colour coding", list(_ov_score_opts.keys()), key="ov_score_label",
         ) if _ov_score_opts else None
         _ov_cmap = _ov_col2.selectbox(
             "Colour map", ["Viridis", "Plasma", "RdBu_r", "Turbo", "Inferno"],
             key="ov_cmap",
         )
+
+        if _ov_sm_early == "z" and _ov_score_opts:
+            _ov_xaxis_label = st.selectbox(
+                "X-axis (depth chart)",
+                list(_ov_score_opts.keys()),
+                index=0,
+                key="ov_xaxis_label",
+                help="Choose which score to plot on the x-axis of the depth chart. "
+                     "Can be different from the dot colour coding.",
+            )
+        else:
+            _ov_xaxis_label = _ov_score_label
 
         _ov_scan_select = st.selectbox(
             "Linescan to show", list(_ov_results.keys()), key="ov_scan_sel",
@@ -3359,6 +3373,14 @@ with tab_image:
             else:
                 _ov_scores = _ov_r[_ov_key]
             _ov_scores = np.asarray(_ov_scores, dtype=float)
+
+            # X-axis scores for depth chart (may differ from colour coding)
+            _ov_xkey = _ov_score_opts[_ov_xaxis_label]
+            if isinstance(_ov_xkey, tuple):
+                _ov_xscores = _ov_r[_ov_xkey[0]][:, _ov_xkey[1]]
+            else:
+                _ov_xscores = _ov_r[_ov_xkey]
+            _ov_xscores = np.asarray(_ov_xscores, dtype=float)
 
             # Stage-coordinate → cropped-image-pixel helpers
             # Image top-left corner in stage µm coords:
@@ -3466,12 +3488,14 @@ with tab_image:
                 with _z_col2:
                     _fig_depth = go.Figure()
                     _fig_depth.add_trace(go.Scatter(
-                        x=_ov_scores,
+                        x=_ov_xscores,
                         y=_ov_dist,
                         mode="markers",
                         marker=dict(
                             color=_ov_scores,
                             colorscale=_ov_cmap,
+                            cmin=float(_ov_scores.min()),
+                            cmax=float(_ov_scores.max()),
                             size=_ov_dot_size,
                             line=dict(color="black", width=0.5),
                             colorbar=dict(
@@ -3486,17 +3510,18 @@ with tab_image:
                             showscale=True,
                         ),
                         hovertemplate=(
-                            f"<b>{_ov_score_label}</b>: %{{x:.3f}}<br>"
+                            f"<b>{_ov_xaxis_label}</b>: %{{x:.3f}}<br>"
+                            f"Colour: {_ov_score_label} %{{marker.color:.3f}}<br>"
                             "Depth: %{y:.2f} µm<extra></extra>"
                         ),
-                        name=_ov_score_label,
+                        name=_ov_xaxis_label,
                     ))
                     _fig_depth.update_layout(
                         height=500,
                         margin=dict(l=10, r=20, t=30, b=40),
-                        xaxis=dict(title=_ov_score_label),
+                        xaxis=dict(title=_ov_xaxis_label),
                         yaxis=dict(title="Depth (µm)"),
-                        title=dict(text=f"{_ov_score_label} vs Depth", font=dict(size=13)),
+                        title=dict(text=f"{_ov_xaxis_label} vs Depth", font=dict(size=13)),
                     )
                     st.plotly_chart(_fig_depth, use_container_width=True)
 
@@ -3622,14 +3647,14 @@ with tab_image:
                     _max_img.axis("off")
                     _max_img.set_title(f"Image — {_ov_scan_select}", fontsize=10)
                     # Depth chart
-                    _sc_z = _max_d.scatter(_ov_scores, _ov_dist,
+                    _sc_z = _max_d.scatter(_ov_xscores, _ov_dist,
                                            c=_ov_scores, cmap=_mpl_cmap, norm=_norm_z,
                                            s=_ov_dot_size ** 2 * 0.5,
                                            linewidths=0.4, edgecolors="black")
                     _mplt.colorbar(_sc_z, ax=_max_d, label=_ov_score_label, fraction=0.05)
-                    _max_d.set_xlabel(_ov_score_label, fontsize=9)
+                    _max_d.set_xlabel(_ov_xaxis_label, fontsize=9)
                     _max_d.set_ylabel("Depth (µm)", fontsize=9)
-                    _max_d.set_title(f"{_ov_score_label} vs Depth", fontsize=10)
+                    _max_d.set_title(f"{_ov_xaxis_label} vs Depth", fontsize=10)
                     _mfig.tight_layout()
                     _mfig.savefig(_svg_buf, format="svg", bbox_inches="tight")
                     _mplt.close(_mfig)
