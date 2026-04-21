@@ -218,6 +218,26 @@ def _pls_x_variance(model, X_train, valid_features):
     return vexp, list(np.cumsum(vexp))
 
 
+def _align_refs_to_wn(comp_raw, wn_csv, wn_target):
+    """
+    Resample reference spectra from wn_csv onto wn_target via linear interpolation.
+    Returns (aligned_array, info_msg_or_None); msg is None when no resampling needed.
+    """
+    wn_csv    = np.asarray(wn_csv,    dtype=float)
+    wn_target = np.asarray(wn_target, dtype=float)
+    if len(wn_csv) == len(wn_target) and np.allclose(wn_csv, wn_target, atol=0.5):
+        return comp_raw, None
+    aligned = np.vstack([np.interp(wn_target, wn_csv, row) for row in comp_raw])
+    msg = (
+        f"Reference CSV wavenumber axis ({len(wn_csv)} pts, "
+        f"{wn_csv[0]:.0f}–{wn_csv[-1]:.0f} cm⁻¹) differs from the linescan axis "
+        f"({len(wn_target)} pts, {wn_target[0]:.0f}–{wn_target[-1]:.0f} cm⁻¹). "
+        f"Reference spectra were resampled by linear interpolation onto the linescan "
+        f"wavenumber grid before preprocessing."
+    )
+    return aligned, msg
+
+
 def _std_picker(label, caption, key_prefix, subdir, optional=False):
     """
     Render a standard-CSV picker with Upload / Training library (/ None) radio.
@@ -771,6 +791,7 @@ if build_btn:
             # ── MCR references (optional) ───────────────────────────────────
             ST_init = None
             comp_labels = []
+            _mcr_ref_wn_msg = None
             if mcr_ref_src:
                 with st.spinner("Preprocessing MCR references…"):
                     df_refs = _read_csv_src(mcr_ref_src)
@@ -779,6 +800,8 @@ if build_btn:
                     row_mask = [i for i, cid in enumerate(all_ids) if cid in selected_ids]
                     comp_raw = df_refs.iloc[row_mask, 1:].to_numpy()
                     comp_labels = [str(all_ids[i]) for i in row_mask]
+                    _wn_csv_build = pd.to_numeric(df_refs.columns[1:], errors="coerce").values
+                    comp_raw, _mcr_ref_wn_msg = _align_refs_to_wn(comp_raw, _wn_csv_build, wn_ref)
                     ST_init, _, _ = an.preprocess_matrix(comp_raw, wn_ref, settings)
 
             st.session_state["models"] = dict(
@@ -787,6 +810,7 @@ if build_btn:
                 ST_init=ST_init,
                 wn_ref=wn_ref,
                 comp_labels=comp_labels,
+                mcr_wn_msg=_mcr_ref_wn_msg if ST_init is not None else None,
             )
             st.session_state["settings"]      = settings
             st.session_state["n_components"]  = n_components
@@ -919,6 +943,12 @@ if run_btn:
                             _comp_raw_run = _df_mcr_run.iloc[_rmask_run, 1:].to_numpy()
                             _labels_run = [str(_all_ids_run[j]) for j in _rmask_run]
                             _wn_for_refs = models.get("wn_ref", wn)
+                            _wn_csv_run = pd.to_numeric(_df_mcr_run.columns[1:], errors="coerce").values
+                            _comp_raw_run, _wn_msg_run = _align_refs_to_wn(
+                                _comp_raw_run, _wn_csv_run, _wn_for_refs
+                            )
+                            if _wn_msg_run:
+                                st.session_state["models"]["mcr_wn_msg"] = _wn_msg_run
                             _st_init, _, _ = an.preprocess_matrix(_comp_raw_run, _wn_for_refs, s)
                             if "models" not in st.session_state:
                                 st.session_state["models"] = {}
@@ -1116,7 +1146,8 @@ with tab_calib:
 
             fig_d.update_xaxes(title_text=f"Actual ({unit})",   row=1, col=1)
             fig_d.update_xaxes(title_text="Actual (wt%)",       row=1, col=2)
-            fig_d.update_xaxes(title_text="N components",       row=2, col=1)
+            fig_d.update_xaxes(title_text="N components",       row=2, col=1,
+                               tick0=1, dtick=2, range=[0.5, n_cv + 0.5])
             fig_d.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=2, col=2)
             fig_d.update_yaxes(title_text=f"Predicted ({unit})", row=1, col=1)
             fig_d.update_yaxes(title_text="Predicted (wt%)",    row=1, col=2)
@@ -1320,7 +1351,8 @@ with tab_calib:
 
             fig_p.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=1)
             fig_p.update_xaxes(title_text=f"Actual ({unit})",   row=1, col=2)
-            fig_p.update_xaxes(title_text="N components",        row=2, col=1)
+            fig_p.update_xaxes(title_text="N components",        row=2, col=1,
+                               tick0=1, dtick=2, range=[0.5, n_cv + 0.5])
             fig_p.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=2, col=2)
             fig_p.update_yaxes(title_text="Norm. intensity",    row=1, col=1)
             fig_p.update_yaxes(title_text=f"Predicted ({unit})", row=1, col=2)
@@ -1447,7 +1479,8 @@ with tab_calib:
                 )
             fig_s.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=1)
             fig_s.update_xaxes(title_text="Actual (mM)",        row=1, col=2)
-            fig_s.update_xaxes(title_text="Components",         row=1, col=3)
+            fig_s.update_xaxes(title_text="Components",         row=1, col=3,
+                               tick0=1, dtick=2, range=[0.5, n_cs + 0.5])
             fig_s.update_yaxes(title_text="Intensity (a.u.)",   row=1, col=1)
             fig_s.update_yaxes(title_text="Predicted (mM)",     row=1, col=2)
             fig_s.update_yaxes(title_text="RMSE (mM)",          row=1, col=3)
@@ -1566,6 +1599,9 @@ with tab_results:
                 )
             except Exception as _e:
                 st.warning(f"Could not plot MCR references: {_e}")
+
+    if st.session_state.get("models", {}).get("mcr_wn_msg"):
+        st.info(st.session_state["models"]["mcr_wn_msg"])
 
     if "results" not in st.session_state or not st.session_state["results"]:
         st.info("Run MCR analysis first — configure parameters in the MCR decomposition tab and click ▶ Run MCR Analysis.")
@@ -4022,6 +4058,8 @@ with tab_download:
                                color="red", alpha=0.10, lw=0)
                 ax.set_xlabel("Latent variables")
                 ax.set_ylabel(label)
+                ax.set_xlim(0.5, _nc_max + 0.5)
+                ax.xaxis.set_major_locator(_mticker.MultipleLocator(2))
                 ax.legend(fontsize=5, frameon=False)
                 _style_ax(ax)
 
