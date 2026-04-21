@@ -3587,11 +3587,11 @@ with tab_image:
             st.session_state["overlay_fig_scan"]  = _ov_scan_select
             try:
                 import plotly.io as _pio
-                st.session_state["overlay_fig_pdf"] = _pio.to_image(_fig_ov, format="pdf")
-                st.session_state["overlay_fig_pdf_err"] = None
-            except Exception as _pdf_exc:
-                st.session_state["overlay_fig_pdf"] = None
-                st.session_state["overlay_fig_pdf_err"] = str(_pdf_exc)
+                st.session_state["overlay_fig_svg"] = _pio.to_image(_fig_ov, format="svg")
+                st.session_state["overlay_fig_svg_err"] = None
+            except Exception as _svg_exc:
+                st.session_state["overlay_fig_svg"] = None
+                st.session_state["overlay_fig_svg_err"] = str(_svg_exc)
 
         elif _img_file is None:
             st.info("Upload a microscopy image above to display the overlay.")
@@ -3773,23 +3773,23 @@ with tab_download:
                 key="dl_overlay_html",
                 use_container_width=True,
             )
-            _pdf_bytes = st.session_state.get("overlay_fig_pdf")
-            if _pdf_bytes:
+            _svg_bytes = st.session_state.get("overlay_fig_svg")
+            if _svg_bytes:
                 _dl_c2.download_button(
-                    f"⬇  Download overlay (.pdf)",
-                    data=_pdf_bytes,
-                    file_name=f"overlay_{_ov_safe}.pdf",
-                    mime="application/pdf",
-                    key="dl_overlay_pdf",
+                    f"⬇  Download overlay (.svg)",
+                    data=_svg_bytes,
+                    file_name=f"overlay_{_ov_safe}.svg",
+                    mime="image/svg+xml",
+                    key="dl_overlay_svg",
                     use_container_width=True,
                 )
             else:
-                _pdf_err = st.session_state.get("overlay_fig_pdf_err")
-                _dl_c2.warning(f"PDF export failed: {_pdf_err}" if _pdf_err else "PDF export unavailable.")
+                _svg_err = st.session_state.get("overlay_fig_svg_err")
+                _dl_c2.warning(f"SVG export failed: {_svg_err}" if _svg_err else "SVG export unavailable.")
             st.caption(
                 f"**{_ov_scan} — {_ov_label}**. "
                 "HTML: interactive, zoomable in any browser. "
-                "PDF: static vector graphic, suitable for publications."
+                "SVG: static vector graphic, suitable for publications (open in Inkscape or Illustrator)."
             )
 
         # ── Publication SVG figures ─────────────────────────────────────────
