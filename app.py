@@ -4171,53 +4171,21 @@ with tab_download:
         if not _pub_has:
             st.info("Run MCR/PLS analysis or further analysis to generate figures.")
         else:
-            # ── Global defaults (panels, colours, font) ───────────────────
+            # ── Global style (applies to all figures) ─────────────────────
             _DEFAULT_COLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
                              "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
-            with st.expander("⚙  Global defaults (panels, colours, font)", expanded=False):
-                _sty_gl1, _sty_gl2, _sty_gl3 = st.columns(3)
-                with _sty_gl1:
-                    st.caption("**Panel dimensions (cm)**")
-                    _d2a, _d2b = st.columns(2)
-                    st.caption("Spectrum / loadings:")
-                    _ui_wspec = _d2a.number_input("W", 2.0, 20.0, 5.0, step=0.5, key="pub_wspec")
-                    _ui_hspec = _d2b.number_input("H", 1.0, 15.0, 2.8, step=0.5, key="pub_hspec")
-                    st.caption("Profile / scatter:")
-                    _ui_wwide = _d2a.number_input("W", 2.0, 20.0, 7.0, step=0.5, key="pub_wwide")
-                    _ui_hwide = _d2b.number_input("H", 1.0, 15.0, 3.5, step=0.5, key="pub_hwide")
-                    st.caption("Square (amide I):")
-                    _ui_wsq   = _d2a.number_input("W", 2.0, 20.0, 5.0, step=0.5, key="pub_wsq")
-                    _ui_hsq   = _d2b.number_input("H", 1.0, 15.0, 5.0, step=0.5, key="pub_hsq")
-                with _sty_gl2:
-                    st.caption("**Colour palette**")
-                    _ui_pal = st.selectbox(
-                        "Palette",
-                        ["Custom", "tab10", "Set1", "Set2", "Dark2",
-                         "Paired", "viridis", "plasma", "magma", "coolwarm"],
-                        key="pub_palette",
-                    )
-                    if _ui_pal == "Custom":
-                        _ui_cols = []
-                        _pc1, _pc2 = st.columns(2)
-                        for _pci in range(8):
-                            _ui_cols.append(
-                                (_pc1 if _pci % 2 == 0 else _pc2).color_picker(
-                                    f"Color {_pci + 1}", _DEFAULT_COLS[_pci],
-                                    key=f"pub_col{_pci}",
-                                )
-                            )
-                    else:
-                        import matplotlib.colors as _mcolors
-                        _cmap_fn = __import__("matplotlib").colormaps.get_cmap(_ui_pal)
-                        _ui_cols = [_mcolors.to_hex(_cmap_fn(i / 7)) for i in range(8)]
-                        _prev_html = "".join(
-                            f'<span style="background:{c};display:inline-block;'
-                            f'width:24px;height:24px;margin:2px;border-radius:4px;'
-                            f'border:1px solid #ccc"></span>'
-                            for c in _ui_cols
-                        )
-                        st.markdown(_prev_html, unsafe_allow_html=True)
-                with _sty_gl3:
+            with st.expander("⚙  Global style (font, sizes, line widths)", expanded=False):
+                _gs1, _gs2, _gs3 = st.columns(3)
+                with _gs1:
+                    st.caption("**Font sizes (pt)**")
+                    _ui_ts  = st.number_input("Tick labels", 3, 16, 5, step=1, key="pub_ts")
+                    _ui_ls  = st.number_input("Axis labels", 4, 20, 8, step=1, key="pub_ls")
+                    _ui_leg = st.number_input("Legend",      3, 14, 5, step=1, key="pub_leg")
+                with _gs2:
+                    st.caption("**Line widths**")
+                    _ui_lw    = st.number_input("Main traces",      0.2, 4.0, 0.8, step=0.1, key="pub_lw",    format="%.1f")
+                    _ui_lw_sp = st.number_input("Spectra overlays", 0.1, 2.0, 0.3, step=0.1, key="pub_lw_sp", format="%.1f")
+                with _gs3:
                     st.caption("**Font family**")
                     _ui_font = st.selectbox(
                         "Font",
@@ -4226,48 +4194,60 @@ with tab_download:
                         key="pub_font",
                     )
 
-            # ── Per-figure style & selection ──────────────────────────────
+            # ── Per-figure: include, dimensions, colours ───────────────────
+            # Default (W cm, H cm) per category
             _ALL_CATS = [
-                ("linescan_spectra", "Preprocessed linescan spectra"),
-                ("mcr_scores",       "MCR concentration scores"),
-                ("pls_profiles",     "PLS concentration profiles"),
-                ("pls_tr_spectra",   "PLS training spectra"),
-                ("pls_cal_scatter",  "PLS calibration scatter & RMSE"),
-                ("pls_loadings",     "PLS loadings & coefficients"),
-                ("salt_cal",         "Salt PLS calibration"),
-                ("pca",              "PCA"),
-                ("amide",            "Amide I deconvolution"),
-                ("peak_ratio",       "Peak intensity ratio"),
+                ("linescan_spectra", "Preprocessed linescan spectra",  5.0, 2.8),
+                ("mcr_scores",       "MCR concentration scores",        7.0, 3.5),
+                ("pls_profiles",     "PLS concentration profiles",      7.0, 3.5),
+                ("pls_tr_spectra",   "PLS training spectra",            5.0, 2.8),
+                ("pls_cal_scatter",  "PLS calibration scatter & RMSE",  7.0, 3.5),
+                ("pls_loadings",     "PLS loadings & coefficients",     5.0, 2.8),
+                ("salt_cal",         "Salt PLS calibration",            5.0, 2.8),
+                ("pca",              "PCA",                             5.0, 3.2),
+                ("amide",            "Amide I deconvolution",           5.0, 5.0),
+                ("peak_ratio",       "Peak intensity ratio",            7.0, 3.5),
             ]
-            st.caption(
-                "Expand each figure to include/exclude it and adjust its typography "
-                "and line widths independently."
-            )
+            st.caption("Expand each figure to include/exclude it and set its panel size and colour palette.")
             _fig_sel    = {}
             _fig_styles = {}
-            for _cat_k, _cat_lbl in _ALL_CATS:
+            for _cat_k, _cat_lbl, _def_w, _def_h in _ALL_CATS:
                 with st.expander(_cat_lbl, expanded=False):
                     _fig_sel[_cat_k] = st.checkbox(
                         "Include in export", value=True, key=f"pub_sel_{_cat_k}"
                     )
                     _dis = not _fig_sel[_cat_k]
-                    _fc1, _fc2, _fc3, _fc4, _fc5 = st.columns(5)
-                    _fig_styles[_cat_k] = {
-                        "ts":    int(_fc1.number_input(
-                            "Tick (pt)",     3, 16, 5,   step=1,   key=f"pub_ts_{_cat_k}",    disabled=_dis)),
-                        "ls":    int(_fc2.number_input(
-                            "Axis (pt)",     4, 20, 8,   step=1,   key=f"pub_ls_{_cat_k}",    disabled=_dis)),
-                        "lg":    int(_fc3.number_input(
-                            "Legend (pt)",   3, 14, 5,   step=1,   key=f"pub_lg_{_cat_k}",    disabled=_dis)),
-                        "lw":    float(_fc4.number_input(
-                            "Main lw",    0.2, 4.0, 0.8, step=0.1, key=f"pub_lw_{_cat_k}",   format="%.1f", disabled=_dis)),
-                        "lw_sp": float(_fc5.number_input(
-                            "Spectra lw", 0.1, 2.0, 0.3, step=0.1, key=f"pub_lwsp_{_cat_k}", format="%.1f", disabled=_dis)),
-                    }
-            _DEFAULT_STY = _fig_styles.get(
-                "linescan_spectra",
-                {"ts": 5, "ls": 8, "lg": 5, "lw": 0.8, "lw_sp": 0.3},
-            )
+                    _fca, _fcb, _fcc = st.columns(3)
+                    _fw = _fca.number_input("Width (cm)",  1.0, 25.0, _def_w, step=0.5, key=f"pub_w_{_cat_k}",   disabled=_dis)
+                    _fh = _fcb.number_input("Height (cm)", 0.5, 20.0, _def_h, step=0.5, key=f"pub_h_{_cat_k}",   disabled=_dis)
+                    with _fcc:
+                        _pal = st.selectbox(
+                            "Palette",
+                            ["Custom", "tab10", "Set1", "Set2", "Dark2",
+                             "Paired", "viridis", "plasma", "magma", "coolwarm"],
+                            key=f"pub_pal_{_cat_k}", disabled=_dis,
+                        )
+                        if _pal == "Custom":
+                            _pcols = []
+                            _fcc1, _fcc2 = st.columns(2)
+                            for _pci in range(8):
+                                _pcols.append(
+                                    (_fcc1 if _pci % 2 == 0 else _fcc2).color_picker(
+                                        f"C{_pci + 1}", _DEFAULT_COLS[_pci],
+                                        key=f"pub_col{_pci}_{_cat_k}", disabled=_dis,
+                                    )
+                                )
+                        else:
+                            import matplotlib.colors as _mcolors
+                            _cmap_fn = __import__("matplotlib").colormaps.get_cmap(_pal)
+                            _pcols = [_mcolors.to_hex(_cmap_fn(i / 7)) for i in range(8)]
+                            st.markdown("".join(
+                                f'<span style="background:{c};display:inline-block;'
+                                f'width:18px;height:18px;margin:1px;border-radius:3px;'
+                                f'border:1px solid #ccc"></span>'
+                                for c in _pcols
+                            ), unsafe_allow_html=True)
+                    _fig_styles[_cat_k] = {"w": float(_fw), "h": float(_fh), "cols": _pcols}
 
             import matplotlib
             matplotlib.use("Agg")
@@ -4287,18 +4267,22 @@ with tab_download:
             })
 
             _CM    = 1 / 2.54
-            _W_SPEC = float(_ui_wspec) * _CM
-            _H_SPEC = float(_ui_hspec) * _CM
-            _W_WIDE = float(_ui_wwide) * _CM
-            _H_WIDE = float(_ui_hwide) * _CM
-            _W_SQ   = float(_ui_wsq)   * _CM
-            _H_SQ   = float(_ui_hsq)   * _CM
-            _TS, _LS, _LG, _LW, _LW_SP = 5, 8, 5, 0.8, 0.3  # overridden per-figure in assembly loop
-            _HPAD   = 1.4 * _CM
-            _VPAD   = 1.8 * _CM
+            _TS    = int(_ui_ts)
+            _LS    = int(_ui_ls)
+            _LG    = int(_ui_leg)
+            _LW    = float(_ui_lw)
+            _LW_SP = float(_ui_lw_sp)
+            _HPAD  = 1.4 * _CM
+            _VPAD  = 1.8 * _CM
             _ML, _MR = 1.6 * _CM, 1.0 * _CM
             _MT, _MB = 0.8 * _CM, 1.2 * _CM
-            _MCOLS  = list(_ui_cols)
+            _MCOLS = _DEFAULT_COLS[:]  # overridden per-figure in assembly loop
+
+            def _ps(tag, n=1):
+                """Return n identical (w_in, h_in) panel specs for a figure category."""
+                _s = _fig_styles[tag]
+                _p = (_s["w"] * _CM, _s["h"] * _CM)
+                return [_p] * n
 
             def _style_ax(ax):
                 ax.tick_params(labelsize=_TS, width=0.5, length=2, colors="black")
@@ -4357,10 +4341,8 @@ with tab_download:
                         axs[1].legend(fontsize=_LG, frameon=False)
                         _style_ax(axs[1])
 
-                _spec_panels = [(_W_SPEC, _H_SPEC)]
-                if _has_mcr_sv:
-                    _spec_panels.append((_W_SPEC, _H_SPEC))
-                _row_specs.append((_spec_panels, _draw_spec_row, _fig_styles["linescan_spectra"]))
+                _row_specs.append((_ps("linescan_spectra", 1 + int(_has_mcr_sv)),
+                                   _draw_spec_row, _fig_styles["linescan_spectra"]))
                 _row_tags.append("linescan_spectra")
                 _cap_spec = (f"Linescan: {_safe_fn}. "
                              f"a) Preprocessed Raman spectra (up to 60, grey).")
@@ -4382,7 +4364,7 @@ with tab_download:
                         axs[0].legend(fontsize=_LG, frameon=False, loc="upper right")
                         _style_ax(axs[0])
 
-                    _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_mcr_scores, _fig_styles["mcr_scores"]))
+                    _row_specs.append((_ps("mcr_scores"), _draw_mcr_scores, _fig_styles["mcr_scores"]))
                     _row_tags.append("mcr_scores")
                     _nc = _sv_r["C_mcr"].shape[1]
                     _cap_parts.append(
@@ -4477,10 +4459,8 @@ with tab_download:
                                                    labelsize=_TS)
                                 _style_ax(axs[1])
 
-                    _pls_panels = [(_W_WIDE, _H_WIDE)]
-                    if _has_peg_sv or _has_salt_sv:
-                        _pls_panels.append((_W_WIDE, _H_WIDE))
-                    _row_specs.append((_pls_panels, _draw_pls_row, _fig_styles["pls_profiles"]))
+                    _row_specs.append((_ps("pls_profiles", 1 + int(_has_peg_sv or _has_salt_sv)),
+                                       _draw_pls_row, _fig_styles["pls_profiles"]))
                     _row_tags.append("pls_profiles")
                     _cap_pls = (
                         f"PLS concentration profiles \u2014 {_safe_fn}. "
@@ -4565,7 +4545,7 @@ with tab_download:
                 if _dual_sv:
                     _n_prot = _pls_p_sv["X_prot_proc"].shape[0]
                     _n_peg  = _pls_p_sv["X_train_proc"].shape[0] - _n_prot
-                    _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
+                    _row_specs.append((_ps("pls_tr_spectra", 2),
                                        _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
                     _row_tags.append("pls_tr_spectra")
                     _cap_parts.append(
@@ -4575,7 +4555,8 @@ with tab_download:
                     )
                 else:
                     _n_tr = _pls_p_sv["X_train_proc"].shape[0]
-                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
+                    _row_specs.append((_ps("pls_tr_spectra"),
+                                       _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
                     _row_tags.append("pls_tr_spectra")
                     _cap_parts.append(
                         f"PLS1 training spectra ({_wn_rng}), "
@@ -4595,7 +4576,7 @@ with tab_download:
                         _style_ax(axs[0])
                         _rmse_row(axs[1], pp)
 
-                    _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                    _row_specs.append((_ps("pls_cal_scatter", 2),
                                        _draw_pls1_reg_rmse, _fig_styles["pls_cal_scatter"]))
                     _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
@@ -4628,7 +4609,7 @@ with tab_download:
                         axs[1].set_ylabel("Predicted (wt%)")
                         _style_ax(axs[1])
 
-                    _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
+                    _row_specs.append((_ps("pls_cal_scatter", 2),
                                        _draw_dual_scatters, _fig_styles["pls_cal_scatter"]))
                     _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
@@ -4642,7 +4623,8 @@ with tab_download:
                     def _draw_dual_rmse(axs, pp=_pls_p_sv):
                         _rmse_row(axs[0], pp)
 
-                    _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_dual_rmse, _fig_styles["pls_cal_scatter"]))
+                    _row_specs.append((_ps("pls_cal_scatter"),
+                                       _draw_dual_rmse, _fig_styles["pls_cal_scatter"]))
                     _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
                         f"PLS2 RMSE vs latent variables. "
@@ -4665,7 +4647,7 @@ with tab_download:
                         axs[0].legend(fontsize=_LG, frameon=False)
                     _style_ax(axs[0])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_loadings, _fig_styles["pls_loadings"]))
+                _row_specs.append((_ps("pls_loadings"), _draw_pls_loadings, _fig_styles["pls_loadings"]))
                 _row_tags.append("pls_loadings")
                 _cap_parts.append(
                     f"{'PLS1' if not _dual_sv else 'PLS2'} X-loadings ({_wn_rng}), "
@@ -4685,7 +4667,7 @@ with tab_download:
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
                         _style_ax(axs[0])
 
-                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_coef_protein, _fig_styles["pls_loadings"]))
+                    _row_specs.append((_ps("pls_loadings"), _draw_coef_protein, _fig_styles["pls_loadings"]))
                     _row_tags.append("pls_loadings")
                     _cap_parts.append(
                         f"{'PLS1' if not _dual_sv else 'PLS2'} regression coefficients "
@@ -4702,7 +4684,7 @@ with tab_download:
                             axs[0].set_xlim(wn_v[0], wn_v[-1])
                             _style_ax(axs[0])
 
-                        _row_specs.append(([(_W_SPEC, _H_SPEC)],
+                        _row_specs.append((_ps("pls_loadings"),
                                            _draw_coef_crowder, _fig_styles["pls_loadings"]))
                         _row_tags.append("pls_loadings")
                         _cap_parts.append(
@@ -4728,7 +4710,7 @@ with tab_download:
                     axs[0].set_xlim(_wn[0], _wn[-1])
                     _style_ax(axs[0])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_spec, _fig_styles["salt_cal"]))
+                _row_specs.append((_ps("salt_cal"), _draw_salt_spec, _fig_styles["salt_cal"]))
                 _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 training spectra "
@@ -4746,8 +4728,7 @@ with tab_download:
                     _style_ax(axs[0])
                     _rmse_row(axs[1], ps, label="RMSE (mM)")
 
-                _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
-                                   _draw_salt_reg_rmse, _fig_styles["salt_cal"]))
+                _row_specs.append((_ps("salt_cal", 2), _draw_salt_reg_rmse, _fig_styles["salt_cal"]))
                 _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 calibration ({_wn_s_rng}). "
@@ -4772,7 +4753,7 @@ with tab_download:
                         axs[0].legend(fontsize=_LG, frameon=False)
                     _style_ax(axs[0])
 
-                _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_loadings, _fig_styles["salt_cal"]))
+                _row_specs.append((_ps("salt_cal"), _draw_salt_loadings, _fig_styles["salt_cal"]))
                 _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 X-loadings ({_wn_s_rng}), "
@@ -4790,7 +4771,7 @@ with tab_download:
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
                         _style_ax(axs[0])
 
-                    _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_coef, _fig_styles["salt_cal"]))
+                    _row_specs.append((_ps("salt_cal"), _draw_salt_coef, _fig_styles["salt_cal"]))
                     _row_tags.append("salt_cal")
                     _cap_parts.append(
                         f"Salt PLS1 regression coefficients ({_wn_s_rng})."
@@ -4840,11 +4821,7 @@ with tab_download:
                         _sp.set_linewidth(0.5)
                     _style_ax(axs[2])
 
-                _row_specs.append((
-                    [(_W_SPEC, _H_WIDE), (_W_SPEC, _H_SPEC), (_W_SPEC, _H_WIDE)],
-                    _draw_pca,
-                    _fig_styles["pca"],
-                ))
+                _row_specs.append((_ps("pca", 3), _draw_pca, _fig_styles["pca"]))
                 _row_tags.append("pca")
                 _npc = _pca_sv["scores"].shape[1]
                 _cap_parts.append(
@@ -4889,7 +4866,7 @@ with tab_download:
                     axs[0].legend(fontsize=_LG, frameon=False, loc="upper left")
                     _style_ax(axs[0])
 
-                _row_specs.append(([(_W_SQ, _H_SQ)], _draw_amide, _fig_styles["amide"]))
+                _row_specs.append((_ps("amide"), _draw_amide, _fig_styles["amide"]))
                 _row_tags.append("amide")
                 _cap_parts.append(
                     f"Amide I band deconvolution "
@@ -4923,10 +4900,8 @@ with tab_download:
                         axs[1].set_ylabel(f"I({rr['pk1']})/I({rr['pk2']})")
                         _style_ax(axs[1])
 
-                _ratio_panels = [(_W_WIDE, _H_WIDE)]
-                if _rr_lv is not None:
-                    _ratio_panels.append((_W_WIDE, _H_WIDE))
-                _row_specs.append((_ratio_panels, _draw_ratio, _fig_styles["peak_ratio"]))
+                _row_specs.append((_ps("peak_ratio", 1 + int(_rr_lv is not None)),
+                                   _draw_ratio, _fig_styles["peak_ratio"]))
                 _row_tags.append("peak_ratio")
                 _cap_parts.append(
                     f"Peak intensity ratio I({_ratio_sv['pk1']} cm\u207b\xb9) / "
@@ -4965,11 +4940,7 @@ with tab_download:
 
                 _y_top = _fig_h_in - _MT
                 for _ri, (panels, draw_fn, _sty_fig) in enumerate(_row_specs):
-                    _TS    = _sty_fig["ts"]
-                    _LS    = _sty_fig["ls"]
-                    _LG    = _sty_fig["lg"]
-                    _LW    = _sty_fig["lw"]
-                    _LW_SP = _sty_fig["lw_sp"]
+                    _MCOLS = _sty_fig["cols"]
                     _rh = _rh_in[_ri]
                     _y_bot = _y_top - _rh
                     _x = _ML
