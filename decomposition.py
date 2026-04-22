@@ -199,6 +199,93 @@ def build_dual_pls_model(
     }
 
 
+def build_triple_pls_model(
+    X_p1: np.ndarray, y_p1: np.ndarray,
+    X_p2: np.ndarray, y_p2: np.ndarray,
+    X_peg: np.ndarray, y_peg: np.ndarray,
+    max_components: int = 20,
+    cv_folds: int = 5,
+) -> dict:
+    """
+    Train a multi-output PLS2 model predicting two proteins and a molecular crowder
+    simultaneously.  Training stacks all three standard sets with the other outputs
+    zeroed out, identical to the dual approach.
+
+    Returns a dict with 'triple': True and 'dual': True so downstream code that
+    only checks 'dual' still dispatches correctly.
+    """
+    n1, n2, np_ = len(y_p1), len(y_p2), len(y_peg)
+    X_train  = np.vstack([X_p1, X_p2, X_peg])
+    y_t_p1   = np.concatenate([y_p1,           np.zeros(n2),  np.zeros(np_)])
+    y_t_p2   = np.concatenate([np.zeros(n1),   y_p2,          np.zeros(np_)])
+    y_t_peg  = np.concatenate([np.zeros(n1),   np.zeros(n2),  y_peg        ])
+    Y_train  = np.column_stack([y_t_p1, y_t_p2, y_t_peg])
+
+    n_opt, rmse_cv, rmse_train = _find_optimal_components(
+        X_train, Y_train,
+        max_components=max_components,
+        cv_folds=cv_folds,
+    )
+
+    feat_std       = np.std(X_train, axis=0)
+    valid_features = feat_std > 1e-10
+
+    model  = PLSRegression(n_components=n_opt, scale=False)
+    model.fit(X_train[:, valid_features], Y_train)
+    Y_pred = model.predict(X_train[:, valid_features])
+
+    rmse_p1  = float(np.sqrt(mean_squared_error(y_t_p1,  Y_pred[:, 0])))
+    r2_p1    = float(r2_score(y_t_p1,  Y_pred[:, 0]))
+    rmse_p2  = float(np.sqrt(mean_squared_error(y_t_p2,  Y_pred[:, 1])))
+    r2_p2    = float(r2_score(y_t_p2,  Y_pred[:, 1]))
+    rmse_peg = float(np.sqrt(mean_squared_error(y_t_peg, Y_pred[:, 2])))
+    r2_peg   = float(r2_score(y_t_peg, Y_pred[:, 2]))
+
+    # Per-output CV RMSE for error bands in results plots
+    kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    p1_cv_errors, p2_cv_errors, peg_cv_errors = [], [], []
+    X_f = X_train[:, valid_features]
+    for train_idx, val_idx in kfold.split(X_f):
+        X_tr_f      = X_f[train_idx]
+        valid_inner = np.std(X_tr_f, axis=0) > 1e-10
+        pls_tmp     = PLSRegression(n_components=n_opt, scale=False)
+        pls_tmp.fit(X_tr_f[:, valid_inner], Y_train[train_idx])
+        Y_vp = pls_tmp.predict(X_f[val_idx][:, valid_inner])
+        p1_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 0], Y_vp[:, 0]))))
+        p2_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 1], Y_vp[:, 1]))))
+        peg_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 2], Y_vp[:, 2]))))
+
+    return {
+        "triple":               True,
+        "dual":                 True,   # superset — keeps dual dispatch paths working
+        "model":                model,
+        "valid_features":       valid_features,
+        "n_components":         n_opt,
+        "rmse_p1_train":        rmse_p1,
+        "r2_p1_train":          r2_p1,
+        "rmse_p2_train":        rmse_p2,
+        "r2_p2_train":          r2_p2,
+        "rmse_peg_train":       rmse_peg,
+        "r2_peg_train":         r2_peg,
+        "cv_rmse":              float(rmse_cv[n_opt - 1]),
+        "cv_rmse_p1":           float(np.mean(p1_cv_errors)),
+        "cv_rmse_p2":           float(np.mean(p2_cv_errors)),
+        "cv_rmse_peg":          float(np.mean(peg_cv_errors)),
+        # keep old key names so non-triple dual code doesn't KeyError
+        "cv_rmse_protein":      float(np.mean(p1_cv_errors)),
+        "rmse_cv_all":          rmse_cv,
+        "rmse_train_all":       rmse_train,
+        "y_p1_train":           y_t_p1,
+        "y_p2_train":           y_t_p2,
+        "y_peg_train":          y_t_peg,
+        "y_pred_p1_train":      Y_pred[:, 0],
+        "y_pred_p2_train":      Y_pred[:, 1],
+        "y_pred_peg_train":     Y_pred[:, 2],
+        "X_train_proc":         X_train,
+        "wn":                   None,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MCR-ALS
 # ─────────────────────────────────────────────────────────────────────────────

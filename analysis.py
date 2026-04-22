@@ -26,6 +26,7 @@ from preprocessing import (          # noqa: F401 (re-exported)
 from decomposition import (          # noqa: F401 (re-exported)
     build_pls_model,
     build_dual_pls_model,
+    build_triple_pls_model,
     run_mcr,
 )
 
@@ -76,10 +77,17 @@ def process_linescan(
 
     # Protein (and optionally molecular crowder) PLS (optional)
     # Preprocess with pls_settings to match the normalization used during training
-    pls_protein = pls_peg = None
+    pls_protein = pls_protein2 = pls_peg = None
     if pls_protein_info is not None:
         X_pls, _, _ = preprocess_matrix(X, wn_original, pls_settings)
-        if pls_protein_info.get("dual"):
+        if pls_protein_info.get("triple"):
+            Y_triple     = pls_protein_info["model"].predict(
+                X_pls[:, pls_protein_info["valid_features"]]
+            )
+            pls_protein  = Y_triple[:, 0].flatten()
+            pls_protein2 = Y_triple[:, 1].flatten()
+            pls_peg      = Y_triple[:, 2].flatten()
+        elif pls_protein_info.get("dual"):
             Y_dual      = pls_protein_info["model"].predict(
                 X_pls[:, pls_protein_info["valid_features"]]
             )
@@ -99,17 +107,18 @@ def process_linescan(
         ).flatten()
 
     return {
-        "distance":    distance,
-        "positions":   positions,          # raw stage x/y/z per spectrum (µm)
-        "X_proc":      X_proc,
-        "wn_proc":     wn_proc,
-        "C_mcr":       C_mcr,
-        "ST_mcr":      ST_mcr,
-        "mcr_ratio":   mcr_ratio,
-        "mcr_n_iter":  mcr_n_iter,
-        "pls_protein": pls_protein,
-        "pls_peg":     pls_peg,
-        "pls_salt":    pls_salt,
+        "distance":     distance,
+        "positions":    positions,          # raw stage x/y/z per spectrum (µm)
+        "X_proc":       X_proc,
+        "wn_proc":      wn_proc,
+        "C_mcr":        C_mcr,
+        "ST_mcr":       ST_mcr,
+        "mcr_ratio":    mcr_ratio,
+        "mcr_n_iter":   mcr_n_iter,
+        "pls_protein":  pls_protein,
+        "pls_protein2": pls_protein2,
+        "pls_peg":      pls_peg,
+        "pls_salt":     pls_salt,
     }
 
 
@@ -135,8 +144,11 @@ def results_to_excel_bytes(
             data["MCR_Ratio_Comp1_Comp2"] = results["mcr_ratio"].astype(float)
 
     if results.get("pls_protein") is not None:
-        prot_col = f"PLS_Protein_{protein_unit.replace('/', '_per_')}"
+        prot_col = f"PLS_Protein1_{protein_unit.replace('/', '_per_')}"
         data[prot_col] = results["pls_protein"].astype(float)
+
+    if results.get("pls_protein2") is not None:
+        data[f"PLS_Protein2_{protein_unit.replace('/', '_per_')}"] = results["pls_protein2"].astype(float)
 
     if results.get("pls_peg") is not None:
         data["PLS_Crowder_wt_percent"] = results["pls_peg"].astype(float)
