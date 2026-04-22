@@ -17,10 +17,12 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import importlib as _importlib
-import decomposition as _decomp_mod   # noqa: F401 — ensure fresh load
+import decomposition as _decomp_mod   # noqa: F401
+import preprocessing as _prep_mod     # noqa: F401
 import analysis as an
-_importlib.reload(_decomp_mod)        # force re-read of source file
-_importlib.reload(an)                 # re-export build_triple_pls_model
+_importlib.reload(_decomp_mod)        # force re-read of source files
+_importlib.reload(_prep_mod)          # picks up second_deriv and future changes
+_importlib.reload(an)                 # re-exports from reloaded sub-modules
 import raman_preprocessing as rms
 
 # ─────────────────────────────────────────────────────────────────────────────
