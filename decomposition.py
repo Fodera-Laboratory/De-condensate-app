@@ -271,8 +271,10 @@ def build_triple_pls_model(
         "cv_rmse_p1":           float(np.mean(p1_cv_errors)),
         "cv_rmse_p2":           float(np.mean(p2_cv_errors)),
         "cv_rmse_peg":          float(np.mean(peg_cv_errors)),
-        # keep old key names so non-triple dual code doesn't KeyError
+        # backward-compat aliases so dual code paths don't KeyError on triple
         "cv_rmse_protein":      float(np.mean(p1_cv_errors)),
+        "r2_protein_train":     r2_p1,
+        "rmse_protein_train":   rmse_p1,
         "rmse_cv_all":          rmse_cv,
         "rmse_train_all":       rmse_train,
         "y_p1_train":           y_t_p1,
