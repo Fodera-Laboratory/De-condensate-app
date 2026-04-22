@@ -4391,10 +4391,11 @@ with tab_download:
                         axs[0].fill_between(_dist, _prot - cv_p, _prot + cv_p,
                                             color=_MCOLS[0], alpha=0.15)
                         axs[0].set_xlabel(dlbl)
-                        axs[0].set_ylabel(f"Protein ({unit})", color=_MCOLS[0])
-                        axs[0].tick_params(axis="y", colors=_MCOLS[0],
-                                           labelsize=_TS)
                         _style_ax(axs[0])
+                        axs[0].set_ylabel(f"Protein ({unit})", color=_MCOLS[0])
+                        axs[0].yaxis.label.set_color(_MCOLS[0])
+                        axs[0].tick_params(axis="y", colors=_MCOLS[0],
+                                           labelsize=_TS, width=0.5, length=2)
 
                         if has_peg:
                             _peg   = np.array(r["pls_peg"])
