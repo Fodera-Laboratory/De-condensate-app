@@ -4158,9 +4158,7 @@ with tab_download:
         st.divider()
         st.subheader("Publication figures")
         st.caption(
-            "All generated plots combined into a single SVG file sized for publication "
-            "(subplots: 4.5 × 2.5 cm, standalone panels: 4.5 × 4.5 cm; "
-            "tick labels 8 pt, axis labels 9 pt). "
+            "Selected plots exported as a single SVG (editable text in Inkscape / Illustrator). "
             "Figure captions exported as a separate .txt file."
         )
 
@@ -4173,6 +4171,79 @@ with tab_download:
         if not _pub_has:
             st.info("Run MCR/PLS analysis or further analysis to generate figures.")
         else:
+            # ── Style settings ────────────────────────────────────────────
+            _DEFAULT_COLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
+                             "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
+            with st.expander("⚙  Style settings", expanded=False):
+                _sty1, _sty2, _sty3 = st.columns(3)
+                with _sty1:
+                    st.caption("**Typography & lines**")
+                    _ui_ts    = st.number_input("Tick label (pt)",      3, 16,  5,   step=1,   key="pub_ts")
+                    _ui_ls    = st.number_input("Axis label (pt)",      4, 20,  8,   step=1,   key="pub_ls")
+                    _ui_leg   = st.number_input("Legend (pt)",          3, 14,  5,   step=1,   key="pub_leg")
+                    _ui_lw    = st.number_input("Main line width",   0.2, 4.0, 0.8, step=0.1, key="pub_lw",    format="%.1f")
+                    _ui_lw_sp = st.number_input("Spectra line width",0.1, 2.0, 0.3, step=0.1, key="pub_lw_sp", format="%.1f")
+                with _sty2:
+                    st.caption("**Panel dimensions (cm)**")
+                    _d2a, _d2b = st.columns(2)
+                    _ui_wspec = _d2a.number_input("Spec. W", 2.0, 20.0, 5.0, step=0.5, key="pub_wspec")
+                    _ui_hspec = _d2b.number_input("Spec. H", 1.0, 15.0, 2.8, step=0.5, key="pub_hspec")
+                    _ui_wwide = _d2a.number_input("Score W", 2.0, 20.0, 7.0, step=0.5, key="pub_wwide")
+                    _ui_hwide = _d2b.number_input("Score H", 1.0, 15.0, 3.5, step=0.5, key="pub_hwide")
+                    _ui_wsq   = _d2a.number_input("Sq. W",   2.0, 20.0, 5.0, step=0.5, key="pub_wsq")
+                    _ui_hsq   = _d2b.number_input("Sq. H",   1.0, 15.0, 5.0, step=0.5, key="pub_hsq")
+                with _sty3:
+                    st.caption("**Colour palette**")
+                    _ui_pal = st.selectbox(
+                        "Palette",
+                        ["Custom", "tab10", "Set1", "Set2", "Dark2",
+                         "Paired", "viridis", "plasma", "magma", "coolwarm"],
+                        key="pub_palette",
+                    )
+                    if _ui_pal == "Custom":
+                        _ui_cols = []
+                        _pc1, _pc2 = st.columns(2)
+                        for _pci in range(8):
+                            _ui_cols.append(
+                                (_pc1 if _pci % 2 == 0 else _pc2).color_picker(
+                                    f"Color {_pci + 1}", _DEFAULT_COLS[_pci],
+                                    key=f"pub_col{_pci}",
+                                )
+                            )
+                    else:
+                        import matplotlib.colors as _mcolors
+                        _cmap_fn = __import__("matplotlib").colormaps.get_cmap(_ui_pal)
+                        _ui_cols = [_mcolors.to_hex(_cmap_fn(i / 7)) for i in range(8)]
+                        _prev_html = "".join(
+                            f'<span style="background:{c};display:inline-block;'
+                            f'width:24px;height:24px;margin:2px;border-radius:4px;'
+                            f'border:1px solid #ccc"></span>'
+                            for c in _ui_cols
+                        )
+                        st.markdown(_prev_html, unsafe_allow_html=True)
+
+            # ── Figure selection ──────────────────────────────────────────
+            _ALL_CATS = [
+                ("linescan_spectra", "Preprocessed linescan spectra"),
+                ("mcr_scores",       "MCR concentration scores"),
+                ("pls_profiles",     "PLS concentration profiles"),
+                ("pls_tr_spectra",   "PLS training spectra"),
+                ("pls_cal_scatter",  "PLS calibration scatter & RMSE"),
+                ("pls_loadings",     "PLS loadings & coefficients"),
+                ("salt_cal",         "Salt PLS calibration"),
+                ("pca",              "PCA"),
+                ("amide",            "Amide I deconvolution"),
+                ("peak_ratio",       "Peak intensity ratio"),
+            ]
+            with st.expander("📋  Figure selection", expanded=True):
+                st.caption("Uncheck to exclude from the exported SVG.")
+                _fsel_c = st.columns(2)
+                _fig_sel = {}
+                for _fi2, (_cat_k, _cat_lbl) in enumerate(_ALL_CATS):
+                    _fig_sel[_cat_k] = _fsel_c[_fi2 % 2].checkbox(
+                        _cat_lbl, value=True, key=f"pub_sel_{_cat_k}"
+                    )
+
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
@@ -4180,39 +4251,36 @@ with tab_download:
             import matplotlib.ticker as _mticker
             import io as _mio
 
-            # Keep text as editable SVG <text> elements (not paths) so Inkscape
-            # can select and edit individual labels.
             plt.rcParams.update({
-                "svg.fonttype":        "none",   # text stays as text, not paths
-                "font.family":         "Arial",
-                "text.color":          "black",
-                "axes.labelcolor":     "black",
-                "xtick.color":         "black",
-                "ytick.color":         "black",
-                "axes.edgecolor":      "black",
+                "svg.fonttype":    "none",
+                "font.family":     "Arial",
+                "text.color":      "black",
+                "axes.labelcolor": "black",
+                "xtick.color":     "black",
+                "ytick.color":     "black",
+                "axes.edgecolor":  "black",
             })
 
-            _CM = 1 / 2.54
-            # Panel sizes (in) by type
-            _W_SPEC  = 5.0 * _CM   # spectra / loadings / coefficients
-            _H_SPEC  = 2.8 * _CM
-            _W_WIDE  = 7.0 * _CM   # scores / regression / RMSE / scatter
-            _H_WIDE  = 3.5 * _CM
-            _W_SQ    = 5.0 * _CM   # square panels (amide deconvolution)
-            _H_SQ    = 5.0 * _CM
-            _TS, _LS = 5, 8        # tick 5 pt, label 8 pt
-            # Layout spacing (in)
-            _HPAD = 1.4 * _CM      # horizontal gap between panels
-            _VPAD = 1.8 * _CM      # vertical gap between rows
-            _ML, _MR = 1.6*_CM, 1.0*_CM
-            _MT, _MB = 0.8*_CM, 1.2*_CM
-            # Colour palette — matches COLORS used in web-page Plotly charts
-            _MCOLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
-                      "#FFA15A", "#19D3F3", "#FF6692", "#B6E880"]
+            _CM    = 1 / 2.54
+            _W_SPEC = float(_ui_wspec) * _CM
+            _H_SPEC = float(_ui_hspec) * _CM
+            _W_WIDE = float(_ui_wwide) * _CM
+            _H_WIDE = float(_ui_hwide) * _CM
+            _W_SQ   = float(_ui_wsq)   * _CM
+            _H_SQ   = float(_ui_hsq)   * _CM
+            _TS     = int(_ui_ts)
+            _LS     = int(_ui_ls)
+            _LG     = int(_ui_leg)
+            _LW     = float(_ui_lw)
+            _LW_SP  = float(_ui_lw_sp)
+            _HPAD   = 1.4 * _CM
+            _VPAD   = 1.8 * _CM
+            _ML, _MR = 1.6 * _CM, 1.0 * _CM
+            _MT, _MB = 0.8 * _CM, 1.2 * _CM
+            _MCOLS  = list(_ui_cols)
 
             def _style_ax(ax):
-                ax.tick_params(labelsize=_TS, width=0.5, length=2,
-                               colors="black")
+                ax.tick_params(labelsize=_TS, width=0.5, length=2, colors="black")
                 ax.xaxis.label.set_size(_LS)
                 ax.yaxis.label.set_size(_LS)
                 ax.xaxis.label.set_color("black")
@@ -4227,6 +4295,7 @@ with tab_download:
             # left-to-right using fig.add_axes() with absolute coordinates.
             _row_specs  = []
             _cap_parts  = []
+            _row_tags   = []
             _res_sv     = results_all
             _sm_sv      = st.session_state.get("scan_mode", "xy")
             _unit_sv    = st.session_state.get("unit", "mg/mL")
@@ -4249,7 +4318,7 @@ with tab_download:
                     _n_show = min(r["X_proc"].shape[0], 60)
                     for _si in range(_n_show):
                         axs[0].plot(r["wn_proc"], r["X_proc"][_si],
-                                    color="#aaaaaa", lw=0.3, alpha=0.4)
+                                    color="#aaaaaa", lw=_LW_SP, alpha=0.4)
                     axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
                     axs[0].set_xlim(r["wn_proc"][0], r["wn_proc"][-1])
@@ -4260,17 +4329,18 @@ with tab_download:
                                    else f"Comp {_k+1}")
                             axs[1].plot(r["wn_proc"], r["ST_mcr"][_k],
                                         color=_MCOLS[_k % len(_MCOLS)],
-                                        lw=0.8, label=_lb)
+                                        lw=_LW, label=_lb)
                         axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[1].set_ylabel("Intensity (a.u.)")
                         axs[1].set_xlim(r["wn_proc"][0], r["wn_proc"][-1])
-                        axs[1].legend(fontsize=5, frameon=False)
+                        axs[1].legend(fontsize=_LG, frameon=False)
                         _style_ax(axs[1])
 
                 _spec_panels = [(_W_SPEC, _H_SPEC)]
                 if _has_mcr_sv:
                     _spec_panels.append((_W_SPEC, _H_SPEC))
                 _row_specs.append((_spec_panels, _draw_spec_row))
+                _row_tags.append("linescan_spectra")
                 _cap_spec = (f"Linescan: {_safe_fn}. "
                              f"a) Preprocessed Raman spectra (up to 60, grey).")
                 if _has_mcr_sv:
@@ -4285,13 +4355,14 @@ with tab_download:
                                    else f"Comp {_k+1}")
                             axs[0].plot(r["distance"], r["C_mcr"][:, _k],
                                         color=_MCOLS[_k % len(_MCOLS)],
-                                        lw=0.8, label=_lb)
+                                        lw=_LW, label=_lb)
                         axs[0].set_xlabel(_dlbl_sv)
                         axs[0].set_ylabel("MCR score (a.u.)")
-                        axs[0].legend(fontsize=5, frameon=False, loc="upper right")
+                        axs[0].legend(fontsize=_LG, frameon=False, loc="upper right")
                         _style_ax(axs[0])
 
                     _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_mcr_scores))
+                    _row_tags.append("mcr_scores")
                     _nc = _sv_r["C_mcr"].shape[1]
                     _cap_parts.append(
                         f"MCR-ALS scores \u2014 {_safe_fn}. "
@@ -4313,7 +4384,7 @@ with tab_download:
                     ):
                         _prot = np.array(r["pls_protein"])
                         _dist = np.array(r["distance"])
-                        axs[0].plot(_dist, _prot, color=_MCOLS[0], lw=0.8)
+                        axs[0].plot(_dist, _prot, color=_MCOLS[0], lw=_LW)
                         axs[0].fill_between(_dist, _prot - cv_p, _prot + cv_p,
                                             color=_MCOLS[0], alpha=0.15)
                         axs[0].set_xlabel(dlbl)
@@ -4326,7 +4397,7 @@ with tab_download:
                             _peg   = np.array(r["pls_peg"])
                             _cv_pg = _pls_p_sv["cv_rmse_peg"]
                             _axtw  = axs[0].twinx()
-                            _axtw.plot(_dist, _peg, color=_MCOLS[2], lw=0.8)
+                            _axtw.plot(_dist, _peg, color=_MCOLS[2], lw=_LW)
                             _axtw.fill_between(_dist, _peg - _cv_pg,
                                                _peg + _cv_pg,
                                                color=_MCOLS[2], alpha=0.15)
@@ -4358,7 +4429,7 @@ with tab_download:
                             _salt  = np.array(r["pls_salt"])
                             _cv_s  = _pls_s_sv["cv_rmse"]
                             _axtw2 = axs[0].twinx()
-                            _axtw2.plot(_dist, _salt, color=_MCOLS[3], lw=0.8)
+                            _axtw2.plot(_dist, _salt, color=_MCOLS[3], lw=_LW)
                             _axtw2.fill_between(_dist, _salt - _cv_s,
                                                 _salt + _cv_s,
                                                 color=_MCOLS[3], alpha=0.15)
@@ -4389,6 +4460,7 @@ with tab_download:
                     if _has_peg_sv or _has_salt_sv:
                         _pls_panels.append((_W_WIDE, _H_WIDE))
                     _row_specs.append((_pls_panels, _draw_pls_row))
+                    _row_tags.append("pls_profiles")
                     _cap_pls = (
                         f"PLS concentration profiles \u2014 {_safe_fn}. "
                         f"a) Protein ({_unit_sv}) \u00b1 {_cv_p_sv:.4f} {_unit_sv} CV RMSE."
@@ -4412,9 +4484,9 @@ with tab_download:
                 """Draw CV/Train RMSE curve with overfitting shading."""
                 _comps  = list(range(1, len(pp_or_ps["rmse_cv_all"]) + 1))
                 ax.plot(_comps, pp_or_ps["rmse_cv_all"], "o-",
-                        color="red", lw=0.8, ms=3, label="CV")
+                        color="red", lw=_LW, ms=3, label="CV")
                 ax.plot(_comps, pp_or_ps["rmse_train_all"], "o-",
-                        color="steelblue", lw=0.8, ms=3, label="Train")
+                        color="steelblue", lw=_LW, ms=3, label="Train")
                 ax.axvline(pp_or_ps["n_components"], color="black",
                            lw=0.6, ls="--")
                 _nc_opt = pp_or_ps["n_components"]
@@ -4426,7 +4498,7 @@ with tab_download:
                 ax.set_ylabel(label)
                 ax.set_xlim(0.5, _nc_max + 0.5)
                 ax.xaxis.set_major_locator(_mticker.MultipleLocator(2))
-                ax.legend(fontsize=5, frameon=False)
+                ax.legend(fontsize=_LG, frameon=False)
                 _style_ax(ax)
 
             if _pls_p_sv is not None:
@@ -4447,14 +4519,14 @@ with tab_download:
                                         pp["X_train_proc"][_Xprot.shape[0]:])
                         for _si in range(_Xprot.shape[0]):
                             axs[0].plot(_wn, _Xprot[_si],
-                                        color=_MCOLS[0], lw=0.3, alpha=0.5)
+                                        color=_MCOLS[0], lw=_LW_SP, alpha=0.5)
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Intensity (a.u.)")
                         axs[0].set_xlim(_wn[0], _wn[-1])
                         _style_ax(axs[0])
                         for _si in range(_Xpeg.shape[0]):
                             axs[1].plot(_wn, _Xpeg[_si],
-                                        color=_MCOLS[2], lw=0.3, alpha=0.5)
+                                        color=_MCOLS[2], lw=_LW_SP, alpha=0.5)
                         axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[1].set_ylabel("Intensity (a.u.)")
                         axs[1].set_xlim(_wn[0], _wn[-1])
@@ -4463,7 +4535,7 @@ with tab_download:
                         _Xtr = pp["X_train_proc"]
                         for _si in range(_Xtr.shape[0]):
                             axs[0].plot(_wn, _Xtr[_si],
-                                        color=_MCOLS[0], lw=0.3, alpha=0.5)
+                                        color=_MCOLS[0], lw=_LW_SP, alpha=0.5)
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Intensity (a.u.)")
                         axs[0].set_xlim(_wn[0], _wn[-1])
@@ -4474,6 +4546,7 @@ with tab_download:
                     _n_peg  = _pls_p_sv["X_train_proc"].shape[0] - _n_prot
                     _row_specs.append(([(_W_SPEC, _H_SPEC), (_W_SPEC, _H_SPEC)],
                                        _draw_pls_tr_spec))
+                    _row_tags.append("pls_tr_spectra")
                     _cap_parts.append(
                         f"PLS2 training spectra ({_wn_rng}). "
                         f"a) Protein standards ({_n_prot} spectra, blue). "
@@ -4482,6 +4555,7 @@ with tab_download:
                 else:
                     _n_tr = _pls_p_sv["X_train_proc"].shape[0]
                     _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_tr_spec))
+                    _row_tags.append("pls_tr_spectra")
                     _cap_parts.append(
                         f"PLS1 training spectra ({_wn_rng}), "
                         f"{_n_tr} preprocessed protein standard spectra."
@@ -4502,6 +4576,7 @@ with tab_download:
 
                     _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
                                        _draw_pls1_reg_rmse))
+                    _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
                         f"PLS1 protein calibration ({_wn_rng}). "
                         f"a) Predicted vs actual ({_unit_sv}); "
@@ -4534,6 +4609,7 @@ with tab_download:
 
                     _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
                                        _draw_dual_scatters))
+                    _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
                         f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
                         f"a) Protein predicted vs actual ({_unit_sv}); "
@@ -4546,6 +4622,7 @@ with tab_download:
                         _rmse_row(axs[0], pp)
 
                     _row_specs.append(([(_W_WIDE, _H_WIDE)], _draw_dual_rmse))
+                    _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
                         f"PLS2 RMSE vs latent variables. "
                         f"CV RMSE (red) and training RMSE (blue); "
@@ -4564,10 +4641,11 @@ with tab_download:
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Loading")
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
-                        axs[0].legend(fontsize=5, frameon=False)
+                        axs[0].legend(fontsize=_LG, frameon=False)
                     _style_ax(axs[0])
 
                 _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_pls_loadings))
+                _row_tags.append("pls_loadings")
                 _cap_parts.append(
                     f"{'PLS1' if not _dual_sv else 'PLS2'} X-loadings ({_wn_rng}), "
                     f"{_pls_p_sv['n_components']} latent variable(s)."
@@ -4579,7 +4657,7 @@ with tab_download:
 
                     def _draw_coef_protein(axs, wn_v=_wn_vld, coef=_coef_all,
                                            unit=_unit_sv):
-                        axs[0].plot(wn_v, coef[:, 0], color=_MCOLS[0], lw=0.8)
+                        axs[0].plot(wn_v, coef[:, 0], color=_MCOLS[0], lw=_LW)
                         axs[0].axhline(0, color="black", lw=0.3, ls="--")
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel(f"Coeff. ({unit})")
@@ -4587,6 +4665,7 @@ with tab_download:
                         _style_ax(axs[0])
 
                     _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_coef_protein))
+                    _row_tags.append("pls_loadings")
                     _cap_parts.append(
                         f"{'PLS1' if not _dual_sv else 'PLS2'} regression coefficients "
                         f"— protein ({_unit_sv})."
@@ -4595,7 +4674,7 @@ with tab_download:
                     if _dual_sv and _coef_all.shape[1] > 1:
                         def _draw_coef_crowder(axs, wn_v=_wn_vld,
                                                coef=_coef_all):
-                            axs[0].plot(wn_v, coef[:, 1], color=_MCOLS[2], lw=0.8)
+                            axs[0].plot(wn_v, coef[:, 1], color=_MCOLS[2], lw=_LW)
                             axs[0].axhline(0, color="black", lw=0.3, ls="--")
                             axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                             axs[0].set_ylabel("Coeff. (wt%)")
@@ -4604,6 +4683,7 @@ with tab_download:
 
                         _row_specs.append(([(_W_SPEC, _H_SPEC)],
                                            _draw_coef_crowder))
+                        _row_tags.append("pls_loadings")
                         _cap_parts.append(
                             "PLS2 regression coefficients — molecular crowder (wt%)."
                         )
@@ -4621,13 +4701,14 @@ with tab_download:
                     _Xs = ps["X_train_proc"]; _wn = ps["wn"]
                     for _si in range(_Xs.shape[0]):
                         axs[0].plot(_wn, _Xs[_si],
-                                    color="#aaaaaa", lw=0.3, alpha=0.5)
+                                    color="#aaaaaa", lw=_LW_SP, alpha=0.5)
                     axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
                     axs[0].set_xlim(_wn[0], _wn[-1])
                     _style_ax(axs[0])
 
                 _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_spec))
+                _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 training spectra "
                     f"({_pls_s_sv['X_train_proc'].shape[0]} spectra)."
@@ -4646,6 +4727,7 @@ with tab_download:
 
                 _row_specs.append(([(_W_WIDE, _H_WIDE), (_W_WIDE, _H_WIDE)],
                                    _draw_salt_reg_rmse))
+                _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 calibration ({_wn_s_rng}). "
                     f"a) Predicted vs actual (mM); "
@@ -4666,10 +4748,11 @@ with tab_download:
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Loading")
                         axs[0].set_xlim(wn_v[0], wn_v[-1])
-                        axs[0].legend(fontsize=5, frameon=False)
+                        axs[0].legend(fontsize=_LG, frameon=False)
                     _style_ax(axs[0])
 
                 _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_loadings))
+                _row_tags.append("salt_cal")
                 _cap_parts.append(
                     f"Salt PLS1 X-loadings ({_wn_s_rng}), "
                     f"{_pls_s_sv['n_components']} latent variable(s)."
@@ -4679,7 +4762,7 @@ with tab_download:
                     def _draw_salt_coef(axs, ps=_pls_s_sv,
                                         wn_v=_wn_sv_sv, nf=_nf_sv_s):
                         _coef = _pls_coef(ps["model"], nf)
-                        axs[0].plot(wn_v, _coef[:, 0], color=_MCOLS[3], lw=0.8)
+                        axs[0].plot(wn_v, _coef[:, 0], color=_MCOLS[3], lw=_LW)
                         axs[0].axhline(0, color="black", lw=0.3, ls="--")
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Coeff. (mM)")
@@ -4687,6 +4770,7 @@ with tab_download:
                         _style_ax(axs[0])
 
                     _row_specs.append(([(_W_SPEC, _H_SPEC)], _draw_salt_coef))
+                    _row_tags.append("salt_cal")
                     _cap_parts.append(
                         f"Salt PLS1 regression coefficients ({_wn_s_rng})."
                     )
@@ -4716,14 +4800,14 @@ with tab_download:
                     axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[1].set_ylabel("Loading")
                     axs[1].set_xlim(pr["wn"][0], pr["wn"][-1])
-                    axs[1].legend(fontsize=5, frameon=False)
+                    axs[1].legend(fontsize=_LG, frameon=False)
                     _style_ax(axs[1])
                     _ve = pr["var_exp"]
                     _xs = range(len(_ve))
                     axs[2].bar(_xs, _ve, color=_MCOLS[0], width=0.6, alpha=0.8)
                     _ax3b = axs[2].twinx()
                     _ax3b.plot(_xs, np.cumsum(_ve), "o-",
-                               color=_MCOLS[1], ms=3, lw=0.8)
+                               color=_MCOLS[1], ms=3, lw=_LW)
                     axs[2].set_xticks(list(_xs))
                     axs[2].set_xticklabels(
                         [f"PC{_i+1}" for _i in _xs], fontsize=_TS
@@ -4739,6 +4823,7 @@ with tab_download:
                     [(_W_SPEC, _H_WIDE), (_W_SPEC, _H_SPEC), (_W_SPEC, _H_WIDE)],
                     _draw_pca,
                 ))
+                _row_tags.append("pca")
                 _npc = _pca_sv["scores"].shape[1]
                 _cap_parts.append(
                     f"PCA of {_pca_sv['scores'].shape[0]} spectra "
@@ -4760,7 +4845,7 @@ with tab_download:
                     _lbs = ar.get("g_labels",
                                   [f"G{_k+1}" for _k in range(_ng)])
                     _wn_lo, _wn_hi = float(_wn.min()), float(_wn.max())
-                    axs[0].plot(_wn, _sp, color="black", lw=0.8,
+                    axs[0].plot(_wn, _sp, color="black", lw=_LW,
                                 label="Mean", zorder=3)
                     _ytot = np.zeros_like(_sp, dtype=float)
                     for _gi in range(_ng):
@@ -4771,7 +4856,7 @@ with tab_download:
                         axs[0].fill_between(_wn, _yi, alpha=0.25, color=_col)
                         axs[0].plot(_wn, _yi, color=_col, lw=0.6,
                                     label=f"{_lbs[_gi]} ({_mu:.0f})")
-                    axs[0].plot(_wn, _ytot, color="red", lw=0.8,
+                    axs[0].plot(_wn, _ytot, color="red", lw=_LW,
                                 ls="--", label="Fit")
                     axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                     axs[0].set_ylabel("Intensity (a.u.)")
@@ -4779,10 +4864,11 @@ with tab_download:
                     axs[0].yaxis.set_major_formatter(
                         _mticker.FormatStrFormatter("%.4f")
                     )
-                    axs[0].legend(fontsize=5, frameon=False, loc="upper left")
+                    axs[0].legend(fontsize=_LG, frameon=False, loc="upper left")
                     _style_ax(axs[0])
 
                 _row_specs.append(([(_W_SQ, _H_SQ)], _draw_amide))
+                _row_tags.append("amide")
                 _cap_parts.append(
                     f"Amide I band deconvolution "
                     f"({_amide_sv['wn'][0]:.0f}\u2013"
@@ -4819,6 +4905,7 @@ with tab_download:
                 if _rr_lv is not None:
                     _ratio_panels.append((_W_WIDE, _H_WIDE))
                 _row_specs.append((_ratio_panels, _draw_ratio))
+                _row_tags.append("peak_ratio")
                 _cap_parts.append(
                     f"Peak intensity ratio I({_ratio_sv['pk1']} cm\u207b\xb9) / "
                     f"I({_ratio_sv['pk2']} cm\u207b\xb9), "
@@ -4827,6 +4914,15 @@ with tab_download:
                     f"a) Ratio vs position."
                     + (f" b) Ratio vs {_rr_lk}." if _rr_lv is not None else "")
                 )
+
+            # ── Apply figure selection filter ─────────────────────────────
+            _filtered_pairs = [
+                (rs, cp)
+                for rs, cp, tag in zip(_row_specs, _cap_parts, _row_tags)
+                if _fig_sel.get(tag, True)
+            ]
+            _row_specs = [rs for rs, cp in _filtered_pairs]
+            _cap_parts = [cp for rs, cp in _filtered_pairs]
 
             # ── Assemble figure ───────────────────────────────────────────
             if not _row_specs:
