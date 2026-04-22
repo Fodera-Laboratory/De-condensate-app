@@ -5254,7 +5254,7 @@ with tab_about:
         _sz = _r_z  * np.outer(np.ones_like(_u), np.cos(_v))
 
         _fig_cv, _ax_cv = _mplt.subplots(
-            figsize=(3.2, 4.5),
+            figsize=(3.4, 5.2),
             subplot_kw={"projection": "3d"},
         )
         _ax_cv.plot_surface(_sx, _sy, _sz, color="#5EC418", alpha=0.85,
@@ -5265,17 +5265,15 @@ with tab_about:
         _ax_cv.tick_params(labelsize=6)
         _ax_cv.set_xlim(-170, 170); _ax_cv.set_ylim(-170, 170)
         _ax_cv.set_zlim(-520, 520)
-        _ax_cv.set_box_aspect([1, 1, 3.05])
+        _ax_cv.set_box_aspect([1, 1, 2.8])
         _ax_cv.xaxis.pane.fill = False
         _ax_cv.yaxis.pane.fill = False
         _ax_cv.zaxis.pane.fill = False
-        _fig_cv.tight_layout(pad=0.5)
+        _fig_cv.subplots_adjust(left=0.0, right=1.0, bottom=0.05, top=0.95)
         st.pyplot(_fig_cv, use_container_width=True)
         _mplt.close(_fig_cv)
 
     with _cv_col2:
-        _vol_fL = (4 / 3) * np.pi * (_r_xy ** 2) * _r_z / 1e9  # nm³ → fL (1 fL = 1e9 nm³ / 1e15 = 1e-6 µm³ hmm)
-        # 1 fL = 1e-15 L = 1 µm³ → 1 nm³ = 1e-9 µm³ → V_nm3 / 1e9 = V_µm3 → V_fL = V_µm3
         _vol_fL = (4 / 3) * np.pi * (_r_xy * 1e-3) ** 2 * (_r_z * 1e-3)  # µm³ = fL
         st.markdown(
             f"""
@@ -5304,7 +5302,9 @@ dilute-phase spectra within a single confocal volume, and the
 predicted value represents a spatial average rather than a true
 local concentration.
 
-*See:* [Dieing & Hollricher, *Spectroscopy* (2008)](https://www.spectroscopyonline.com/view/basic-aspects-experimental-design-raman-microscopy)
+*See:*
+- [Everall, N.J. *Analyst* **135**, 2512–2522 (2010)](https://pubs.rsc.org/en/content/articlelanding/2010/an/c0an00371a) — confocal Raman errors and artefacts: depth-scale compression, spherical aberration, out-of-focus contributions
+- [Dieing & Hollricher, *Spectroscopy* (2008)](https://www.spectroscopyonline.com/view/basic-aspects-experimental-design-raman-microscopy) — experimental design guidelines for Raman microscopy
             """
         )
 
