@@ -5235,6 +5235,79 @@ with tab_about:
         "(https://raman.oxinst.com/assets/uploads/raman/materials/WITec-alpha300-Brochure.pdf)."
     )
 
+    st.markdown("### Confocal sampling volume")
+    _cv_col1, _cv_col2 = st.columns([1, 1.6], gap="large")
+    with _cv_col1:
+        # ── Prolate-spheroid figure ───────────────────────────────────────
+        import matplotlib.pyplot as _mplt
+        import matplotlib as _mpl
+        from mpl_toolkits.mplot3d import Axes3D as _Axes3D  # noqa: F401
+
+        # 100× preset values converted to nm radii (half the full resolution)
+        _r_xy = 153.0   # nm  (0.306 µm / 2)
+        _r_z  = 465.0   # nm  (0.930 µm / 2)
+
+        _u = np.linspace(0, 2 * np.pi, 80)
+        _v = np.linspace(0, np.pi,     80)
+        _sx = _r_xy * np.outer(np.cos(_u), np.sin(_v))
+        _sy = _r_xy * np.outer(np.sin(_u), np.sin(_v))
+        _sz = _r_z  * np.outer(np.ones_like(_u), np.cos(_v))
+
+        _fig_cv, _ax_cv = _mplt.subplots(
+            figsize=(3.2, 4.5),
+            subplot_kw={"projection": "3d"},
+        )
+        _ax_cv.plot_surface(_sx, _sy, _sz, color="#5EC418", alpha=0.85,
+                            linewidth=0, antialiased=True)
+        _ax_cv.set_xlabel("X (nm)", fontsize=7, labelpad=4)
+        _ax_cv.set_ylabel("Y (nm)", fontsize=7, labelpad=4)
+        _ax_cv.set_zlabel("Z (nm)", fontsize=7, labelpad=4)
+        _ax_cv.tick_params(labelsize=6)
+        _ax_cv.set_xlim(-170, 170); _ax_cv.set_ylim(-170, 170)
+        _ax_cv.set_zlim(-520, 520)
+        _ax_cv.set_box_aspect([1, 1, 3.05])
+        _ax_cv.xaxis.pane.fill = False
+        _ax_cv.yaxis.pane.fill = False
+        _ax_cv.zaxis.pane.fill = False
+        _fig_cv.tight_layout(pad=0.5)
+        st.pyplot(_fig_cv, use_container_width=True)
+        _mplt.close(_fig_cv)
+
+    with _cv_col2:
+        _vol_fL = (4 / 3) * np.pi * (_r_xy ** 2) * _r_z / 1e9  # nm³ → fL (1 fL = 1e9 nm³ / 1e15 = 1e-6 µm³ hmm)
+        # 1 fL = 1e-15 L = 1 µm³ → 1 nm³ = 1e-9 µm³ → V_nm3 / 1e9 = V_µm3 → V_fL = V_µm3
+        _vol_fL = (4 / 3) * np.pi * (_r_xy * 1e-3) ** 2 * (_r_z * 1e-3)  # µm³ = fL
+        st.markdown(
+            f"""
+Each spectrum collected by a confocal Raman microscope represents the
+**integrated signal from a finite volume**, not a single point. The
+sampling volume is a prolate spheroid — elongated along the optical
+axis (Z) due to the diffraction-limited point-spread function.
+
+For the **100× objective** (NA 0.9, λ = 532 nm):
+
+| Dimension | Full width |
+|---|---|
+| Lateral (XY) | ≈ 0.31 µm |
+| Axial (Z) | ≈ 0.93 µm |
+| **Sampling volume** | **≈ {_vol_fL:.2f} fL** |
+
+**Practical consequence:** a Z-scan through a condensate samples a
+column of material at each step. Concentration profiles therefore
+reflect an **axial average** over ~0.93 µm at every position — sharp
+interfaces will appear broadened, and dilute-phase signal will
+contaminate dense-phase spectra near the droplet boundary.
+
+This is particularly relevant for **PLS-predicted concentrations**:
+near phase boundaries the model sees a mixture of dense- and
+dilute-phase spectra within a single confocal volume, and the
+predicted value represents a spatial average rather than a true
+local concentration.
+
+*See:* [Dieing & Hollricher, *Spectroscopy* (2008)](https://www.spectroscopyonline.com/view/basic-aspects-experimental-design-raman-microscopy)
+            """
+        )
+
     st.markdown("### Python libraries & references")
     st.markdown(
         "| Library | Role | Reference |\n"
