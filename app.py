@@ -768,12 +768,17 @@ if build_btn:
                             X_p2_proc, _, _ = an.preprocess_matrix(X_p2_raw, wn_ref, pls_settings)
 
                         with st.spinner("Training triple protein1+protein2+crowder PLS model…"):
-                            pls_protein = an.build_triple_pls_model(
-                                X_prot_proc, y_prot,
-                                X_p2_proc,   y_p2,
-                                X_peg_proc,  y_peg,
-                                max_components=int(max_pls_components), cv_folds=int(cv_folds),
-                            )
+                            try:
+                                pls_protein = an.build_triple_pls_model(
+                                    X_prot_proc, y_prot,
+                                    X_p2_proc,   y_p2,
+                                    X_peg_proc,  y_peg,
+                                    max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                                )
+                            except Exception as _triple_err:
+                                import traceback as _tb
+                                st.error(f"Triple PLS failed — {type(_triple_err).__name__}: {_triple_err}\n\n```\n{_tb.format_exc()}\n```")
+                                st.stop()
                             pls_protein["wn"]          = wn_prot
                             pls_protein["X_prot_proc"] = X_prot_proc
                             pls_protein["X_p2_proc"]   = X_p2_proc
