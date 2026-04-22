@@ -16,7 +16,11 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import importlib as _importlib
+import decomposition as _decomp_mod   # noqa: F401 — ensure fresh load
 import analysis as an
+_importlib.reload(_decomp_mod)        # force re-read of source file
+_importlib.reload(an)                 # re-export build_triple_pls_model
 import raman_preprocessing as rms
 
 # ─────────────────────────────────────────────────────────────────────────────
