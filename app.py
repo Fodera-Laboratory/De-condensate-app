@@ -506,6 +506,22 @@ with tab_files:
             ),
             disabled=not spike_remove,
         )
+        second_deriv = st.toggle(
+            "Second-derivative preprocessing",
+            value=False,
+            key="second_deriv",
+            help=(
+                "Apply a Savitzky-Golay second derivative as the final preprocessing step "
+                "(after normalisation). Sharpens overlapping spectral features and can improve "
+                "discrimination between proteins with similar amide-band profiles. "
+                "Applied to both linescan spectra and PLS/MCR standard spectra."
+            ),
+        )
+        sd_window = sd_poly = None
+        if second_deriv:
+            _sdc1, _sdc2 = st.columns(2)
+            sd_window = _sdc1.slider("SD window length (odd)", 5, 31, 11, step=2, key="sd_window")
+            sd_poly   = _sdc2.slider("SD polynomial order",    1,  5,  2,        key="sd_poly")
 
     with _fc2:
         st.subheader("Spectral Range")
@@ -722,6 +738,9 @@ settings = dict(
     salt_normalize=salt_normalize,
     spike_remove=spike_remove,
     spike_threshold=spike_threshold,
+    second_deriv=second_deriv,
+    sd_window=sd_window if second_deriv else 11,
+    sd_poly=sd_poly   if second_deriv else 2,
     wn_min=wn_min,
     wn_max=wn_max,
     use_cut=use_cut,

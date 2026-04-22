@@ -136,6 +136,13 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = vector_normalization(I)
     # normalize == "none": skip
 
+    # ── Second derivative (optional, applied last) ────────────────────────
+    if settings.get("second_deriv", False):
+        from scipy.signal import savgol_filter as _sgf
+        sd_win  = int(settings.get("sd_window", 11))
+        sd_poly = int(settings.get("sd_poly",    2))
+        I = _sgf(I, window_length=sd_win, polyorder=sd_poly, deriv=2)
+
     return I
 
 
