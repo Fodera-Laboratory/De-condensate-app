@@ -575,7 +575,7 @@ with tab_pls:
             "Molecular crowder standard CSV (optional)",
             "Col 0: concentration (wt%), remaining cols: spectra. "
             "Trained as an independent PLS1 model alongside the protein model.",
-            "peg", "Crowder", optional=True,
+            "peg", "PEG", optional=True,
         )
         crowder_unit = st.text_input(
             "Crowder concentration unit", value="wt%", key="crowder_unit",
