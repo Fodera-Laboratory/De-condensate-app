@@ -824,22 +824,43 @@ if build_btn:
                         pls_crowder["X_train_proc"] = X_peg_proc
                         pls_crowder["y_raw"]        = y_peg
 
-            # ── OSC cross-references ─────────────────────────────────────────
+            # ── OSC cross-references + retrain on OSC-corrected training data ──
             # Each model gets the OTHER model's PLS loading subspace (x_weights_)
-            # as its OSC reference — this spans exactly the spectral directions
-            # used to predict the interferent, so projecting them out is maximally
-            # effective.  Weights are expanded back to the full feature grid
-            # (zeros for invalid features) so apply_osc works on the full X_pls.
+            # as its OSC reference, then is RETRAINED on OSC-corrected training
+            # data so that calibration and prediction live in the same spectral
+            # space.  One round is sufficient because the OSC references come
+            # from the initial (independent) fits.
             if pls_protein is not None and pls_crowder is not None:
                 _n_full = X_prot_proc.shape[1]  # same grid for both models
-                # Protein model: project out crowder PLS subspace
+                # Build OSC reference matrices from initial fits
                 _peg_W = np.zeros((pls_crowder["model"].x_weights_.shape[1], _n_full))
                 _peg_W[:, pls_crowder["valid_features"]] = pls_crowder["model"].x_weights_.T
-                pls_protein["osc_ref"] = _peg_W  # shape (n_crowder_LVs, n_full)
-                # Crowder model: project out protein PLS subspace
                 _prot_W = np.zeros((pls_protein["model"].x_weights_.shape[1], _n_full))
                 _prot_W[:, pls_protein["valid_features"]] = pls_protein["model"].x_weights_.T
-                pls_crowder["osc_ref"] = _prot_W  # shape (n_protein_LVs, n_full)
+
+                # Retrain protein model on OSC-corrected training data
+                with st.spinner("Retraining protein PLS on OSC-corrected spectra…"):
+                    X_prot_osc = an.apply_osc(X_prot_proc, _peg_W)
+                    pls_protein = an.build_pls_model(
+                        X_prot_osc, y_prot,
+                        max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                    )
+                    pls_protein["wn"]           = wn_prot
+                    pls_protein["X_train_proc"] = X_prot_osc
+                    pls_protein["y_raw"]        = y_prot
+                    pls_protein["osc_ref"]      = _peg_W
+
+                # Retrain crowder model on OSC-corrected training data
+                with st.spinner("Retraining crowder PLS on OSC-corrected spectra…"):
+                    X_peg_osc = an.apply_osc(X_peg_proc, _prot_W)
+                    pls_crowder = an.build_pls_model(
+                        X_peg_osc, y_peg,
+                        max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                    )
+                    pls_crowder["wn"]           = wn_peg
+                    pls_crowder["X_train_proc"] = X_peg_osc
+                    pls_crowder["y_raw"]        = y_peg
+                    pls_crowder["osc_ref"]      = _prot_W
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
