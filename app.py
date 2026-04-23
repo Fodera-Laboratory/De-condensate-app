@@ -704,29 +704,32 @@ with tab_mcr:
                  "NNLS enforces non-negative spectral values.",
         )
 
-        st.subheader("Component mapping (optional)")
-        st.caption(
-            "Map MCR components to PLS outputs. When set, the MCR spectrum for "
-            "that component is used as the OSC reference for the other model, and "
-            "MCR-calibrated concentration profiles are shown in results."
-        )
-        _cm1, _cm2 = st.columns(2)
-        mcr_protein_comp_raw = _cm1.number_input(
-            "Protein MCR component (1-based, 0 = none)",
-            min_value=0, max_value=10, value=0, step=1,
-            key="mcr_protein_comp_input",
-            help="Which MCR component corresponds to the protein. 0 = not set.",
-        )
-        mcr_crowder_comp_raw = _cm2.number_input(
-            "Crowder MCR component (1-based, 0 = none)",
-            min_value=0, max_value=10, value=0, step=1,
-            key="mcr_crowder_comp_input",
-            help="Which MCR component corresponds to the molecular crowder. 0 = not set.",
-        )
-        # Convert 1-based UI input to 0-based index (0 input → None)
-        st.session_state["mcr_protein_comp"] = int(mcr_protein_comp_raw) - 1 if mcr_protein_comp_raw > 0 else None
-        st.session_state["mcr_crowder_comp"] = int(mcr_crowder_comp_raw) - 1 if mcr_crowder_comp_raw > 0 else None
+    st.divider()
+    st.subheader("MCR → PLS component mapping (optional)")
+    st.caption(
+        "When both protein and crowder PLS models are built, map each MCR component "
+        "to a concentration output. The mapped MCR spectrum is then used as the OSC "
+        "reference (instead of the training-mean fallback), and MCR-calibrated "
+        "concentration profiles are shown alongside the PLS profiles in results."
+    )
+    _cm1, _cm2 = st.columns(2)
+    mcr_protein_comp_raw = _cm1.number_input(
+        "Protein MCR component (1-based, 0 = none)",
+        min_value=0, max_value=10, value=0, step=1,
+        key="mcr_protein_comp_input",
+        help="Which MCR component corresponds to the protein. 0 = not set.",
+    )
+    mcr_crowder_comp_raw = _cm2.number_input(
+        "Crowder MCR component (1-based, 0 = none)",
+        min_value=0, max_value=10, value=0, step=1,
+        key="mcr_crowder_comp_input",
+        help="Which MCR component corresponds to the molecular crowder. 0 = not set.",
+    )
+    # Convert 1-based UI input to 0-based index (0 input → None)
+    st.session_state["mcr_protein_comp"] = int(mcr_protein_comp_raw) - 1 if mcr_protein_comp_raw > 0 else None
+    st.session_state["mcr_crowder_comp"] = int(mcr_crowder_comp_raw) - 1 if mcr_crowder_comp_raw > 0 else None
 
+    st.divider()
     run_btn = st.button(
         "▶ Run MCR Analysis",
         use_container_width=True,
@@ -822,11 +825,21 @@ if build_btn:
                         pls_crowder["y_raw"]        = y_peg
 
             # ── OSC cross-references ─────────────────────────────────────────
-            # Each model gets the mean spectrum of the OTHER component as its
-            # OSC reference (used at prediction time to project out interference).
+            # Each model gets the OTHER model's PLS loading subspace (x_weights_)
+            # as its OSC reference — this spans exactly the spectral directions
+            # used to predict the interferent, so projecting them out is maximally
+            # effective.  Weights are expanded back to the full feature grid
+            # (zeros for invalid features) so apply_osc works on the full X_pls.
             if pls_protein is not None and pls_crowder is not None:
-                pls_protein["osc_ref"] = X_peg_proc.mean(axis=0)
-                pls_crowder["osc_ref"] = X_prot_proc.mean(axis=0)
+                _n_full = X_prot_proc.shape[1]  # same grid for both models
+                # Protein model: project out crowder PLS subspace
+                _peg_W = np.zeros((pls_crowder["model"].x_weights_.shape[1], _n_full))
+                _peg_W[:, pls_crowder["valid_features"]] = pls_crowder["model"].x_weights_.T
+                pls_protein["osc_ref"] = _peg_W  # shape (n_crowder_LVs, n_full)
+                # Crowder model: project out protein PLS subspace
+                _prot_W = np.zeros((pls_protein["model"].x_weights_.shape[1], _n_full))
+                _prot_W[:, pls_protein["valid_features"]] = pls_protein["model"].x_weights_.T
+                pls_crowder["osc_ref"] = _prot_W  # shape (n_protein_LVs, n_full)
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None

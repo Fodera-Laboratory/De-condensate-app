@@ -66,16 +66,9 @@ def _find_optimal_components(
             float(np.sqrt(mean_squared_error(y, pls.predict(X[:, valid]))))
         )
 
-    # 1-SE rule: prefer the simplest model within 1 SE of the best CV RMSE.
-    best_idx   = int(np.argmin(rmse_cv))
-    best_errs  = fold_errors_all[best_idx]
-    se_best    = (float(np.std(best_errs, ddof=1)) / np.sqrt(len(best_errs))
-                  if len(best_errs) > 1 else 0.0)
-    threshold  = rmse_cv[best_idx] + se_best
-    optimal_n  = next(
-        (i + 1 for i, v in enumerate(rmse_cv) if v <= threshold),
-        best_idx + 1,
-    )
+    # Use the component count that minimises CV RMSE (no SE penalty).
+    best_idx  = int(np.argmin(rmse_cv))
+    optimal_n = best_idx + 1
     return optimal_n, rmse_cv, rmse_train
 
 
