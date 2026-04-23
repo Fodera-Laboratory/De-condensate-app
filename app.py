@@ -567,25 +567,19 @@ with tab_pls:
     with _pc1:
         st.subheader("Standard spectra")
         protein_std_src = _std_picker(
-            "Protein 1 standard CSV",
+            "Protein standard CSV",
             "Col 0: concentration (mg/mL), remaining cols: spectra.",
             "prot", "Protein",
         )
-        protein2_std_src = _std_picker(
-            "Protein 2 standard CSV (optional)",
-            "Col 0: concentration (same unit as Protein 1), remaining cols: spectra. "
-            "When provided together with a crowder CSV, a triple PLS model is trained.",
-            "prot2", "Protein", optional=True,
-        )
-        protein2_name = st.text_input(
-            "Protein 2 name", value="Protein 2", key="p2_name",
-            help="Label used in plots and Excel export for the second protein.",
-        )
         peg_std_src = _std_picker(
-            "Molecular crowder standard CSV",
+            "Molecular crowder standard CSV (optional)",
             "Col 0: concentration (wt%), remaining cols: spectra. "
-            "When provided, a dual or triple PLS model is trained.",
-            "peg", "PEG", optional=True,
+            "Trained as an independent PLS1 model alongside the protein model.",
+            "peg", "Crowder", optional=True,
+        )
+        crowder_unit = st.text_input(
+            "Crowder concentration unit", value="wt%", key="crowder_unit",
+            help="Unit shown on crowder axis in plots and Excel export.",
         )
         salt_std_src = _std_picker(
             "Salt standard CSV",
@@ -777,60 +771,32 @@ if build_btn:
                     X_prot_raw = df_prot.iloc[:, 1:].to_numpy()
                     X_prot_proc, wn_prot, _ = an.preprocess_matrix(X_prot_raw, wn_ref, pls_settings)
 
-                # ── Triple / Dual / Single PLS ──────────────────────────────
+                # ── Protein PLS1 ────────────────────────────────────────────
+                with st.spinner("Training protein PLS model…"):
+                    pls_protein = an.build_pls_model(
+                        X_prot_proc, y_prot,
+                        max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                    )
+                    pls_protein["wn"]          = wn_prot
+                    pls_protein["X_train_proc"] = X_prot_proc
+                    pls_protein["y_raw"]        = y_prot
+
+                # ── Crowder PLS1 (independent, optional) ────────────────────
+                pls_crowder = None
                 if peg_std_src:
                     with st.spinner("Loading & preprocessing molecular crowder standards…"):
                         df_peg = _read_csv_src(peg_std_src)
                         y_peg = df_peg.iloc[:, 0].to_numpy(dtype=float)
                         X_peg_raw = df_peg.iloc[:, 1:].to_numpy()
-                        X_peg_proc, _, _ = an.preprocess_matrix(X_peg_raw, wn_ref, pls_settings)
-
-                    if protein2_std_src:
-                        with st.spinner("Loading & preprocessing protein 2 standards…"):
-                            df_p2 = _read_csv_src(protein2_std_src)
-                            y_p2 = df_p2.iloc[:, 0].to_numpy(dtype=float) * conv
-                            X_p2_raw = df_p2.iloc[:, 1:].to_numpy()
-                            X_p2_proc, _, _ = an.preprocess_matrix(X_p2_raw, wn_ref, pls_settings)
-
-                        with st.spinner("Training triple protein1+protein2+crowder PLS model…"):
-                            try:
-                                pls_protein = an.build_triple_pls_model(
-                                    X_prot_proc, y_prot,
-                                    X_p2_proc,   y_p2,
-                                    X_peg_proc,  y_peg,
-                                    max_components=int(max_pls_components), cv_folds=int(cv_folds),
-                                )
-                            except Exception as _triple_err:
-                                import traceback as _tb
-                                st.error(f"Triple PLS failed — {type(_triple_err).__name__}: {_triple_err}\n\n```\n{_tb.format_exc()}\n```")
-                                st.stop()
-                            pls_protein["wn"]          = wn_prot
-                            pls_protein["X_prot_proc"] = X_prot_proc
-                            pls_protein["X_p2_proc"]   = X_p2_proc
-                            pls_protein["X_peg_proc"]  = X_peg_proc
-                            pls_protein["y_prot_raw"]  = y_prot
-                            pls_protein["y_p2_raw"]    = y_p2
-                            pls_protein["y_peg_raw"]   = y_peg
-                    else:
-                        with st.spinner("Training dual protein+molecular crowder PLS model…"):
-                            pls_protein = an.build_dual_pls_model(
-                                X_prot_proc, y_prot, X_peg_proc, y_peg,
-                                max_components=int(max_pls_components), cv_folds=int(cv_folds),
-                            )
-                            pls_protein["wn"] = wn_prot
-                            pls_protein["X_prot_proc"] = X_prot_proc
-                            pls_protein["X_peg_proc"]  = X_peg_proc
-                            pls_protein["y_prot_raw"]  = y_prot
-                            pls_protein["y_peg_raw"]   = y_peg
-                else:
-                    with st.spinner("Training protein PLS model…"):
-                        pls_protein = an.build_pls_model(
-                            X_prot_proc, y_prot,
+                        X_peg_proc, wn_peg, _ = an.preprocess_matrix(X_peg_raw, wn_ref, pls_settings)
+                    with st.spinner("Training molecular crowder PLS model…"):
+                        pls_crowder = an.build_pls_model(
+                            X_peg_proc, y_peg,
                             max_components=int(max_pls_components), cv_folds=int(cv_folds),
                         )
-                        pls_protein["wn"] = wn_prot
-                        pls_protein["X_train_proc"] = X_prot_proc
-                        pls_protein["y_raw"] = y_prot
+                        pls_crowder["wn"]          = wn_peg
+                        pls_crowder["X_train_proc"] = X_peg_proc
+                        pls_crowder["y_raw"]        = y_peg
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -869,6 +835,7 @@ if build_btn:
 
             st.session_state["models"] = dict(
                 pls_protein=pls_protein,
+                pls_crowder=pls_crowder,
                 pls_salt=pls_salt,
                 ST_init=ST_init,
                 wn_ref=wn_ref,
@@ -878,7 +845,6 @@ if build_btn:
             st.session_state["settings"]       = settings
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
-            st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
             st.session_state["mcr_params"]    = dict(
                 max_iter=int(mcr_max_iter),
                 tol_increase=float(mcr_tol),
@@ -888,18 +854,15 @@ if build_btn:
 
             msg_parts = []
             if pls_protein is not None:
-                dual = pls_protein.get("dual", False)
-                if dual:
-                    msg_parts.append(
-                        f"Dual protein+molecular crowder PLS: {pls_protein['n_components']} LVs, "
-                        f"CV RMSE — Protein: {pls_protein['cv_rmse_protein']:.3f} {unit}, "
-                        f"Molecular crowder: {pls_protein['cv_rmse_peg']:.3f} wt%"
-                    )
-                else:
-                    msg_parts.append(
-                        f"Protein PLS: {pls_protein['n_components']} LVs, "
-                        f"CV RMSE = {pls_protein['cv_rmse']:.3f} {unit}"
-                    )
+                msg_parts.append(
+                    f"Protein PLS: {pls_protein['n_components']} LVs, "
+                    f"CV RMSE = {pls_protein['cv_rmse']:.3f} {unit}"
+                )
+            if pls_crowder is not None:
+                msg_parts.append(
+                    f"Crowder PLS: {pls_crowder['n_components']} LVs, "
+                    f"CV RMSE = {pls_crowder['cv_rmse']:.3f} {crowder_unit}"
+                )
             if pls_salt is not None:
                 msg_parts.append(
                     f"Salt PLS: {pls_salt['n_components']} LVs, "
@@ -926,6 +889,7 @@ if build_btn:
                             _awn, _aX, _apos,
                             scan_mode=_auto_sm,
                             pls_protein_info=pls_protein,
+                            pls_crowder_info=pls_crowder,
                             pls_salt_info=pls_salt,
                             ST_init=None,
                             n_components=n_components,
@@ -1025,6 +989,7 @@ if run_btn:
                     wn, X, positions,
                     scan_mode=sm,
                     pls_protein_info=models.get("pls_protein"),
+                    pls_crowder_info=models.get("pls_crowder"),
                     pls_salt_info=models.get("pls_salt"),
                     ST_init=_st_init,
                     n_components=n_comp,
@@ -1115,19 +1080,16 @@ with tab_calib:
     if "models" not in st.session_state:
         st.info("Build a PLS model first — upload standard CSVs above and click ▶ Build PLS Model.")
     else:
-        models = st.session_state["models"]
-        unit   = st.session_state.get("unit", "mg/mL")
-        pls_p  = models.get("pls_protein")
-        pls_s  = models.get("pls_salt")
-        dual   = pls_p.get("dual", False) if pls_p else False
+        models  = st.session_state["models"]
+        unit    = st.session_state.get("unit", "mg/mL")
+        pls_p   = models.get("pls_protein")
+        pls_c   = models.get("pls_crowder")
+        pls_s   = models.get("pls_salt")
 
         if pls_p is None:
             st.info("No protein PLS model was built. Upload a protein standard CSV above and click ▶ Build PLS Model.")
 
-
-        _triple = pls_p.get("triple", False) if pls_p else False
-
-        if pls_p is not None and _triple:
+        if False:  # triple PLS2 removed
             # ── Triple protein1 + protein2 + molecular crowder calibration ──
             _p2name = st.session_state.get("protein2_name", "Protein 2")
             st.subheader(f"Triple PLS2: Protein 1 + {_p2name} + Molecular Crowder")
@@ -1264,7 +1226,7 @@ with tab_calib:
                                       yaxis_title="Norm. intensity", height=250)
                     st.plotly_chart(_fg, use_container_width=True)
 
-        elif pls_p is not None and dual:
+        elif False:  # dual PLS2 removed
             # ── Dual protein + molecular crowder calibration ────────────────
             st.subheader("Dual Protein + Molecular Crowder PLS regression")
             m1, m2, m3, m4, m5 = st.columns(5)
@@ -1483,7 +1445,7 @@ with tab_calib:
                         f"covering {pls_s['wn'][0]:.0f}–{pls_s['wn'][-1]:.0f} cm⁻¹."
                     )
 
-        elif pls_p is not None:
+        if pls_p is not None:
             # ── Single-output protein PLS calibration ─────────
             st.subheader("Protein PLS regression")
             m1, m2, m3 = st.columns(3)
@@ -1625,6 +1587,110 @@ with tab_calib:
                     f"concentration, not X-variance (unlike PCA), so later LVs may explain "
                     f"more predictive variance than a PCA component at the same rank."
                 )
+
+        # ── Crowder PLS1 ─────────────────────────────────────
+        if pls_c is not None:
+            st.divider()
+            _crd_unit = st.session_state.get("crowder_unit", "wt%") or "wt%"
+            st.subheader("Molecular crowder PLS regression (independent PLS1)")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Optimal components", pls_c["n_components"])
+            c2.metric("CV RMSE",  f"{pls_c['cv_rmse']:.4f} {_crd_unit}")
+            c3.metric("Train R²", f"{pls_c['r2_train']:.4f}")
+
+            fig_c = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=[
+                    "a)  Preprocessed standards",
+                    f"b)  Calibration (actual vs predicted, {_crd_unit})",
+                    "c)  CV vs Training RMSE",
+                    "d)  PLS loadings (all PCs)",
+                ],
+            )
+            wn_c   = pls_c["wn"]
+            X_c    = pls_c["X_train_proc"]
+            y_c    = pls_c["y_raw"]
+            yp_c   = pls_c["y_pred_train"]
+
+            for i in range(X_c.shape[0]):
+                fig_c.add_trace(go.Scatter(
+                    x=wn_c, y=X_c[i], mode="lines",
+                    line=dict(width=0.8), opacity=0.5, showlegend=False,
+                ), row=1, col=1)
+
+            fig_c.add_trace(go.Scatter(
+                x=y_c, y=yp_c, mode="markers",
+                marker=dict(color=COLORS[2], size=7, line=dict(color="black", width=0.5)),
+                showlegend=False,
+            ), row=1, col=2)
+            fig_c.add_trace(go.Scatter(
+                x=[y_c.min(), y_c.max()], y=[y_c.min(), y_c.max()],
+                mode="lines", line=dict(dash="dash", color="black", width=1), showlegend=False,
+            ), row=1, col=2)
+
+            n_cv_c = len(pls_c["rmse_cv_all"])
+            comps_c = list(range(1, n_cv_c + 1))
+            fig_c.add_trace(go.Scatter(
+                x=comps_c, y=pls_c["rmse_cv_all"], mode="lines+markers",
+                name="CV RMSE", line=dict(color="red"),
+            ), row=2, col=1)
+            fig_c.add_trace(go.Scatter(
+                x=comps_c, y=pls_c["rmse_train_all"], mode="lines+markers",
+                name="Train RMSE", line=dict(color="steelblue"),
+            ), row=2, col=1)
+            fig_c.add_vline(
+                x=pls_c["n_components"], line_dash="dash", line_color="black",
+                annotation_text=f"opt={pls_c['n_components']}", row=2, col=1,
+            )
+            if n_cv_c > pls_c["n_components"]:
+                fig_c.add_vrect(
+                    x0=pls_c["n_components"] + 0.5, x1=n_cv_c + 0.5,
+                    fillcolor="rgba(255,0,0,0.12)", line_width=0,
+                    annotation_text="Overfitting", annotation_position="top right",
+                    annotation=dict(font_size=11, font_color="red", y=0.5, yanchor="middle"),
+                    row=2, col=1,
+                )
+
+            wn_c_vld = wn_c[pls_c["valid_features"]]
+            for i in range(pls_c["n_components"]):
+                fig_c.add_trace(go.Scatter(
+                    x=wn_c_vld, y=pls_c["model"].x_loadings_[:, i],
+                    mode="lines", name=f"PC{i + 1}",
+                ), row=2, col=2)
+
+            fig_c.update_xaxes(title_text="Wavenumber (cm⁻¹)",         row=1, col=1)
+            fig_c.update_xaxes(title_text=f"Actual ({_crd_unit})",     row=1, col=2)
+            fig_c.update_xaxes(title_text="N components",              row=2, col=1,
+                               tick0=1, dtick=2, range=[0.5, n_cv_c + 0.5])
+            fig_c.update_xaxes(title_text="Wavenumber (cm⁻¹)",         row=2, col=2)
+            fig_c.update_yaxes(title_text="Norm. intensity",           row=1, col=1)
+            fig_c.update_yaxes(title_text=f"Predicted ({_crd_unit})",  row=1, col=2)
+            fig_c.update_yaxes(title_text="RMSE",                      row=2, col=1)
+            fig_c.update_yaxes(title_text="Loading",                   row=2, col=2)
+            fig_c.update_layout(height=550, legend=dict(orientation="h", y=-0.15))
+            st.plotly_chart(fig_c, use_container_width=True)
+            st.caption(
+                f"Independent PLS1 calibration for molecular crowder concentration "
+                f"using {pls_c['n_components']} latent variables. "
+                f"**a)** {X_c.shape[0]} preprocessed standards ({wn_c[0]:.0f}–{wn_c[-1]:.0f} cm⁻¹). "
+                f"**b)** Predicted vs actual ({_crd_unit}); train R² = {pls_c['r2_train']:.4f}. "
+                f"**c)** CV RMSE = {pls_c['cv_rmse']:.4f} {_crd_unit} at opt = {pls_c['n_components']} LVs. "
+                f"**d)** X-loadings per LV."
+            )
+
+            with st.expander("PLS regression coefficients"):
+                coef_c = _pls_coef(pls_c["model"], len(wn_c_vld))
+                fig_coef_c = go.Figure()
+                fig_coef_c.add_trace(go.Scatter(
+                    x=wn_c_vld, y=coef_c[:, 0], mode="lines",
+                    name="Crowder", line=dict(color=COLORS[2], width=1.5),
+                ))
+                fig_coef_c.add_hline(y=0, line_dash="dot", line_color="grey")
+                fig_coef_c.update_layout(
+                    xaxis_title="Wavenumber (cm⁻¹)", yaxis_title="Coefficient",
+                    height=280,
+                )
+                st.plotly_chart(fig_coef_c, use_container_width=True)
 
         # ── Salt ─────────────────────────────────────────────
         if pls_s:
@@ -1966,36 +2032,25 @@ with tab_calib:
         _sm       = st.session_state.get("scan_mode", "xy")
         _dl       = "Depth (µm)" if _sm == "z" else "Distance (µm)"
         _pls_p    = _models.get("pls_protein")
+        _pls_c    = _models.get("pls_crowder")
         _pls_s    = _models.get("pls_salt")
-        _dual     = _pls_p.get("dual",   False) if _pls_p else False
-        _triple   = _pls_p.get("triple", False) if _pls_p else False
-        _p2name   = st.session_state.get("protein2_name", "Protein 2") or "Protein 2"
 
         _sel = st.selectbox("Select linescan", list(_r_all.keys()), key="pls_linescan_sel")
         _r   = _r_all[_sel]
 
         _has_pls  = _pls_p is not None and _r.get("pls_protein") is not None
-        _has_p2   = _triple and _r.get("pls_protein2") is not None
-        _has_peg  = _dual and _r.get("pls_peg") is not None
+        _has_peg  = _pls_c is not None and _r.get("pls_peg") is not None
         _has_salt = _pls_s is not None and _r.get("pls_salt") is not None
 
         if not _has_pls:
             st.info("No protein PLS model was built — upload a protein standard CSV and click ▶ Build PLS Model.")
 
         if _has_pls:
-            if _triple and _has_peg and _has_salt:
-                _specs     = [[{"secondary_y": True}, {"secondary_y": False}]]
-                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & crowder (wt%)", "b)  PLS salt (mM)"]
-                _n_bot     = 2
-            elif _triple and _has_peg:
-                _specs     = [[{"secondary_y": True}]]
-                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & molecular crowder (wt%)"]
-                _n_bot     = 1
-            elif _dual and _has_peg and _has_salt:
+            if _has_peg and _has_salt:
                 _specs     = [[{"secondary_y": True}, {"secondary_y": False}]]
                 _subtitles = [f"a)  PLS protein ({_unit}) & molecular crowder", "b)  PLS salt (mM)"]
                 _n_bot     = 2
-            elif _dual and _has_peg:
+            elif _has_peg:
                 _specs     = [[{"secondary_y": True}]]
                 _subtitles = [f"a)  PLS protein ({_unit}) & molecular crowder"]
                 _n_bot     = 1
@@ -2011,7 +2066,7 @@ with tab_calib:
             _c1sy    = _specs[0][0].get("secondary_y", False)
             _fig_bot = make_subplots(rows=1, cols=_n_bot, specs=_specs, subplot_titles=_subtitles)
             _dist    = _r["distance"]
-            _cv_p    = _pls_p["cv_rmse_p1"] if _triple else (_pls_p["cv_rmse_protein"] if _dual else _pls_p["cv_rmse"])
+            _cv_p    = _pls_p["cv_rmse"]
             _prot    = _r["pls_protein"]
 
             _fig_bot.add_trace(go.Scatter(
@@ -2025,27 +2080,13 @@ with tab_calib:
                 line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
             ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
             _fig_bot.update_yaxes(
-                title_text=f"Protein 1 ({_unit})" if _triple else f"Protein ({_unit})",
+                title_text=f"Protein ({_unit})",
                 title_font=dict(color=COLORS[0]), tickfont=dict(color=COLORS[0]),
                 row=1, col=1, **({} if not _c1sy else {"secondary_y": False}),
             )
 
-            if _triple and _has_p2:
-                _cv_p2 = _pls_p["cv_rmse_p2"]
-                _prot2 = _r["pls_protein2"]
-                _fig_bot.add_trace(go.Scatter(
-                    x=_dist, y=_prot2, mode="lines",
-                    line=dict(color=COLORS[1], width=1.5), showlegend=False,
-                ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
-                _fig_bot.add_trace(go.Scatter(
-                    x=np.concatenate([_dist, _dist[::-1]]),
-                    y=np.concatenate([_prot2 + _cv_p2, (_prot2 - _cv_p2)[::-1]]),
-                    fill="toself", fillcolor=COLORS_FILL[1],
-                    line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
-                ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
-
-            if _dual and _has_peg:
-                _cv_peg = _pls_p["cv_rmse_peg"]
+            if _has_peg:
+                _cv_peg = _pls_c["cv_rmse"]
                 _peg    = _r["pls_peg"]
                 _fig_bot.add_trace(go.Scatter(
                     x=_dist, y=_peg, mode="lines",
@@ -2064,7 +2105,7 @@ with tab_calib:
                 )
 
             if _has_salt:
-                _s_col = 2 if (_dual and _has_peg) else 1
+                _s_col = 2 if _has_peg else 1
                 _s_sy  = True if _s_col == 1 else None
                 _cv_s  = _pls_s["cv_rmse"]
                 _salt  = _r["pls_salt"]
@@ -2089,68 +2130,43 @@ with tab_calib:
                 _fig_bot.update_xaxes(title_text=_dl, row=1, col=_col)
             _fig_bot.update_layout(height=320)
             st.plotly_chart(_fig_bot, use_container_width=True)
-            _pls_parts = [f"protein 1 ± {_cv_p:.4f} {_unit}" if _triple else f"protein ± {_cv_p:.4f} {_unit}"]
-            if _triple and _has_p2:
-                _pls_parts.append(f"{_p2name} ± {_pls_p['cv_rmse_p2']:.4f} {_unit}")
+            _pls_parts = [f"protein ± {_cv_p:.4f} {_unit}"]
             if _has_peg:
-                _pls_parts.append(f"molecular crowder ± {_pls_p['cv_rmse_peg']:.4f} wt%")
+                _crd_unit_res = st.session_state.get("crowder_unit", "wt%") or "wt%"
+                _pls_parts.append(f"molecular crowder ± {_pls_c['cv_rmse']:.4f} {_crd_unit_res}")
             if _has_salt:
                 _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} mM")
             st.caption(
                 f"**a)** PLS-predicted concentration profiles along the linescan for *{_sel}*. "
                 f"Shaded bands indicate ±CV RMSE: {'; '.join(_pls_parts)}. "
-                f"Left y-axis: protein(s); right y-axis: crowder where applicable."
-                + (f" **b)** Salt (mM) on a separate axis." if (_dual and _has_peg and _has_salt) else "")
+                f"Left y-axis: protein; right y-axis: crowder where applicable."
+                + (f" **b)** Salt (mM) on a separate axis." if (_has_peg and _has_salt) else "")
             )
 
-            if _triple and _has_p2 and _has_peg:
-                st.divider()
-                _fig_sc3 = make_subplots(rows=1, cols=2,
-                    subplot_titles=[f"Protein 1 vs Crowder", f"{_p2name} vs Crowder"])
-                for _sci, (_px, _pxcv, _plbl) in enumerate([
-                    (_r["pls_protein"],  _pls_p["cv_rmse_p1"], "Protein 1"),
-                    (_r["pls_protein2"], _pls_p["cv_rmse_p2"], _p2name),
-                ]):
-                    _fig_sc3.add_trace(go.Scatter(
-                        x=_px, y=_r["pls_peg"], mode="markers",
-                        marker=dict(color=COLORS[_sci], size=7, line=dict(color="black", width=0.5)),
-                        error_x=dict(type="constant", value=_pxcv,
-                                     color="black", thickness=1, width=4),
-                        error_y=dict(type="constant", value=_pls_p["cv_rmse_peg"],
-                                     color="black", thickness=1, width=4),
-                        showlegend=False,
-                    ), row=1, col=_sci + 1)
-                    _fig_sc3.update_xaxes(title_text=f"{_plbl} ({_unit})", row=1, col=_sci + 1)
-                    _fig_sc3.update_yaxes(title_text="Molecular crowder (wt%)", row=1, col=_sci + 1)
-                _fig_sc3.update_layout(height=350)
-                st.plotly_chart(_fig_sc3, use_container_width=True)
-                st.caption(
-                    f"Crowder vs protein co-localisation for *{_sel}*. "
-                    f"Error bars: ±CV RMSE."
-                )
-            elif _dual and _has_peg:
+            if _has_peg:
+                _crd_unit_sc = st.session_state.get("crowder_unit", "wt%") or "wt%"
                 st.divider()
                 _fig_sc = go.Figure()
                 _fig_sc.add_trace(go.Scatter(
                     x=_r["pls_protein"], y=_r["pls_peg"], mode="markers",
                     marker=dict(color=COLORS[2], size=7, line=dict(color="black", width=0.5)),
-                    error_x=dict(type="constant", value=_pls_p["cv_rmse_protein"],
+                    error_x=dict(type="constant", value=_pls_p["cv_rmse"],
                                  color="black", thickness=1, width=4),
-                    error_y=dict(type="constant", value=_pls_p["cv_rmse_peg"],
+                    error_y=dict(type="constant", value=_pls_c["cv_rmse"],
                                  color="black", thickness=1, width=4),
                 ))
                 _fig_sc.update_layout(
                     title="Molecular crowder vs Protein (PLS)",
-                    xaxis_title=f"Protein ({_unit})", yaxis_title="Molecular crowder (wt%)",
+                    xaxis_title=f"Protein ({_unit})", yaxis_title=f"Molecular crowder ({_crd_unit_sc})",
                     height=350, width=420,
                 )
                 st.plotly_chart(_fig_sc)
                 st.caption(
                     f"Molecular crowder vs protein co-localisation scatter for *{_sel}*. "
-                    f"Error bars: ±CV RMSE (protein: {_pls_p['cv_rmse_protein']:.4f} {_unit}; "
-                    f"molecular crowder: {_pls_p['cv_rmse_peg']:.4f} wt%)."
+                    f"Error bars: ±CV RMSE (protein: {_pls_p['cv_rmse']:.4f} {_unit}; "
+                    f"molecular crowder: {_pls_c['cv_rmse']:.4f} {_crd_unit_sc})."
                 )
-            elif not _dual and _has_salt:
+            elif _has_salt:
                 st.divider()
                 _fig_sc = go.Figure()
                 _fig_sc.add_trace(go.Scatter(
@@ -2175,36 +2191,26 @@ with tab_calib:
 
         st.divider()
         with st.expander("Summary statistics"):
-            _n_sc = (1 if _has_pls else 0) + (1 if _has_p2 else 0) + (1 if _has_peg else 0) + (1 if _has_salt else 0)
+            _crd_unit_ss = st.session_state.get("crowder_unit", "wt%") or "wt%"
+            _n_sc = (1 if _has_pls else 0) + (1 if _has_peg else 0) + (1 if _has_salt else 0)
             _cols = st.columns(max(_n_sc, 1))
             _ci   = 0
             if _has_pls:
-                _cv_p_val = _pls_p["cv_rmse_p1"] if _triple else (_pls_p["cv_rmse_protein"] if _dual else _pls_p["cv_rmse"])
-                _p1lbl    = "Protein 1 (PLS)" if _triple else "Protein (PLS)"
                 _cols[_ci].markdown(
-                    f"**{_p1lbl}**  \n"
+                    f"**Protein (PLS)**  \n"
                     f"Min: {_r['pls_protein'].min():.3f} {_unit}  \n"
                     f"Max: {_r['pls_protein'].max():.3f} {_unit}  \n"
                     f"Mean: {_r['pls_protein'].mean():.3f} {_unit}  \n"
-                    f"±CV RMSE: {_cv_p_val:.3f} {_unit}"
-                )
-                _ci += 1
-            if _has_p2:
-                _cols[_ci].markdown(
-                    f"**{_p2name} (PLS)**  \n"
-                    f"Min: {_r['pls_protein2'].min():.3f} {_unit}  \n"
-                    f"Max: {_r['pls_protein2'].max():.3f} {_unit}  \n"
-                    f"Mean: {_r['pls_protein2'].mean():.3f} {_unit}  \n"
-                    f"±CV RMSE: {_pls_p['cv_rmse_p2']:.3f} {_unit}"
+                    f"±CV RMSE: {_pls_p['cv_rmse']:.3f} {_unit}"
                 )
                 _ci += 1
             if _has_peg:
                 _cols[_ci].markdown(
                     f"**Molecular crowder (PLS)**  \n"
-                    f"Min: {_r['pls_peg'].min():.3f} wt%  \n"
-                    f"Max: {_r['pls_peg'].max():.3f} wt%  \n"
-                    f"Mean: {_r['pls_peg'].mean():.3f} wt%  \n"
-                    f"±CV RMSE: {_pls_p['cv_rmse_peg']:.3f} wt%"
+                    f"Min: {_r['pls_peg'].min():.3f} {_crd_unit_ss}  \n"
+                    f"Max: {_r['pls_peg'].max():.3f} {_crd_unit_ss}  \n"
+                    f"Mean: {_r['pls_peg'].mean():.3f} {_crd_unit_ss}  \n"
+                    f"±CV RMSE: {_pls_c['cv_rmse']:.3f} {_crd_unit_ss}"
                 )
                 _ci += 1
             if _has_salt:
@@ -4308,8 +4314,8 @@ with tab_download:
             _dlbl_sv    = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
             _models_sv  = st.session_state.get("models", {})
             _pls_p_sv   = _models_sv.get("pls_protein")
+            _pls_c_sv   = _models_sv.get("pls_crowder")
             _pls_s_sv   = _models_sv.get("pls_salt")
-            _dual_sv    = _pls_p_sv.get("dual", False) if _pls_p_sv else False
 
             # ── Per-linescan rows ─────────────────────────────────────────
             for _sv_fn, _sv_r in _res_sv.items():
@@ -4374,11 +4380,10 @@ with tab_download:
 
                 # Row C: PLS concentration profile + co-localisation scatter
                 if _has_pls_sv:
-                    _has_peg_sv  = _dual_sv and _sv_r.get("pls_peg") is not None
+                    _has_peg_sv  = _pls_c_sv is not None and _sv_r.get("pls_peg") is not None
                     _has_salt_sv = (_pls_s_sv is not None
                                     and _sv_r.get("pls_salt") is not None)
-                    _cv_p_sv     = (_pls_p_sv["cv_rmse_protein"] if _dual_sv
-                                    else _pls_p_sv["cv_rmse"])
+                    _cv_p_sv     = _pls_p_sv["cv_rmse"]
 
                     def _draw_pls_row(
                         axs, r=_sv_r,
@@ -4399,7 +4404,7 @@ with tab_download:
 
                         if has_peg:
                             _peg   = np.array(r["pls_peg"])
-                            _cv_pg = _pls_p_sv["cv_rmse_peg"]
+                            _cv_pg = _pls_c_sv["cv_rmse"]
                             _axtw  = axs[0].twinx()
                             _axtw.plot(_dist, _peg, color=_MCOLS[2], lw=_LW)
                             _axtw.fill_between(_dist, _peg - _cv_pg,
@@ -4468,9 +4473,10 @@ with tab_download:
                         f"a) Protein ({_unit_sv}) \u00b1 {_cv_p_sv:.4f} {_unit_sv} CV RMSE."
                     )
                     if _has_peg_sv:
+                        _crd_unit_sv = st.session_state.get("crowder_unit", "wt%") or "wt%"
                         _cap_pls += (
-                            f" Twin axis (green): crowder (wt%) "
-                            f"\u00b1 {_pls_p_sv['cv_rmse_peg']:.4f} wt% CV RMSE. "
+                            f" Twin axis (green): crowder ({_crd_unit_sv}) "
+                            f"\u00b1 {_pls_c_sv['cv_rmse']:.4f} {_crd_unit_sv} CV RMSE. "
                             f"b) Crowder vs protein; error bars = \u00b1CV RMSE."
                         )
                     elif _has_salt_sv:
@@ -4512,126 +4518,100 @@ with tab_download:
                            if _wn_vld is not None else "")
 
                 # ── Training spectra ─────────────────────────────────────
-                def _draw_pls_tr_spec(axs, pp=_pls_p_sv, unit=_unit_sv,
-                                      dual=_dual_sv):
+                def _draw_pls_tr_spec(axs, pp=_pls_p_sv, unit=_unit_sv):
                     _wn = pp["wn"]
-                    if dual:
-                        _Xprot = pp["X_prot_proc"]
-                        _Xpeg  = pp.get("X_peg_proc",
-                                        pp["X_train_proc"][_Xprot.shape[0]:])
-                        for _si in range(_Xprot.shape[0]):
-                            axs[0].plot(_wn, _Xprot[_si],
-                                        color=_MCOLS[0], lw=_LW_SP, alpha=0.5)
-                        axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[0].set_ylabel("Intensity (a.u.)")
-                        axs[0].set_xlim(_wn[0], _wn[-1])
-                        _style_ax(axs[0])
-                        for _si in range(_Xpeg.shape[0]):
-                            axs[1].plot(_wn, _Xpeg[_si],
+                    _Xtr = pp["X_train_proc"]
+                    for _si in range(_Xtr.shape[0]):
+                        axs[0].plot(_wn, _Xtr[_si],
+                                    color=_MCOLS[0], lw=_LW_SP, alpha=0.5)
+                    axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
+                    axs[0].set_ylabel("Intensity (a.u.)")
+                    axs[0].set_xlim(_wn[0], _wn[-1])
+                    _style_ax(axs[0])
+
+                _n_tr = _pls_p_sv["X_train_proc"].shape[0]
+                _row_specs.append((_ps("pls_tr_spectra"),
+                                   _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
+                _row_tags.append("pls_tr_spectra")
+                _cap_parts.append(
+                    f"PLS1 protein training spectra ({_wn_rng}), "
+                    f"{_n_tr} preprocessed standard spectra."
+                )
+
+                # ── Protein regression + RMSE ─────────────────────────────
+                def _draw_pls1_reg_rmse(axs, pp=_pls_p_sv, unit=_unit_sv):
+                    _yt = pp["y_raw"]; _yp = pp["y_pred_train"]
+                    axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
+                                   edgecolors="black", linewidths=0.3, zorder=3)
+                    _mn, _mx = _yt.min(), _yt.max()
+                    axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
+                    axs[0].set_xlabel(f"Actual ({unit})")
+                    axs[0].set_ylabel(f"Predicted ({unit})")
+                    _style_ax(axs[0])
+                    _rmse_row(axs[1], pp)
+
+                _row_specs.append((_ps("pls_cal_scatter", 2),
+                                   _draw_pls1_reg_rmse, _fig_styles["pls_cal_scatter"]))
+                _row_tags.append("pls_cal_scatter")
+                _cap_parts.append(
+                    f"PLS1 protein calibration ({_wn_rng}). "
+                    f"a) Predicted vs actual ({_unit_sv}); "
+                    f"R\u00b2 = {_pls_p_sv['r2_train']:.4f}. "
+                    f"b) CV RMSE (red) and training RMSE (blue); "
+                    f"opt = {_pls_p_sv['n_components']}, "
+                    f"CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
+                    f"Red shading: overfitting region."
+                )
+
+                # ── Crowder regression + RMSE (if model exists) ──────────
+                if _pls_c_sv is not None:
+                    _crd_unit_sv2 = st.session_state.get("crowder_unit", "wt%") or "wt%"
+                    _wn_c_sv  = _pls_c_sv["wn"]
+                    _vf_c_sv  = _pls_c_sv["valid_features"]
+                    _wn_c_vld = _wn_c_sv[_vf_c_sv] if _wn_c_sv is not None else None
+                    _nf_c_sv  = len(_wn_c_vld) if _wn_c_vld is not None else 0
+                    _wn_c_rng = (f"{_wn_c_vld[0]:.0f}\u2013{_wn_c_vld[-1]:.0f} cm\u207b\xb9"
+                                 if _wn_c_vld is not None else "")
+
+                    def _draw_crowder_tr_spec(axs, pc=_pls_c_sv):
+                        _wn = pc["wn"]
+                        for _si in range(pc["X_train_proc"].shape[0]):
+                            axs[0].plot(_wn, pc["X_train_proc"][_si],
                                         color=_MCOLS[2], lw=_LW_SP, alpha=0.5)
-                        axs[1].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                        axs[1].set_ylabel("Intensity (a.u.)")
-                        axs[1].set_xlim(_wn[0], _wn[-1])
-                        _style_ax(axs[1])
-                    else:
-                        _Xtr = pp["X_train_proc"]
-                        for _si in range(_Xtr.shape[0]):
-                            axs[0].plot(_wn, _Xtr[_si],
-                                        color=_MCOLS[0], lw=_LW_SP, alpha=0.5)
                         axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
                         axs[0].set_ylabel("Intensity (a.u.)")
                         axs[0].set_xlim(_wn[0], _wn[-1])
                         _style_ax(axs[0])
 
-                if _dual_sv:
-                    _n_prot = _pls_p_sv["X_prot_proc"].shape[0]
-                    _n_peg  = _pls_p_sv["X_train_proc"].shape[0] - _n_prot
-                    _row_specs.append((_ps("pls_tr_spectra", 2),
-                                       _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
-                    _row_tags.append("pls_tr_spectra")
-                    _cap_parts.append(
-                        f"PLS2 training spectra ({_wn_rng}). "
-                        f"a) Protein standards ({_n_prot} spectra, blue). "
-                        f"b) Molecular crowder standards ({_n_peg} spectra, green)."
-                    )
-                else:
-                    _n_tr = _pls_p_sv["X_train_proc"].shape[0]
                     _row_specs.append((_ps("pls_tr_spectra"),
-                                       _draw_pls_tr_spec, _fig_styles["pls_tr_spectra"]))
+                                       _draw_crowder_tr_spec, _fig_styles["pls_tr_spectra"]))
                     _row_tags.append("pls_tr_spectra")
                     _cap_parts.append(
-                        f"PLS1 training spectra ({_wn_rng}), "
-                        f"{_n_tr} preprocessed protein standard spectra."
+                        f"PLS1 crowder training spectra ({_wn_c_rng}), "
+                        f"{_pls_c_sv['X_train_proc'].shape[0]} preprocessed standard spectra."
                     )
 
-                # ── Regression + RMSE ─────────────────────────────────────
-                if not _dual_sv:
-                    def _draw_pls1_reg_rmse(axs, pp=_pls_p_sv, unit=_unit_sv):
-                        _yt = pp["y_raw"]; _yp = pp["y_pred_train"]
-                        axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[0], alpha=0.8,
+                    def _draw_crowder_reg_rmse(axs, pc=_pls_c_sv,
+                                               unit=_crd_unit_sv2):
+                        _yt = pc["y_raw"]; _yp = pc["y_pred_train"]
+                        axs[0].scatter(_yt, _yp, s=10, color=_MCOLS[2], alpha=0.8,
                                        edgecolors="black", linewidths=0.3, zorder=3)
                         _mn, _mx = _yt.min(), _yt.max()
                         axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
                         axs[0].set_xlabel(f"Actual ({unit})")
                         axs[0].set_ylabel(f"Predicted ({unit})")
                         _style_ax(axs[0])
-                        _rmse_row(axs[1], pp)
+                        _rmse_row(axs[1], pc)
 
                     _row_specs.append((_ps("pls_cal_scatter", 2),
-                                       _draw_pls1_reg_rmse, _fig_styles["pls_cal_scatter"]))
+                                       _draw_crowder_reg_rmse, _fig_styles["pls_cal_scatter"]))
                     _row_tags.append("pls_cal_scatter")
                     _cap_parts.append(
-                        f"PLS1 protein calibration ({_wn_rng}). "
-                        f"a) Predicted vs actual ({_unit_sv}); "
-                        f"R\u00b2 = {_pls_p_sv['r2_train']:.4f}. "
-                        f"b) CV RMSE (red) and training RMSE (blue); "
-                        f"opt = {_pls_p_sv['n_components']}, "
-                        f"CV RMSE = {_pls_p_sv['cv_rmse']:.4f} {_unit_sv}. "
-                        f"Red shading: overfitting region."
-                    )
-                else:
-                    def _draw_dual_scatters(axs, pp=_pls_p_sv, unit=_unit_sv):
-                        _ypt = pp["y_protein_train"]
-                        _ypp = pp["y_pred_protein_train"]
-                        axs[0].scatter(_ypt, _ypp, s=10, color=_MCOLS[0], alpha=0.8,
-                                       edgecolors="black", linewidths=0.3, zorder=3)
-                        _mn, _mx = _ypt.min(), _ypt.max()
-                        axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
-                        axs[0].set_xlabel(f"Actual ({unit})")
-                        axs[0].set_ylabel(f"Predicted ({unit})")
-                        _style_ax(axs[0])
-                        _ygt = pp["y_peg_train"]
-                        _ygp = pp["y_pred_peg_train"]
-                        axs[1].scatter(_ygt, _ygp, s=10, color=_MCOLS[2], alpha=0.8,
-                                       edgecolors="black", linewidths=0.3, zorder=3)
-                        _mn2, _mx2 = _ygt.min(), _ygt.max()
-                        axs[1].plot([_mn2, _mx2], [_mn2, _mx2], "k--", lw=0.6)
-                        axs[1].set_xlabel("Actual (wt%)")
-                        axs[1].set_ylabel("Predicted (wt%)")
-                        _style_ax(axs[1])
-
-                    _row_specs.append((_ps("pls_cal_scatter", 2),
-                                       _draw_dual_scatters, _fig_styles["pls_cal_scatter"]))
-                    _row_tags.append("pls_cal_scatter")
-                    _cap_parts.append(
-                        f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
-                        f"a) Protein predicted vs actual ({_unit_sv}); "
-                        f"R\u00b2 = {_pls_p_sv['r2_protein_train']:.4f}. "
-                        f"b) Crowder predicted vs actual (wt%); "
-                        f"R\u00b2 = {_pls_p_sv['r2_peg_train']:.4f}."
-                    )
-
-                    def _draw_dual_rmse(axs, pp=_pls_p_sv):
-                        _rmse_row(axs[0], pp)
-
-                    _row_specs.append((_ps("pls_cal_scatter"),
-                                       _draw_dual_rmse, _fig_styles["pls_cal_scatter"]))
-                    _row_tags.append("pls_cal_scatter")
-                    _cap_parts.append(
-                        f"PLS2 RMSE vs latent variables. "
-                        f"CV RMSE (red) and training RMSE (blue); "
-                        f"opt = {_pls_p_sv['n_components']}. "
-                        f"Red shading: overfitting region."
+                        f"PLS1 crowder calibration ({_wn_c_rng}). "
+                        f"a) Predicted vs actual ({_crd_unit_sv2}); "
+                        f"R\u00b2 = {_pls_c_sv['r2_train']:.4f}. "
+                        f"b) CV RMSE = {_pls_c_sv['cv_rmse']:.4f} {_crd_unit_sv2}; "
+                        f"opt = {_pls_c_sv['n_components']} LVs."
                     )
 
                 # ── Loadings (separate row) ───────────────────────────────
@@ -4651,7 +4631,7 @@ with tab_download:
                 _row_specs.append((_ps("pls_loadings"), _draw_pls_loadings, _fig_styles["pls_loadings"]))
                 _row_tags.append("pls_loadings")
                 _cap_parts.append(
-                    f"{'PLS1' if not _dual_sv else 'PLS2'} X-loadings ({_wn_rng}), "
+                    f"PLS1 protein X-loadings ({_wn_rng}), "
                     f"{_pls_p_sv['n_components']} latent variable(s)."
                 )
 
@@ -4671,17 +4651,19 @@ with tab_download:
                     _row_specs.append((_ps("pls_loadings"), _draw_coef_protein, _fig_styles["pls_loadings"]))
                     _row_tags.append("pls_loadings")
                     _cap_parts.append(
-                        f"{'PLS1' if not _dual_sv else 'PLS2'} regression coefficients "
-                        f"— protein ({_unit_sv})."
+                        f"PLS1 protein regression coefficients ({_unit_sv})."
                     )
 
-                    if _dual_sv and _coef_all.shape[1] > 1:
-                        def _draw_coef_crowder(axs, wn_v=_wn_vld,
-                                               coef=_coef_all):
-                            axs[0].plot(wn_v, coef[:, 1], color=_MCOLS[2], lw=_LW)
+                    if _pls_c_sv is not None and _wn_c_vld is not None and _nf_c_sv > 0:
+                        _coef_c_sv  = _pls_coef(_pls_c_sv["model"], _nf_c_sv)
+                        _crd_u_coef = st.session_state.get("crowder_unit", "wt%") or "wt%"
+
+                        def _draw_coef_crowder(axs, wn_v=_wn_c_vld,
+                                               coef=_coef_c_sv, unit=_crd_u_coef):
+                            axs[0].plot(wn_v, coef[:, 0], color=_MCOLS[2], lw=_LW)
                             axs[0].axhline(0, color="black", lw=0.3, ls="--")
                             axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                            axs[0].set_ylabel("Coeff. (wt%)")
+                            axs[0].set_ylabel(f"Coeff. ({unit})")
                             axs[0].set_xlim(wn_v[0], wn_v[-1])
                             _style_ax(axs[0])
 
@@ -4689,7 +4671,7 @@ with tab_download:
                                            _draw_coef_crowder, _fig_styles["pls_loadings"]))
                         _row_tags.append("pls_loadings")
                         _cap_parts.append(
-                            "PLS2 regression coefficients — molecular crowder (wt%)."
+                            f"PLS1 crowder regression coefficients ({_crd_u_coef})."
                         )
 
             # ── Salt PLS calibration ──────────────────────────────────────

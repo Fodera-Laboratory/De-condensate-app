@@ -36,17 +36,18 @@ from decomposition import (          # noqa: F401 (re-exported)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def process_linescan(
-    wn_original:      np.ndarray,
-    X:                np.ndarray,
-    positions:        dict,
-    scan_mode:        str,
-    pls_protein_info: dict,    # may be None
-    pls_salt_info:    dict,    # may be None
-    ST_init:          np.ndarray,  # may be None (skips MCR)
-    n_components:     int,
-    settings:         dict,
-    mcr_params:       dict = None,
-    pls_settings:     dict = None,  # if None, falls back to settings
+    wn_original:       np.ndarray,
+    X:                 np.ndarray,
+    positions:         dict,
+    scan_mode:         str,
+    pls_protein_info:  dict,    # may be None
+    pls_salt_info:     dict,    # may be None
+    ST_init:           np.ndarray,  # may be None (skips MCR)
+    n_components:      int,
+    settings:          dict,
+    mcr_params:        dict = None,
+    pls_settings:      dict = None,  # if None, falls back to settings
+    pls_crowder_info:  dict = None,  # independent crowder PLS1, may be None
 ) -> dict:
     """
     Full pipeline for one linescan: preprocess → MCR → PLS.
@@ -75,28 +76,20 @@ def process_linescan(
                 where=C_mcr[:, 1] != 0,
             )
 
-    # Protein (and optionally molecular crowder) PLS (optional)
-    # Preprocess with pls_settings to match the normalization used during training
+    # Protein PLS1 (single output, independent)
     pls_protein = pls_protein2 = pls_peg = None
     if pls_protein_info is not None:
         X_pls, _, _ = preprocess_matrix(X, wn_original, pls_settings)
-        if pls_protein_info.get("triple"):
-            Y_triple     = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
-            )
-            pls_protein  = Y_triple[:, 0].flatten()
-            pls_protein2 = Y_triple[:, 1].flatten()
-            pls_peg      = Y_triple[:, 2].flatten()
-        elif pls_protein_info.get("dual"):
-            Y_dual      = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
-            )
-            pls_protein = Y_dual[:, 0].flatten()
-            pls_peg     = Y_dual[:, 1].flatten()
-        else:
-            pls_protein = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
-            ).flatten()
+        pls_protein = pls_protein_info["model"].predict(
+            X_pls[:, pls_protein_info["valid_features"]]
+        ).flatten()
+
+    # Crowder PLS1 (independent model, optional)
+    if pls_crowder_info is not None:
+        X_pls_c, _, _ = preprocess_matrix(X, wn_original, pls_settings)
+        pls_peg = pls_crowder_info["model"].predict(
+            X_pls_c[:, pls_crowder_info["valid_features"]]
+        ).flatten()
 
     # Salt PLS (optional, separate model on fingerprint region)
     pls_salt = None
