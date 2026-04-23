@@ -362,8 +362,8 @@ _HELP_NORMALISATION = (
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
-tab_tutorial, tab_files, tab_pls, tab_mcr, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
-    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression", "🔬  MCR decomposition",
+tab_tutorial, tab_files, tab_mcr, tab_pls, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
+    ["📖  Tutorial", "📂  Files & preprocessing", "🔬  MCR decomposition", "📊  PLS regression",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
     default=st.session_state.get("active_tab", "📖  Tutorial"),
