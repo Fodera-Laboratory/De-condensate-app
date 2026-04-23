@@ -964,12 +964,13 @@ if run_btn:
         models        = st.session_state.get("models", {})
         s             = st.session_state.get("settings", settings)
         n_comp        = n_components
-        mcr_params    = st.session_state.get("mcr_params", dict(
+        # Always use current widget values so changes take effect without re-building
+        mcr_params = dict(
             max_iter=int(mcr_max_iter),
             tol_increase=float(mcr_tol),
             c_regr=mcr_c_regr,
             st_regr=mcr_st_regr,
-        ))
+        )
         # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
         _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)
         results       = {}
