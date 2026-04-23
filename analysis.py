@@ -28,12 +28,27 @@ from decomposition import (          # noqa: F401 (re-exported)
     build_dual_pls_model,
     build_triple_pls_model,
     run_mcr,
+    apply_osc,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Full linescan pipeline
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _resolve_osc_ref(
+    model_info: dict,
+    ST_mcr: np.ndarray,
+    wn_mcr: np.ndarray,
+    wn_pls: np.ndarray,
+    mcr_idx: int = None,
+) -> np.ndarray:
+    """Return the OSC reference row interpolated onto wn_pls, or None."""
+    if mcr_idx is not None and ST_mcr is not None:
+        if 0 <= mcr_idx < ST_mcr.shape[0]:
+            return np.interp(wn_pls, wn_mcr, ST_mcr[mcr_idx])
+    return model_info.get("osc_ref")
+
 
 def process_linescan(
     wn_original:       np.ndarray,
@@ -48,6 +63,8 @@ def process_linescan(
     mcr_params:        dict = None,
     pls_settings:      dict = None,  # if None, falls back to settings
     pls_crowder_info:  dict = None,  # independent crowder PLS1, may be None
+    mcr_protein_comp:  int  = None,  # which C_mcr column is protein (0-based)
+    mcr_crowder_comp:  int  = None,  # which C_mcr column is crowder (0-based)
 ) -> dict:
     """
     Full pipeline for one linescan: preprocess → MCR → PLS.
@@ -76,20 +93,50 @@ def process_linescan(
                 where=C_mcr[:, 1] != 0,
             )
 
-    # Protein PLS1 (single output, independent)
+    # Protein PLS1 (OSC-corrected if reference available)
     pls_protein = pls_protein2 = pls_peg = None
     if pls_protein_info is not None:
-        X_pls, _, _ = preprocess_matrix(X, wn_original, pls_settings)
+        X_pls, wn_pls, _ = preprocess_matrix(X, wn_original, pls_settings)
+        osc_ref = _resolve_osc_ref(
+            pls_protein_info, ST_mcr, wn_proc, wn_pls,
+            mcr_idx=pls_protein_info.get("osc_mcr_idx"),
+        )
+        if osc_ref is not None:
+            X_pls = apply_osc(X_pls, osc_ref)
         pls_protein = pls_protein_info["model"].predict(
             X_pls[:, pls_protein_info["valid_features"]]
         ).flatten()
 
-    # Crowder PLS1 (independent model, optional)
+    # Crowder PLS1 (OSC-corrected if reference available)
     if pls_crowder_info is not None:
-        X_pls_c, _, _ = preprocess_matrix(X, wn_original, pls_settings)
+        X_pls_c, wn_pls_c, _ = preprocess_matrix(X, wn_original, pls_settings)
+        osc_ref_c = _resolve_osc_ref(
+            pls_crowder_info, ST_mcr, wn_proc, wn_pls_c,
+            mcr_idx=pls_crowder_info.get("osc_mcr_idx"),
+        )
+        if osc_ref_c is not None:
+            X_pls_c = apply_osc(X_pls_c, osc_ref_c)
         pls_peg = pls_crowder_info["model"].predict(
             X_pls_c[:, pls_crowder_info["valid_features"]]
         ).flatten()
+
+    # MCR-calibrated protein / crowder (OLS no-intercept against PLS predictions)
+    pls_protein_mcr = pls_peg_mcr = None
+    if C_mcr is not None:
+        if mcr_protein_comp is not None and pls_protein is not None:
+            k = mcr_protein_comp
+            c = C_mcr[:, k]
+            denom = float(np.dot(c, c))
+            if denom > 0:
+                slope = float(np.dot(c, pls_protein)) / denom
+                pls_protein_mcr = c * slope
+        if mcr_crowder_comp is not None and pls_peg is not None:
+            k = mcr_crowder_comp
+            c = C_mcr[:, k]
+            denom = float(np.dot(c, c))
+            if denom > 0:
+                slope = float(np.dot(c, pls_peg)) / denom
+                pls_peg_mcr = c * slope
 
     # Salt PLS (optional, separate model on fingerprint region)
     pls_salt = None
@@ -100,18 +147,20 @@ def process_linescan(
         ).flatten()
 
     return {
-        "distance":     distance,
-        "positions":    positions,          # raw stage x/y/z per spectrum (µm)
-        "X_proc":       X_proc,
-        "wn_proc":      wn_proc,
-        "C_mcr":        C_mcr,
-        "ST_mcr":       ST_mcr,
-        "mcr_ratio":    mcr_ratio,
-        "mcr_n_iter":   mcr_n_iter,
-        "pls_protein":  pls_protein,
-        "pls_protein2": pls_protein2,
-        "pls_peg":      pls_peg,
-        "pls_salt":     pls_salt,
+        "distance":         distance,
+        "positions":        positions,
+        "X_proc":           X_proc,
+        "wn_proc":          wn_proc,
+        "C_mcr":            C_mcr,
+        "ST_mcr":           ST_mcr,
+        "mcr_ratio":        mcr_ratio,
+        "mcr_n_iter":       mcr_n_iter,
+        "pls_protein":      pls_protein,
+        "pls_protein2":     pls_protein2,
+        "pls_peg":          pls_peg,
+        "pls_salt":         pls_salt,
+        "pls_protein_mcr":  pls_protein_mcr,
+        "pls_peg_mcr":      pls_peg_mcr,
     }
 
 

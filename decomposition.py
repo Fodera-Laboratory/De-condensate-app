@@ -320,3 +320,21 @@ def run_mcr(
     )
     mcr.fit(X_data, ST=ST_init[:n_components])
     return mcr.C_, mcr.ST_, mcr.n_iter
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OSC — Orthogonal Signal Correction
+# ─────────────────────────────────────────────────────────────────────────────
+
+def apply_osc(X: np.ndarray, ref_spectra: np.ndarray) -> np.ndarray:
+    """
+    Remove the spectral subspace spanned by ref_spectra from X
+    (orthogonal projection onto the complement).
+
+    ref_spectra : (k, n_wn) or (n_wn,)
+    Returns X_corrected : same shape as X
+    """
+    if ref_spectra.ndim == 1:
+        ref_spectra = ref_spectra[np.newaxis, :]
+    _, _, Vt = np.linalg.svd(ref_spectra, full_matrices=False)
+    return X - (X @ Vt.T) @ Vt

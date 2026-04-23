@@ -704,6 +704,29 @@ with tab_mcr:
                  "NNLS enforces non-negative spectral values.",
         )
 
+        st.subheader("Component mapping (optional)")
+        st.caption(
+            "Map MCR components to PLS outputs. When set, the MCR spectrum for "
+            "that component is used as the OSC reference for the other model, and "
+            "MCR-calibrated concentration profiles are shown in results."
+        )
+        _cm1, _cm2 = st.columns(2)
+        mcr_protein_comp_raw = _cm1.number_input(
+            "Protein MCR component (1-based, 0 = none)",
+            min_value=0, max_value=10, value=0, step=1,
+            key="mcr_protein_comp_input",
+            help="Which MCR component corresponds to the protein. 0 = not set.",
+        )
+        mcr_crowder_comp_raw = _cm2.number_input(
+            "Crowder MCR component (1-based, 0 = none)",
+            min_value=0, max_value=10, value=0, step=1,
+            key="mcr_crowder_comp_input",
+            help="Which MCR component corresponds to the molecular crowder. 0 = not set.",
+        )
+        # Convert 1-based UI input to 0-based index (0 input → None)
+        st.session_state["mcr_protein_comp"] = int(mcr_protein_comp_raw) - 1 if mcr_protein_comp_raw > 0 else None
+        st.session_state["mcr_crowder_comp"] = int(mcr_crowder_comp_raw) - 1 if mcr_crowder_comp_raw > 0 else None
+
     run_btn = st.button(
         "▶ Run MCR Analysis",
         use_container_width=True,
@@ -797,6 +820,13 @@ if build_btn:
                         pls_crowder["wn"]          = wn_peg
                         pls_crowder["X_train_proc"] = X_peg_proc
                         pls_crowder["y_raw"]        = y_peg
+
+            # ── OSC cross-references ─────────────────────────────────────────
+            # Each model gets the mean spectrum of the OTHER component as its
+            # OSC reference (used at prediction time to project out interference).
+            if pls_protein is not None and pls_crowder is not None:
+                pls_protein["osc_ref"] = X_peg_proc.mean(axis=0)
+                pls_crowder["osc_ref"] = X_prot_proc.mean(axis=0)
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -895,6 +925,8 @@ if build_btn:
                             n_components=n_components,
                             settings=settings,
                             pls_settings=pls_settings,
+                            mcr_protein_comp=st.session_state.get("mcr_protein_comp"),
+                            mcr_crowder_comp=st.session_state.get("mcr_crowder_comp"),
                         )
                     except Exception as _ae:
                         st.warning(f"Could not process {_af.name}: {_ae}")
@@ -985,17 +1017,29 @@ if run_btn:
                         except Exception as _re:
                             st.warning(f"Could not re-process MCR references: {_re}")
 
+                # Set osc_mcr_idx so process_linescan uses ST_mcr for OSC
+                _mcr_p_comp = st.session_state.get("mcr_protein_comp")
+                _mcr_c_comp = st.session_state.get("mcr_crowder_comp")
+                _pls_p_run = models.get("pls_protein")
+                _pls_c_run = models.get("pls_crowder")
+                if _pls_p_run is not None and _mcr_c_comp is not None:
+                    _pls_p_run["osc_mcr_idx"] = _mcr_c_comp
+                if _pls_c_run is not None and _mcr_p_comp is not None:
+                    _pls_c_run["osc_mcr_idx"] = _mcr_p_comp
+
                 _res = an.process_linescan(
                     wn, X, positions,
                     scan_mode=sm,
-                    pls_protein_info=models.get("pls_protein"),
-                    pls_crowder_info=models.get("pls_crowder"),
+                    pls_protein_info=_pls_p_run,
+                    pls_crowder_info=_pls_c_run,
                     pls_salt_info=models.get("pls_salt"),
                     ST_init=_st_init,
                     n_components=n_comp,
                     settings=s,
                     mcr_params=mcr_params,
                     pls_settings=pls_settings,
+                    mcr_protein_comp=_mcr_p_comp,
+                    mcr_crowder_comp=_mcr_c_comp,
                 )
                 if _pca_var_exp is not None:
                     _res["pca_var_exp"]  = _pca_var_exp
@@ -1446,6 +1490,14 @@ with tab_calib:
                     )
 
         if pls_p is not None:
+            # ── OSC status ────────────────────────────────────
+            if pls_p.get("osc_ref") is not None:
+                _osc_src = "ST_mcr" if pls_p.get("osc_mcr_idx") is not None else "crowder training mean"
+                st.info(
+                    f"OSC correction active for protein PLS — crowder spectral subspace "
+                    f"projected out at prediction time (reference: {_osc_src})."
+                )
+
             # ── Single-output protein PLS calibration ─────────
             st.subheader("Protein PLS regression")
             m1, m2, m3 = st.columns(3)
@@ -1592,6 +1644,12 @@ with tab_calib:
         if pls_c is not None:
             st.divider()
             _crd_unit = st.session_state.get("crowder_unit", "wt%") or "wt%"
+            if pls_c.get("osc_ref") is not None:
+                _osc_src_c = "ST_mcr" if pls_c.get("osc_mcr_idx") is not None else "protein training mean"
+                st.info(
+                    f"OSC correction active for crowder PLS — protein spectral subspace "
+                    f"projected out at prediction time (reference: {_osc_src_c})."
+                )
             st.subheader("Molecular crowder PLS regression (independent PLS1)")
             c1, c2, c3 = st.columns(3)
             c1.metric("Optimal components", pls_c["n_components"])
@@ -2084,6 +2142,13 @@ with tab_calib:
                 title_font=dict(color=COLORS[0]), tickfont=dict(color=COLORS[0]),
                 row=1, col=1, **({} if not _c1sy else {"secondary_y": False}),
             )
+            # MCR-calibrated protein (dashed overlay)
+            if _r.get("pls_protein_mcr") is not None:
+                _fig_bot.add_trace(go.Scatter(
+                    x=_dist, y=_r["pls_protein_mcr"], mode="lines",
+                    name="MCR-calibrated protein",
+                    line=dict(color=COLORS[0], width=1.5, dash="dash"), showlegend=True,
+                ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
 
             if _has_peg:
                 _cv_peg = _pls_c["cv_rmse"]
@@ -2103,6 +2168,13 @@ with tab_calib:
                     title_font=dict(color=COLORS[2]), tickfont=dict(color=COLORS[2]),
                     row=1, col=1, secondary_y=True,
                 )
+                # MCR-calibrated crowder (dashed overlay)
+                if _r.get("pls_peg_mcr") is not None:
+                    _fig_bot.add_trace(go.Scatter(
+                        x=_dist, y=_r["pls_peg_mcr"], mode="lines",
+                        name="MCR-calibrated crowder",
+                        line=dict(color=COLORS[2], width=1.5, dash="dash"), showlegend=True,
+                    ), row=1, col=1, secondary_y=True)
 
             if _has_salt:
                 _s_col = 2 if _has_peg else 1
@@ -2136,10 +2208,12 @@ with tab_calib:
                 _pls_parts.append(f"molecular crowder ± {_pls_c['cv_rmse']:.4f} {_crd_unit_res}")
             if _has_salt:
                 _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} mM")
+            _has_mcr_calib = _r.get("pls_protein_mcr") is not None or _r.get("pls_peg_mcr") is not None
             st.caption(
                 f"**a)** PLS-predicted concentration profiles along the linescan for *{_sel}*. "
                 f"Shaded bands indicate ±CV RMSE: {'; '.join(_pls_parts)}. "
                 f"Left y-axis: protein; right y-axis: crowder where applicable."
+                + (" Dashed lines: MCR-calibrated profiles (OSC-PLS scaled by MCR component)." if _has_mcr_calib else "")
                 + (f" **b)** Salt (mM) on a separate axis." if (_has_peg and _has_salt) else "")
             )
 
@@ -4395,6 +4469,10 @@ with tab_download:
                         axs[0].plot(_dist, _prot, color=_MCOLS[0], lw=_LW)
                         axs[0].fill_between(_dist, _prot - cv_p, _prot + cv_p,
                                             color=_MCOLS[0], alpha=0.15)
+                        # MCR-calibrated protein (dashed)
+                        if r.get("pls_protein_mcr") is not None:
+                            axs[0].plot(_dist, np.array(r["pls_protein_mcr"]),
+                                        color=_MCOLS[0], lw=_LW, ls="--", alpha=0.8)
                         axs[0].set_xlabel(dlbl)
                         _style_ax(axs[0])
                         axs[0].set_ylabel(f"Protein ({unit})", color=_MCOLS[0])
@@ -4410,6 +4488,10 @@ with tab_download:
                             _axtw.fill_between(_dist, _peg - _cv_pg,
                                                _peg + _cv_pg,
                                                color=_MCOLS[2], alpha=0.15)
+                            # MCR-calibrated crowder (dashed)
+                            if r.get("pls_peg_mcr") is not None:
+                                _axtw.plot(_dist, np.array(r["pls_peg_mcr"]),
+                                           color=_MCOLS[2], lw=_LW, ls="--", alpha=0.8)
                             _axtw.set_ylabel("Crowder (wt%)",
                                              color=_MCOLS[2], fontsize=_LS)
                             _axtw.tick_params(axis="y", colors=_MCOLS[2],
@@ -4468,9 +4550,13 @@ with tab_download:
                     _row_specs.append((_ps("pls_profiles", 1 + int(_has_peg_sv or _has_salt_sv)),
                                        _draw_pls_row, _fig_styles["pls_profiles"]))
                     _row_tags.append("pls_profiles")
+                    _has_mcr_calib_sv = (_sv_r.get("pls_protein_mcr") is not None
+                                         or _sv_r.get("pls_peg_mcr") is not None)
                     _cap_pls = (
                         f"PLS concentration profiles \u2014 {_safe_fn}. "
-                        f"a) Protein ({_unit_sv}) \u00b1 {_cv_p_sv:.4f} {_unit_sv} CV RMSE."
+                        f"a) Protein ({_unit_sv}) \u00b1 {_cv_p_sv:.4f} {_unit_sv} CV RMSE"
+                        + (" (solid = OSC-PLS, dashed = MCR-calibrated)" if _has_mcr_calib_sv else "")
+                        + "."
                     )
                     if _has_peg_sv:
                         _crd_unit_sv = st.session_state.get("crowder_unit", "wt%") or "wt%"
