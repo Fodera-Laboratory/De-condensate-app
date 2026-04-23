@@ -2076,7 +2076,7 @@ with tab_results:
         if has_mcr:
             st.divider()
             with st.expander("MCR summary"):
-                _mcr_max = st.session_state.get("mcr_params", {}).get("max_iter", 2000)
+                _mcr_max = int(mcr_max_iter)
                 _hit_max = r["mcr_n_iter"] >= _mcr_max
                 st.markdown(
                     f"**MCR** — {'reached max iterations' if _hit_max else 'converged'} "
