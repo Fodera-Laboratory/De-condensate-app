@@ -63,17 +63,14 @@ _RS_BASELINE_MAP = {
 
 
 
-def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
-    """Apply spike removal → baseline → smoothing → normalisation to one spectrum."""
+def _apply_baseline(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
+    """Spike removal + baseline correction only (no smoothing/normalisation)."""
     baseline     = settings.get("baseline",     "rubberband")
-    smooth       = settings.get("smooth",       "none")
-    normalize    = settings.get("normalize",    "minmax")
     spike_remove = settings.get("spike_remove", True)
 
     if spike_remove:
         I = spike_removal_scp(I, threshold=settings.get("spike_threshold", 8.0))
 
-    # ── Baseline correction ───────────────────────────────────────────────
     if baseline == "rubberband":
         I = I - rubberband_correction(wn, I)
     elif baseline == "rolling_ball":
@@ -105,9 +102,14 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         elif baseline in ("imodpoly", "modpoly", "poly"):
             result, _ = _fn(I.reshape(1, -1), wn, poly_order=settings.get("rs_poly_order", 2))
         I = result.squeeze()
-    # baseline == "none": skip
+    return I
 
-    # ── Smoothing (optional) ──────────────────────────────────────────────
+
+def _apply_postprocess(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
+    """Smoothing + normalisation + second derivative (no spike removal / baseline)."""
+    smooth    = settings.get("smooth",    "none")
+    normalize = settings.get("normalize", "minmax")
+
     if smooth == "savgol":
         from raman_preprocessing import Savgol_filter
         I = Savgol_filter(I,
@@ -123,9 +125,7 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         cut = max(1, int(cutoff * len(F)))
         F[cut:] = 0
         I = np.fft.irfft(F, n=n)
-    # smooth == "none": skip
 
-    # ── Normalisation ─────────────────────────────────────────────────────
     if normalize == "minmax":
         I = Min_max_normalisation(I)
     elif normalize == "snv":
@@ -134,15 +134,20 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = area_normalization(I, wn)
     elif normalize == "vector":
         I = vector_normalization(I)
-    # normalize == "none": skip
 
-    # ── Second derivative (optional, applied last) ────────────────────────
     if settings.get("second_deriv", False):
         from scipy.signal import savgol_filter as _sgf
         sd_win  = int(settings.get("sd_window", 11))
         sd_poly = int(settings.get("sd_poly",    2))
         I = _sgf(I, window_length=sd_win, polyorder=sd_poly, deriv=2)
 
+    return I
+
+
+def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
+    """Apply spike removal → baseline → smoothing → normalisation to one spectrum."""
+    I = _apply_baseline(I, wn, settings)
+    I = _apply_postprocess(I, wn, settings)
     return I
 
 
@@ -188,20 +193,51 @@ def preprocess_matrix(
             settings,
             normalize=settings.get("salt_normalize", "none"),
         )
+        use_cut = False
     else:
         wn_min  = settings.get("wn_min", 700)
         wn_max  = settings.get("wn_max", 3900)
         cut_min = settings.get("wn_cut_min") if settings.get("use_cut") else None
         cut_max = settings.get("wn_cut_max") if settings.get("use_cut") else None
+        use_cut = bool(settings.get("use_cut") and cut_min is not None and cut_max is not None)
         mask    = build_mask(wn_original, wn_min, wn_max, cut_min, cut_max)
         eff_settings = settings
 
-    wn   = wn_original[mask]
-    rows = []
-    for i in range(matrix.shape[0]):
-        I = matrix[i][mask].copy()
-        I = _preprocess_spectrum(I, wn, eff_settings)
-        rows.append(I)
+    wn = wn_original[mask]
+
+    if use_cut:
+        # 1. Baseline on full range (no gap), then cut gap, then endpoint-stitch each piece.
+        mask_full = build_mask(wn_original, wn_min, wn_max)
+        wn_full   = wn_original[mask_full]
+        gap_in_full = (wn_full >= cut_min) & (wn_full <= cut_max)
+        left_sel  = ~gap_in_full & (wn_full < cut_min)
+        right_sel = ~gap_in_full & (wn_full > cut_max)
+        wn_left   = wn_full[left_sel]
+        wn_right  = wn_full[right_sel]
+
+        rows = []
+        for i in range(matrix.shape[0]):
+            I_full = matrix[i][mask_full].copy()
+            # Stage 1: spike removal + baseline on full spectrum
+            I_full = _apply_baseline(I_full, wn_full, eff_settings)
+            # Stage 2: cut gap and apply endpoint correction to each sub-region
+            I_left  = I_full[left_sel]
+            I_right = I_full[right_sel]
+            if len(I_left) > 1:
+                I_left = I_left - endpoint_baseline(I_left)
+            if len(I_right) > 1:
+                I_right = I_right - endpoint_baseline(I_right)
+            I = np.concatenate([I_left, I_right])
+            # Stage 3: smoothing + normalisation on stitched spectrum
+            I = _apply_postprocess(I, wn, eff_settings)
+            rows.append(I)
+    else:
+        rows = []
+        for i in range(matrix.shape[0]):
+            I = matrix[i][mask].copy()
+            I = _preprocess_spectrum(I, wn, eff_settings)
+            rows.append(I)
+
     return np.vstack(rows), wn, mask
 
 
