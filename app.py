@@ -182,6 +182,12 @@ def _training_path(subdir, filename):
     return os.path.join(TRAINING_DIR, filename)
 
 
+def _mcr_comp_idx(key):
+    """Return 0-based MCR component index from a 1-based number_input widget, or None if 0."""
+    v = st.session_state.get(key, 0)
+    return int(v) - 1 if v and int(v) > 0 else None
+
+
 def _read_csv_src(src):
     """Read a CSV from either a Streamlit UploadedFile or a plain file-path string."""
     df = pd.read_csv(src)
@@ -725,8 +731,6 @@ with tab_mcr:
         key="mcr_crowder_comp_ui",
         help="Which column of C_mcr holds the crowder concentration profile.",
     )
-    st.session_state["mcr_protein_comp"] = int(_prot_comp_raw) - 1 if _prot_comp_raw > 0 else None
-    st.session_state["mcr_crowder_comp"] = int(_crowd_comp_raw) - 1 if _crowd_comp_raw > 0 else None
 
     st.divider()
     run_btn = st.button(
@@ -925,8 +929,8 @@ if build_btn:
                             n_components=n_components,
                             settings=settings,
                             pls_settings=pls_settings,
-                            mcr_protein_comp=st.session_state.get("mcr_protein_comp"),
-                            mcr_crowder_comp=st.session_state.get("mcr_crowder_comp"),
+                            mcr_protein_comp=_mcr_comp_idx("mcr_protein_comp_ui"),
+                            mcr_crowder_comp=_mcr_comp_idx("mcr_crowder_comp_ui"),
                         )
                     except Exception as _ae:
                         st.warning(f"Could not process {_af.name}: {_ae}")
@@ -1032,8 +1036,8 @@ if run_btn:
                     settings=s,
                     mcr_params=mcr_params,
                     pls_settings=pls_settings,
-                    mcr_protein_comp=st.session_state.get("mcr_protein_comp"),
-                    mcr_crowder_comp=st.session_state.get("mcr_crowder_comp"),
+                    mcr_protein_comp=_mcr_comp_idx("mcr_protein_comp_ui"),
+                    mcr_crowder_comp=_mcr_comp_idx("mcr_crowder_comp_ui"),
                 )
                 if _pca_var_exp is not None:
                     _res["pca_var_exp"]  = _pca_var_exp
@@ -1485,11 +1489,12 @@ with tab_calib:
 
         if pls_p is not None:
             # ── MCR-driven OSC status ──────────────────────────
-            _mcr_c_active = st.session_state.get("mcr_crowder_comp")
+            _mcr_c_active = _mcr_comp_idx("mcr_crowder_comp_ui")
             if _mcr_c_active is not None:
                 st.info(
-                    f"MCR-driven OSC active for protein PLS — crowder MCR component "
-                    f"{_mcr_c_active + 1} subtracted per spectrum before prediction."
+                    f"MCR-driven OSC configured for protein PLS — crowder MCR component "
+                    f"{_mcr_c_active + 1} will be subtracted per spectrum. "
+                    f"Re-run MCR Analysis to apply."
                 )
 
             # ── Single-output protein PLS calibration ─────────
@@ -1584,7 +1589,8 @@ with tab_calib:
 
             _osc_res_p = next(
                 (r for r in (st.session_state.get("results") or {}).values()
-                 if r.get("X_pls_before") is not None and r.get("X_pls_after") is not None),
+                 if r.get("X_pls_before") is not None and r.get("X_pls_after") is not None
+                 and not np.allclose(r["X_pls_before"], r["X_pls_after"])),
                 None,
             )
             if _osc_res_p is not None:
@@ -1687,11 +1693,12 @@ with tab_calib:
         if pls_c is not None:
             st.divider()
             _crd_unit = st.session_state.get("crowder_unit", "wt%") or "wt%"
-            _mcr_p_active = st.session_state.get("mcr_protein_comp")
+            _mcr_p_active = _mcr_comp_idx("mcr_protein_comp_ui")
             if _mcr_p_active is not None:
                 st.info(
-                    f"MCR-driven OSC active for crowder PLS — protein MCR component "
-                    f"{_mcr_p_active + 1} subtracted per spectrum before prediction."
+                    f"MCR-driven OSC configured for crowder PLS — protein MCR component "
+                    f"{_mcr_p_active + 1} will be subtracted per spectrum. "
+                    f"Re-run MCR Analysis to apply."
                 )
             st.subheader("Molecular crowder PLS regression (independent PLS1)")
             c1, c2, c3 = st.columns(3)
@@ -1781,7 +1788,8 @@ with tab_calib:
 
             _osc_res_c = next(
                 (r for r in (st.session_state.get("results") or {}).values()
-                 if r.get("X_pls_c_before") is not None and r.get("X_pls_c_after") is not None),
+                 if r.get("X_pls_c_before") is not None and r.get("X_pls_c_after") is not None
+                 and not np.allclose(r["X_pls_c_before"], r["X_pls_c_after"])),
                 None,
             )
             if _osc_res_c is not None:
