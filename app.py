@@ -2289,14 +2289,18 @@ with tab_calib:
             _n_wn_pls = len(_wn_pls_rec)
             _valid    = _pls_p["valid_features"]
             _model    = _pls_p["model"]
-            _P        = _model.x_loadings_          # (n_valid, n_comp)
-            _Q        = _model.y_loadings_           # (n_outputs, n_comp)
-            _x_mean_v = _model.x_mean_               # (n_valid,)
-            _y_mean   = np.atleast_1d(_model.y_mean_)  # (n_outputs,)
+            _P        = _pls_p.get("x_loadings", getattr(_model, "x_loadings_", None))
+            _Q        = _pls_p.get("y_loadings", getattr(_model, "y_loadings_", None))
+            _x_mean_v = _pls_p.get("x_mean",     getattr(_model, "x_mean_",     np.zeros(int(_valid.sum()))))
+            _y_mean   = np.atleast_1d(_pls_p.get("y_mean", getattr(_model, "y_mean_", np.array([0.0]))))
 
             # Full-grid training mean spectrum (zero at invalid/removed features)
             _x_mean_full = np.zeros(_n_wn_pls)
             _x_mean_full[_valid] = _x_mean_v
+
+            if _P is None or _Q is None:
+                st.info("Spectral reconstruction requires rebuilding the PLS model (loadings not found in current session).")
+                st.stop()
 
             # Assemble centred concentration matrix  (n_samples × n_outputs)
             _c_prot  = _r["pls_protein"]

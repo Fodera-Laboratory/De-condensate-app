@@ -119,6 +119,10 @@ def build_pls_model(
         "rmse_train_all": rmse_train,
         "y_train":        y_train,
         "y_pred_train":   y_pred,
+        "x_mean":         model.x_mean_.copy(),
+        "y_mean":         np.atleast_1d(model.y_mean_).copy(),
+        "x_loadings":     model.x_loadings_.copy(),
+        "y_loadings":     model.y_loadings_.copy(),
     }
 
 
@@ -196,6 +200,10 @@ def build_dual_pls_model(
         "y_pred_peg_train":      Y_pred[:, 1],
         "X_train_proc":          X_train,
         "wn":                    None,   # filled by app.py after training
+        "x_mean":                model.x_mean_.copy(),
+        "y_mean":                np.atleast_1d(model.y_mean_).copy(),
+        "x_loadings":            model.x_loadings_.copy(),
+        "y_loadings":            model.y_loadings_.copy(),
     }
 
 
@@ -285,6 +293,10 @@ def build_triple_pls_model(
         "y_pred_peg_train":     Y_pred[:, 2],
         "X_train_proc":         X_train,
         "wn":                   None,
+        "x_mean":               model.x_mean_.copy(),
+        "y_mean":               np.atleast_1d(model.y_mean_).copy(),
+        "x_loadings":           model.x_loadings_.copy(),
+        "y_loadings":           model.y_loadings_.copy(),
     }
 
 
