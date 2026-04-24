@@ -463,7 +463,7 @@ with tab_files:
         normalize_pls = st.selectbox(
             "PLS regression normalization",
             _norm_opts,
-            index=0,
+            index=_norm_opts.index("area"),
             format_func=_norm_fmt,
             help=(
                 "Normalization applied to spectra before PLS modelling. "
@@ -805,19 +805,15 @@ if build_btn:
                         pls_crowder["y_raw"]        = y_peg
 
             # ── OSC cross-references + retrain on OSC-corrected training data ──
-            # OSC reference = mean of the OTHER component's highest-concentration
-            # training spectra.  These best represent the pure interferent signal
-            # that needs to be projected out.  Both models are then retrained on
-            # their own OSC-corrected training data so calibration and prediction
-            # live in the same spectral space.
+            # OSC cross-references + retrain on OSC-corrected training data
             if pls_protein is not None and pls_crowder is not None:
                 # Mean of highest-concentration crowder spectra → reference for protein OSC
                 _peg_top = X_peg_proc[y_peg == y_peg.max()]
-                _peg_ref = _peg_top.mean(axis=0)  # shape (n_features,)
+                _peg_ref = _peg_top.mean(axis=0)
 
                 # Mean of highest-concentration protein spectra → reference for crowder OSC
                 _prot_top = X_prot_proc[y_prot == y_prot.max()]
-                _prot_ref = _prot_top.mean(axis=0)  # shape (n_features,)
+                _prot_ref = _prot_top.mean(axis=0)
 
                 # Retrain protein model on OSC-corrected training data
                 with st.spinner("Retraining protein PLS on OSC-corrected spectra…"):
