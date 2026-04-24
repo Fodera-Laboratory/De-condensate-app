@@ -2243,7 +2243,6 @@ with tab_calib:
             @st.cache_data(show_spinner=False)
             def _load_water_mean(_wn_ref_key, _pls_settings_frozen):
                 import glob as _glob
-                from raman_io import load_line_scan_from_txt as _lls
                 _pls_s_dict = dict(_pls_settings_frozen)
                 _base = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
@@ -2254,9 +2253,21 @@ with tab_calib:
                     return None, None
                 wn_ref_arr = np.array(_wn_ref_key)
                 _all = []
+                _wnp = None
                 for _tf in _txt_files:
                     try:
-                        _ww, _Xw, _ = _lls(_tf)
+                        # Read WITec single-point ASCII export (no ScanStart/Stop keys)
+                        _skiprows = 0
+                        with open(_tf, "r", encoding="latin1") as _fh:
+                            for _li, _line in enumerate(_fh):
+                                if _line.strip() == "[Data]":
+                                    _skiprows = _li + 2
+                                    break
+                        _df = pd.read_csv(_tf, sep="\t", skiprows=_skiprows, encoding="latin1", header=None)
+                        _ww = _df.iloc[:, 0].astype(float).values
+                        _Xw = _df.iloc[:, 1:].to_numpy().T  # (n_spectra, n_wn)
+                        if _Xw.ndim == 1:
+                            _Xw = _Xw[np.newaxis, :]
                         _Xp, _wnp, _ = an.preprocess_matrix(_Xw, _ww, _pls_s_dict)
                         # align to PLS grid via interpolation if axes differ
                         if not np.allclose(_wnp, wn_ref_arr[:len(_wnp)], atol=0.5):
