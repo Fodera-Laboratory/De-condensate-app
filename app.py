@@ -760,9 +760,6 @@ settings = dict(
     salt_normalize=salt_normalize,
     spike_remove=spike_remove,
     spike_threshold=spike_threshold,
-    second_deriv=second_deriv,
-    sd_window=sd_window if second_deriv else 11,
-    sd_poly=sd_poly   if second_deriv else 2,
     wn_min=wn_min,
     wn_max=wn_max,
     use_cut=use_cut,
@@ -771,8 +768,16 @@ settings = dict(
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
-# Settings override for PLS standard preprocessing
-pls_settings = dict(settings, normalize=normalize_pls)
+# PLS settings: inherit MCR settings but add second-derivative and PLS normalisation.
+# second_deriv is intentionally excluded from settings (MCR base) — it produces
+# negative values which pymcr cannot handle.
+pls_settings = dict(
+    settings,
+    normalize=normalize_pls,
+    second_deriv=second_deriv,
+    sd_window=sd_window if second_deriv else 11,
+    sd_poly=sd_poly   if second_deriv else 2,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -825,44 +830,45 @@ if build_btn:
                         pls_crowder["y_raw"]        = y_peg
 
             # ── OSC cross-references + retrain on OSC-corrected training data ──
-            # Each model gets the OTHER model's PLS loading subspace (x_weights_)
-            # as its OSC reference, then is RETRAINED on OSC-corrected training
-            # data so that calibration and prediction live in the same spectral
-            # space.  One round is sufficient because the OSC references come
-            # from the initial (independent) fits.
+            # OSC reference = mean of the OTHER component's highest-concentration
+            # training spectra.  These best represent the pure interferent signal
+            # that needs to be projected out.  Both models are then retrained on
+            # their own OSC-corrected training data so calibration and prediction
+            # live in the same spectral space.
             if pls_protein is not None and pls_crowder is not None:
-                _n_full = X_prot_proc.shape[1]  # same grid for both models
-                # Build OSC reference matrices from initial fits
-                _peg_W = np.zeros((pls_crowder["model"].x_weights_.shape[1], _n_full))
-                _peg_W[:, pls_crowder["valid_features"]] = pls_crowder["model"].x_weights_.T
-                _prot_W = np.zeros((pls_protein["model"].x_weights_.shape[1], _n_full))
-                _prot_W[:, pls_protein["valid_features"]] = pls_protein["model"].x_weights_.T
+                # Mean of highest-concentration crowder spectra → reference for protein OSC
+                _peg_top = X_peg_proc[y_peg == y_peg.max()]
+                _peg_ref = _peg_top.mean(axis=0)  # shape (n_features,)
+
+                # Mean of highest-concentration protein spectra → reference for crowder OSC
+                _prot_top = X_prot_proc[y_prot == y_prot.max()]
+                _prot_ref = _prot_top.mean(axis=0)  # shape (n_features,)
 
                 # Retrain protein model on OSC-corrected training data
                 with st.spinner("Retraining protein PLS on OSC-corrected spectra…"):
-                    X_prot_osc = an.apply_osc(X_prot_proc, _peg_W)
+                    X_prot_osc = an.apply_osc(X_prot_proc, _peg_ref)
                     pls_protein = an.build_pls_model(
                         X_prot_osc, y_prot,
                         max_components=int(max_pls_components), cv_folds=int(cv_folds),
                     )
                     pls_protein["wn"]               = wn_prot
                     pls_protein["X_train_proc"]     = X_prot_osc
-                    pls_protein["X_train_proc_raw"] = X_prot_proc  # pre-OSC, for comparison plot
+                    pls_protein["X_train_proc_raw"] = X_prot_proc
                     pls_protein["y_raw"]            = y_prot
-                    pls_protein["osc_ref"]          = _peg_W
+                    pls_protein["osc_ref"]          = _peg_ref
 
                 # Retrain crowder model on OSC-corrected training data
                 with st.spinner("Retraining crowder PLS on OSC-corrected spectra…"):
-                    X_peg_osc = an.apply_osc(X_peg_proc, _prot_W)
+                    X_peg_osc = an.apply_osc(X_peg_proc, _prot_ref)
                     pls_crowder = an.build_pls_model(
                         X_peg_osc, y_peg,
                         max_components=int(max_pls_components), cv_folds=int(cv_folds),
                     )
                     pls_crowder["wn"]               = wn_peg
                     pls_crowder["X_train_proc"]     = X_peg_osc
-                    pls_crowder["X_train_proc_raw"] = X_peg_proc  # pre-OSC, for comparison plot
+                    pls_crowder["X_train_proc_raw"] = X_peg_proc
                     pls_crowder["y_raw"]            = y_peg
-                    pls_crowder["osc_ref"]          = _prot_W
+                    pls_crowder["osc_ref"]          = _prot_ref
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -1664,10 +1670,9 @@ with tab_calib:
                     st.caption(
                         f"Effect of OSC on the {_X_raw.shape[0]} protein training spectra. "
                         f"**a)** Raw preprocessed. "
-                        f"**b)** After projecting out the crowder PLS loading subspace "
-                        f"({pls_p['osc_ref'].shape[0]} LV direction(s)). "
-                        f"**c)** Removed signal (difference); peaks here correspond to "
-                        f"spectral variance shared with the crowder model."
+                        f"**b)** After projecting out the highest-concentration crowder reference spectrum. "
+                        f"**c)** Removed signal (difference); peaks here are the crowder spectral "
+                        f"contribution projected out by OSC."
                     )
 
             with st.expander("PLS regression coefficients"):
@@ -1857,10 +1862,9 @@ with tab_calib:
                     st.caption(
                         f"Effect of OSC on the {_X_raw_c.shape[0]} crowder training spectra. "
                         f"**a)** Raw preprocessed. "
-                        f"**b)** After projecting out the protein PLS loading subspace "
-                        f"({pls_c['osc_ref'].shape[0]} LV direction(s)). "
-                        f"**c)** Removed signal (difference); peaks here correspond to "
-                        f"spectral variance shared with the protein model."
+                        f"**b)** After projecting out the highest-concentration protein reference spectrum. "
+                        f"**c)** Removed signal (difference); peaks here are the protein spectral "
+                        f"contribution projected out by OSC."
                     )
 
             with st.expander("PLS regression coefficients"):
