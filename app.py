@@ -2261,7 +2261,7 @@ with tab_calib:
                         with open(_tf, "r", encoding="latin1") as _fh:
                             for _li, _line in enumerate(_fh):
                                 if _line.strip() == "[Data]":
-                                    _skiprows = _li + 2
+                                    _skiprows = _li + 3  # skip [Data], col-names, units rows
                                     break
                         _df = pd.read_csv(_tf, sep="\t", skiprows=_skiprows, encoding="latin1", header=None)
                         _ww = _df.iloc[:, 0].astype(float).values
