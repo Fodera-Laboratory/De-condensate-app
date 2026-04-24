@@ -2253,7 +2253,6 @@ with tab_calib:
                     return None, None
                 wn_ref_arr = np.array(_wn_ref_key)
                 _all = []
-                _wnp = None
                 for _tf in _txt_files:
                     try:
                         # Read WITec single-point ASCII export (no ScanStart/Stop keys)
@@ -2269,19 +2268,14 @@ with tab_calib:
                         if _Xw.ndim == 1:
                             _Xw = _Xw[np.newaxis, :]
                         _Xp, _wnp, _ = an.preprocess_matrix(_Xw, _ww, _pls_s_dict)
-                        # align to PLS grid via interpolation if axes differ
-                        if not np.allclose(_wnp, wn_ref_arr[:len(_wnp)], atol=0.5):
-                            _Xp_aligned = np.array([
-                                np.interp(wn_ref_arr, _wnp, _row) for _row in _Xp
-                            ])
-                            _all.append(_Xp_aligned.mean(axis=0))
-                        else:
-                            _all.append(_Xp.mean(axis=0))
+                        # always interpolate onto wn_ref_arr so all arrays share the same axis
+                        _row_mean = _Xp.mean(axis=0)
+                        _all.append(np.interp(wn_ref_arr, _wnp, _row_mean))
                     except Exception:
                         pass
                 if not _all:
                     return None, None
-                return np.mean(_all, axis=0), _wnp
+                return np.mean(_all, axis=0), wn_ref_arr
 
             _saved_pls_s = _models.get("pls_settings", {})
             _wn_ref_key  = tuple(_models.get("wn_ref", np.array([])).tolist())
