@@ -104,9 +104,13 @@ def build_pls_model(
     feat_std       = np.std(X_train, axis=0)
     valid_features = feat_std > 1e-10
 
+    X_fit  = X_train[:, valid_features]
+    x_mean = X_fit.mean(axis=0)
+    y_mean = np.atleast_1d(np.mean(y_train, axis=0))
+
     model  = PLSRegression(n_components=n_opt, scale=False)
-    model.fit(X_train[:, valid_features], y_train)
-    y_pred = model.predict(X_train[:, valid_features]).flatten()
+    model.fit(X_fit, y_train)
+    y_pred = model.predict(X_fit).flatten()
 
     return {
         "model":          model,
@@ -119,8 +123,8 @@ def build_pls_model(
         "rmse_train_all": rmse_train,
         "y_train":        y_train,
         "y_pred_train":   y_pred,
-        "x_mean":         model.x_mean_.copy(),
-        "y_mean":         np.atleast_1d(model.y_mean_).copy(),
+        "x_mean":         x_mean,
+        "y_mean":         y_mean,
         "x_loadings":     model.x_loadings_.copy(),
         "y_loadings":     model.y_loadings_.copy(),
     }
@@ -154,9 +158,13 @@ def build_dual_pls_model(
     feat_std       = np.std(X_train, axis=0)
     valid_features = feat_std > 1e-10
 
+    X_fit  = X_train[:, valid_features]
+    x_mean = X_fit.mean(axis=0)
+    y_mean = np.atleast_1d(np.mean(Y_train, axis=0))
+
     model  = PLSRegression(n_components=n_opt, scale=False)
-    model.fit(X_train[:, valid_features], Y_train)
-    Y_pred = model.predict(X_train[:, valid_features])
+    model.fit(X_fit, Y_train)
+    Y_pred = model.predict(X_fit)
 
     rmse_protein = float(np.sqrt(mean_squared_error(y_train_protein, Y_pred[:, 0])))
     r2_protein   = float(r2_score(y_train_protein, Y_pred[:, 0]))
@@ -200,8 +208,8 @@ def build_dual_pls_model(
         "y_pred_peg_train":      Y_pred[:, 1],
         "X_train_proc":          X_train,
         "wn":                    None,   # filled by app.py after training
-        "x_mean":                model.x_mean_.copy(),
-        "y_mean":                np.atleast_1d(model.y_mean_).copy(),
+        "x_mean":                x_mean,
+        "y_mean":                y_mean,
         "x_loadings":            model.x_loadings_.copy(),
         "y_loadings":            model.y_loadings_.copy(),
     }
@@ -238,9 +246,13 @@ def build_triple_pls_model(
     feat_std       = np.std(X_train, axis=0)
     valid_features = feat_std > 1e-10
 
+    X_fit  = X_train[:, valid_features]
+    x_mean = X_fit.mean(axis=0)
+    y_mean = np.atleast_1d(np.mean(Y_train, axis=0))
+
     model  = PLSRegression(n_components=n_opt, scale=False)
-    model.fit(X_train[:, valid_features], Y_train)
-    Y_pred = model.predict(X_train[:, valid_features])
+    model.fit(X_fit, Y_train)
+    Y_pred = model.predict(X_fit)
 
     rmse_p1  = float(np.sqrt(mean_squared_error(y_t_p1,  Y_pred[:, 0])))
     r2_p1    = float(r2_score(y_t_p1,  Y_pred[:, 0]))
@@ -293,8 +305,8 @@ def build_triple_pls_model(
         "y_pred_peg_train":     Y_pred[:, 2],
         "X_train_proc":         X_train,
         "wn":                   None,
-        "x_mean":               model.x_mean_.copy(),
-        "y_mean":               np.atleast_1d(model.y_mean_).copy(),
+        "x_mean":               x_mean,
+        "y_mean":               y_mean,
         "x_loadings":           model.x_loadings_.copy(),
         "y_loadings":           model.y_loadings_.copy(),
     }
