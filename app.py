@@ -845,10 +845,11 @@ if build_btn:
                         X_prot_osc, y_prot,
                         max_components=int(max_pls_components), cv_folds=int(cv_folds),
                     )
-                    pls_protein["wn"]           = wn_prot
-                    pls_protein["X_train_proc"] = X_prot_osc
-                    pls_protein["y_raw"]        = y_prot
-                    pls_protein["osc_ref"]      = _peg_W
+                    pls_protein["wn"]               = wn_prot
+                    pls_protein["X_train_proc"]     = X_prot_osc
+                    pls_protein["X_train_proc_raw"] = X_prot_proc  # pre-OSC, for comparison plot
+                    pls_protein["y_raw"]            = y_prot
+                    pls_protein["osc_ref"]          = _peg_W
 
                 # Retrain crowder model on OSC-corrected training data
                 with st.spinner("Retraining crowder PLS on OSC-corrected spectra…"):
@@ -857,10 +858,11 @@ if build_btn:
                         X_peg_osc, y_peg,
                         max_components=int(max_pls_components), cv_folds=int(cv_folds),
                     )
-                    pls_crowder["wn"]           = wn_peg
-                    pls_crowder["X_train_proc"] = X_peg_osc
-                    pls_crowder["y_raw"]        = y_peg
-                    pls_crowder["osc_ref"]      = _prot_W
+                    pls_crowder["wn"]               = wn_peg
+                    pls_crowder["X_train_proc"]     = X_peg_osc
+                    pls_crowder["X_train_proc_raw"] = X_peg_proc  # pre-OSC, for comparison plot
+                    pls_crowder["y_raw"]            = y_peg
+                    pls_crowder["osc_ref"]          = _prot_W
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -1623,6 +1625,51 @@ with tab_calib:
                 f"**d)** X-loadings for each latent variable — prominent features reflect the spectral bands driving concentration prediction."
             )
 
+            if pls_p.get("X_train_proc_raw") is not None:
+                with st.expander("OSC correction — before vs after"):
+                    _wn_osc  = pls_p["wn"]
+                    _X_raw   = pls_p["X_train_proc_raw"]
+                    _X_osc   = pls_p["X_train_proc"]
+                    _fig_osc = make_subplots(
+                        rows=1, cols=3,
+                        subplot_titles=[
+                            "a)  Raw preprocessed",
+                            "b)  OSC-corrected",
+                            "c)  Difference (raw − OSC)",
+                        ],
+                    )
+                    for _si in range(_X_raw.shape[0]):
+                        _fig_osc.add_trace(go.Scatter(
+                            x=_wn_osc, y=_X_raw[_si], mode="lines",
+                            line=dict(color=COLORS[0], width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=1)
+                        _fig_osc.add_trace(go.Scatter(
+                            x=_wn_osc, y=_X_osc[_si], mode="lines",
+                            line=dict(color=COLORS[1], width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=2)
+                        _fig_osc.add_trace(go.Scatter(
+                            x=_wn_osc, y=_X_raw[_si] - _X_osc[_si], mode="lines",
+                            line=dict(color="grey", width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=3)
+                    for _col, _lbl in enumerate(
+                        ["Norm. intensity", "Norm. intensity", "Difference"], start=1
+                    ):
+                        _fig_osc.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=_col)
+                        _fig_osc.update_yaxes(title_text=_lbl, row=1, col=_col)
+                    _fig_osc.update_layout(height=320)
+                    st.plotly_chart(_fig_osc, use_container_width=True)
+                    st.caption(
+                        f"Effect of OSC on the {_X_raw.shape[0]} protein training spectra. "
+                        f"**a)** Raw preprocessed. "
+                        f"**b)** After projecting out the crowder PLS loading subspace "
+                        f"({pls_p['osc_ref'].shape[0]} LV direction(s)). "
+                        f"**c)** Removed signal (difference); peaks here correspond to "
+                        f"spectral variance shared with the crowder model."
+                    )
+
             with st.expander("PLS regression coefficients"):
                 coef = _pls_coef(pls_p["model"], len(wn_valid))
                 fig_coef = go.Figure()
@@ -1770,6 +1817,51 @@ with tab_calib:
                 f"**c)** CV RMSE = {pls_c['cv_rmse']:.4f} {_crd_unit} at opt = {pls_c['n_components']} LVs. "
                 f"**d)** X-loadings per LV."
             )
+
+            if pls_c.get("X_train_proc_raw") is not None:
+                with st.expander("OSC correction — before vs after"):
+                    _wn_osc_c = pls_c["wn"]
+                    _X_raw_c  = pls_c["X_train_proc_raw"]
+                    _X_osc_c  = pls_c["X_train_proc"]
+                    _fig_osc_c = make_subplots(
+                        rows=1, cols=3,
+                        subplot_titles=[
+                            "a)  Raw preprocessed",
+                            "b)  OSC-corrected",
+                            "c)  Difference (raw − OSC)",
+                        ],
+                    )
+                    for _si in range(_X_raw_c.shape[0]):
+                        _fig_osc_c.add_trace(go.Scatter(
+                            x=_wn_osc_c, y=_X_raw_c[_si], mode="lines",
+                            line=dict(color=COLORS[2], width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=1)
+                        _fig_osc_c.add_trace(go.Scatter(
+                            x=_wn_osc_c, y=_X_osc_c[_si], mode="lines",
+                            line=dict(color=COLORS[1], width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=2)
+                        _fig_osc_c.add_trace(go.Scatter(
+                            x=_wn_osc_c, y=_X_raw_c[_si] - _X_osc_c[_si], mode="lines",
+                            line=dict(color="grey", width=0.8), opacity=0.4,
+                            showlegend=False,
+                        ), row=1, col=3)
+                    for _col, _lbl in enumerate(
+                        ["Norm. intensity", "Norm. intensity", "Difference"], start=1
+                    ):
+                        _fig_osc_c.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=_col)
+                        _fig_osc_c.update_yaxes(title_text=_lbl, row=1, col=_col)
+                    _fig_osc_c.update_layout(height=320)
+                    st.plotly_chart(_fig_osc_c, use_container_width=True)
+                    st.caption(
+                        f"Effect of OSC on the {_X_raw_c.shape[0]} crowder training spectra. "
+                        f"**a)** Raw preprocessed. "
+                        f"**b)** After projecting out the protein PLS loading subspace "
+                        f"({pls_c['osc_ref'].shape[0]} LV direction(s)). "
+                        f"**c)** Removed signal (difference); peaks here correspond to "
+                        f"spectral variance shared with the protein model."
+                    )
 
             with st.expander("PLS regression coefficients"):
                 coef_c = _pls_coef(pls_c["model"], len(wn_c_vld))
