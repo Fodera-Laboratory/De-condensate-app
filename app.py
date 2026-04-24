@@ -2282,37 +2282,45 @@ with tab_calib:
             _pls_s_frozen = tuple(sorted(_saved_pls_s.items()))
             _water_mean, _wn_water = _load_water_mean(_wn_ref_key, _pls_s_frozen)
 
-            # ── Build full-grid coefficient vectors ───────────────────────────
+            # ── Loadings-based spectral reconstruction ────────────────────────
+            # Recover latent scores T from predicted concentrations via Y-loadings
+            # Q, then reconstruct X = T @ P.T + x_mean.  This is the min-norm
+            # solution T = Y_c @ inv(Q @ Q.T) @ Q  (T has shape n_samples × n_comp).
             _n_wn_pls = len(_wn_pls_rec)
-            _valid     = _pls_p["valid_features"]
+            _valid    = _pls_p["valid_features"]
+            _model    = _pls_p["model"]
+            _P        = _model.x_loadings_          # (n_valid, n_comp)
+            _Q        = _model.y_loadings_           # (n_outputs, n_comp)
+            _x_mean_v = _model.x_mean_               # (n_valid,)
+            _y_mean   = np.atleast_1d(_model.y_mean_)  # (n_outputs,)
 
-            def _full_coef_vec(model, col):
-                _c = _pls_coef(model, int(_valid.sum()))[:, col]
-                _b = np.zeros(_n_wn_pls)
-                _b[_valid] = _c
-                return _b
+            # Full-grid training mean spectrum (zero at invalid/removed features)
+            _x_mean_full = np.zeros(_n_wn_pls)
+            _x_mean_full[_valid] = _x_mean_v
 
-            _b_prot = _full_coef_vec(_pls_p["model"], 0)
-
-            _b_crowd = None
-            if _dual and _has_peg:
-                _b_crowd = _full_coef_vec(_pls_p["model"], 1 if not _triple else 2)
-
-            # Normalise: b_inv = b / (b·b) so that c * b_inv has spectral units
-            def _b_inv(b):
-                d = float(np.dot(b, b))
-                return b / d if d > 0 else b
-
-            _b_prot_inv  = _b_inv(_b_prot)
-            _b_crowd_inv = _b_inv(_b_crowd) if _b_crowd is not None else None
-
-            # ── Compute contributions and water optimisation ───────────────────
+            # Assemble centred concentration matrix  (n_samples × n_outputs)
             _c_prot  = _r["pls_protein"]
             _c_crowd = _r["pls_peg"] if _has_peg else None
+            if _triple and _r.get("pls_protein2") is not None:
+                _Y_hat_c = np.column_stack([
+                    _c_prot  - _y_mean[0],
+                    _r["pls_protein2"] - _y_mean[1],
+                    _c_crowd - _y_mean[2],
+                ])
+            elif _dual and _c_crowd is not None:
+                _Y_hat_c = np.column_stack([
+                    _c_prot  - _y_mean[0],
+                    _c_crowd - _y_mean[1],
+                ])
+            else:
+                _Y_hat_c = (_c_prot - _y_mean[0])[:, np.newaxis]
 
-            _X_known = np.outer(_c_prot, _b_prot_inv)
-            if _c_crowd is not None and _b_crowd_inv is not None:
-                _X_known += np.outer(_c_crowd, _b_crowd_inv)
+            # Min-norm latent scores and spectral reconstruction
+            _QQt     = _Q @ _Q.T
+            _T_est   = _Y_hat_c @ np.linalg.solve(_QQt, _Q)   # (n_samples, n_comp)
+            _X_rec_v = _T_est @ _P.T + _x_mean_v               # (n_samples, n_valid)
+            _X_known = np.zeros((len(_c_prot), _n_wn_pls))
+            _X_known[:, _valid] = _X_rec_v
 
             # Align water mean to PLS wn grid
             if _water_mean is not None and _wn_water is not None:
@@ -2385,14 +2393,24 @@ with tab_calib:
                     mode="lines", name="Reconstructed",
                     line=dict(color="black", width=1.5, dash="dash"),
                 ))
+                # Per-component contribution = reconstruction with only that output non-zero
+                _Y_prot_only = np.zeros_like(_Y_hat_c)
+                _Y_prot_only[:, 0] = _Y_hat_c[:, 0]
+                _X_prot_only = np.zeros((len(_c_prot), _n_wn_pls))
+                _X_prot_only[:, _valid] = (_Y_prot_only @ np.linalg.solve(_QQt, _Q)) @ _P.T
                 _fig_rec.add_trace(go.Scatter(
-                    x=_wn_pls_rec, y=np.outer(_c_prot, _b_prot_inv)[_pos_idx],
+                    x=_wn_pls_rec, y=_X_prot_only[_pos_idx],
                     mode="lines", name="Protein contribution",
                     line=dict(color=COLORS[1], width=1, dash="dot"),
                 ))
-                if _c_crowd is not None and _b_crowd_inv is not None:
+                if _c_crowd is not None and _Y_hat_c.shape[1] >= 2:
+                    _crowd_col = 2 if _triple else 1
+                    _Y_crowd_only = np.zeros_like(_Y_hat_c)
+                    _Y_crowd_only[:, _crowd_col] = _Y_hat_c[:, _crowd_col]
+                    _X_crowd_only = np.zeros((len(_c_prot), _n_wn_pls))
+                    _X_crowd_only[:, _valid] = (_Y_crowd_only @ np.linalg.solve(_QQt, _Q)) @ _P.T
                     _fig_rec.add_trace(go.Scatter(
-                        x=_wn_pls_rec, y=np.outer(_c_crowd, _b_crowd_inv)[_pos_idx],
+                        x=_wn_pls_rec, y=_X_crowd_only[_pos_idx],
                         mode="lines", name="Crowder contribution",
                         line=dict(color=COLORS[2], width=1, dash="dot"),
                     ))
