@@ -1583,7 +1583,7 @@ with tab_calib:
             )
 
             _osc_res_p = next(
-                (r for r in (st.session_state.get("results") or [])
+                (r for r in (st.session_state.get("results") or {}).values()
                  if r.get("X_pls_before") is not None and r.get("X_pls_after") is not None),
                 None,
             )
@@ -1780,7 +1780,7 @@ with tab_calib:
             )
 
             _osc_res_c = next(
-                (r for r in (st.session_state.get("results") or [])
+                (r for r in (st.session_state.get("results") or {}).values()
                  if r.get("X_pls_c_before") is not None and r.get("X_pls_c_after") is not None),
                 None,
             )
