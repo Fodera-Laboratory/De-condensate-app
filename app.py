@@ -2319,10 +2319,12 @@ with tab_calib:
             else:
                 _Y_hat_c = (_c_prot - _y_mean[0])[:, np.newaxis]
 
-            # Min-norm latent scores and spectral reconstruction
+            # Min-norm latent scores and spectral reconstruction (without x_mean).
+            # x_mean is NOT added here so that the water OLS absorbs the full
+            # background water signal and c_water remains physically positive.
             _QQt     = _Q @ _Q.T
             _T_est   = _Y_hat_c @ np.linalg.solve(_QQt, _Q)   # (n_samples, n_comp)
-            _X_rec_v = _T_est @ _P.T + _x_mean_v               # (n_samples, n_valid)
+            _X_rec_v = _T_est @ _P.T                            # centered, no mean
             _X_known = np.zeros((len(_c_prot), _n_wn_pls))
             _X_known[:, _valid] = _X_rec_v
 
