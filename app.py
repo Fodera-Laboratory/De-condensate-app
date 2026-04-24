@@ -705,6 +705,30 @@ with tab_mcr:
         )
 
     st.divider()
+    st.markdown("#### MCR → PLS component mapping (OSC)")
+    st.caption(
+        "Specify which MCR component is the protein and which is the crowder. "
+        "Before PLS prediction, each spectrum has the MCR-reconstructed interferent "
+        "contribution subtracted (variable per spectrum, scaled by the MCR concentration). "
+        "Leave at 0 to disable."
+    )
+    _cm1, _cm2 = st.columns(2)
+    _prot_comp_raw = _cm1.number_input(
+        "Protein MCR component (1-based, 0 = off)",
+        min_value=0, max_value=10, value=0, step=1,
+        key="mcr_protein_comp_ui",
+        help="Which column of C_mcr holds the protein concentration profile.",
+    )
+    _crowd_comp_raw = _cm2.number_input(
+        "Crowder MCR component (1-based, 0 = off)",
+        min_value=0, max_value=10, value=0, step=1,
+        key="mcr_crowder_comp_ui",
+        help="Which column of C_mcr holds the crowder concentration profile.",
+    )
+    st.session_state["mcr_protein_comp"] = int(_prot_comp_raw) - 1 if _prot_comp_raw > 0 else None
+    st.session_state["mcr_crowder_comp"] = int(_crowd_comp_raw) - 1 if _crowd_comp_raw > 0 else None
+
+    st.divider()
     run_btn = st.button(
         "▶ Run MCR Analysis",
         use_container_width=True,
@@ -803,43 +827,6 @@ if build_btn:
                         pls_crowder["wn"]          = wn_peg
                         pls_crowder["X_train_proc"] = X_peg_proc
                         pls_crowder["y_raw"]        = y_peg
-
-            # ── OSC cross-references + retrain on OSC-corrected training data ──
-            # OSC cross-references + retrain on OSC-corrected training data
-            if pls_protein is not None and pls_crowder is not None:
-                # Mean of highest-concentration crowder spectra → reference for protein OSC
-                _peg_top = X_peg_proc[y_peg == y_peg.max()]
-                _peg_ref = _peg_top.mean(axis=0)
-
-                # Mean of highest-concentration protein spectra → reference for crowder OSC
-                _prot_top = X_prot_proc[y_prot == y_prot.max()]
-                _prot_ref = _prot_top.mean(axis=0)
-
-                # Retrain protein model on OSC-corrected training data
-                with st.spinner("Retraining protein PLS on OSC-corrected spectra…"):
-                    X_prot_osc = an.apply_osc(X_prot_proc, _peg_ref)
-                    pls_protein = an.build_pls_model(
-                        X_prot_osc, y_prot,
-                        max_components=int(max_pls_components), cv_folds=int(cv_folds),
-                    )
-                    pls_protein["wn"]               = wn_prot
-                    pls_protein["X_train_proc"]     = X_prot_osc
-                    pls_protein["X_train_proc_raw"] = X_prot_proc
-                    pls_protein["y_raw"]            = y_prot
-                    pls_protein["osc_ref"]          = _peg_ref
-
-                # Retrain crowder model on OSC-corrected training data
-                with st.spinner("Retraining crowder PLS on OSC-corrected spectra…"):
-                    X_peg_osc = an.apply_osc(X_peg_proc, _prot_ref)
-                    pls_crowder = an.build_pls_model(
-                        X_peg_osc, y_peg,
-                        max_components=int(max_pls_components), cv_folds=int(cv_folds),
-                    )
-                    pls_crowder["wn"]               = wn_peg
-                    pls_crowder["X_train_proc"]     = X_peg_osc
-                    pls_crowder["X_train_proc_raw"] = X_peg_proc
-                    pls_crowder["y_raw"]            = y_peg
-                    pls_crowder["osc_ref"]          = _prot_ref
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -1031,15 +1018,8 @@ if run_btn:
                         except Exception as _re:
                             st.warning(f"Could not re-process MCR references: {_re}")
 
-                # Set osc_mcr_idx so process_linescan uses ST_mcr for OSC
-                _mcr_p_comp = st.session_state.get("mcr_protein_comp")
-                _mcr_c_comp = st.session_state.get("mcr_crowder_comp")
                 _pls_p_run = models.get("pls_protein")
                 _pls_c_run = models.get("pls_crowder")
-                if _pls_p_run is not None and _mcr_c_comp is not None:
-                    _pls_p_run["osc_mcr_idx"] = _mcr_c_comp
-                if _pls_c_run is not None and _mcr_p_comp is not None:
-                    _pls_c_run["osc_mcr_idx"] = _mcr_p_comp
 
                 _res = an.process_linescan(
                     wn, X, positions,
@@ -1052,8 +1032,8 @@ if run_btn:
                     settings=s,
                     mcr_params=mcr_params,
                     pls_settings=pls_settings,
-                    mcr_protein_comp=_mcr_p_comp,
-                    mcr_crowder_comp=_mcr_c_comp,
+                    mcr_protein_comp=st.session_state.get("mcr_protein_comp"),
+                    mcr_crowder_comp=st.session_state.get("mcr_crowder_comp"),
                 )
                 if _pca_var_exp is not None:
                     _res["pca_var_exp"]  = _pca_var_exp
@@ -1504,12 +1484,12 @@ with tab_calib:
                     )
 
         if pls_p is not None:
-            # ── OSC status ────────────────────────────────────
-            if pls_p.get("osc_ref") is not None:
-                _osc_src = "ST_mcr" if pls_p.get("osc_mcr_idx") is not None else "crowder training mean"
+            # ── MCR-driven OSC status ──────────────────────────
+            _mcr_c_active = st.session_state.get("mcr_crowder_comp")
+            if _mcr_c_active is not None:
                 st.info(
-                    f"OSC correction active for protein PLS — crowder spectral subspace "
-                    f"projected out at prediction time (reference: {_osc_src})."
+                    f"MCR-driven OSC active for protein PLS — crowder MCR component "
+                    f"{_mcr_c_active + 1} subtracted per spectrum before prediction."
                 )
 
             # ── Single-output protein PLS calibration ─────────
@@ -1602,17 +1582,22 @@ with tab_calib:
                 f"**d)** X-loadings for each latent variable — prominent features reflect the spectral bands driving concentration prediction."
             )
 
-            if pls_p.get("X_train_proc_raw") is not None:
-                with st.expander("OSC correction — before vs after"):
-                    _wn_osc  = pls_p["wn"]
-                    _X_raw   = pls_p["X_train_proc_raw"]
-                    _X_osc   = pls_p["X_train_proc"]
+            _osc_res_p = next(
+                (r for r in (st.session_state.get("results") or [])
+                 if r.get("X_pls_before") is not None and r.get("X_pls_after") is not None),
+                None,
+            )
+            if _osc_res_p is not None:
+                with st.expander("MCR-driven OSC — linescan spectra before vs after"):
+                    _wn_osc  = _osc_res_p["wn_pls"]
+                    _X_raw   = _osc_res_p["X_pls_before"]
+                    _X_osc   = _osc_res_p["X_pls_after"]
                     _fig_osc = make_subplots(
                         rows=1, cols=3,
                         subplot_titles=[
                             "a)  Raw preprocessed",
-                            "b)  OSC-corrected",
-                            "c)  Difference (raw − OSC)",
+                            "b)  MCR-corrected",
+                            "c)  Subtracted signal",
                         ],
                     )
                     for _si in range(_X_raw.shape[0]):
@@ -1632,18 +1617,18 @@ with tab_calib:
                             showlegend=False,
                         ), row=1, col=3)
                     for _col, _lbl in enumerate(
-                        ["Norm. intensity", "Norm. intensity", "Difference"], start=1
+                        ["Norm. intensity", "Norm. intensity", "Subtracted"], start=1
                     ):
                         _fig_osc.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=_col)
                         _fig_osc.update_yaxes(title_text=_lbl, row=1, col=_col)
                     _fig_osc.update_layout(height=320)
                     st.plotly_chart(_fig_osc, use_container_width=True)
                     st.caption(
-                        f"Effect of OSC on the {_X_raw.shape[0]} protein training spectra. "
+                        f"Effect of MCR-driven OSC on the {_X_raw.shape[0]} protein PLS input spectra "
+                        f"from the first linescan result. "
                         f"**a)** Raw preprocessed. "
-                        f"**b)** After projecting out the highest-concentration crowder reference spectrum. "
-                        f"**c)** Removed signal (difference); peaks here are the crowder spectral "
-                        f"contribution projected out by OSC."
+                        f"**b)** After subtracting the MCR-scaled crowder component. "
+                        f"**c)** Removed signal — peaks here are the crowder spectral contribution."
                     )
 
             with st.expander("PLS regression coefficients"):
@@ -1702,11 +1687,11 @@ with tab_calib:
         if pls_c is not None:
             st.divider()
             _crd_unit = st.session_state.get("crowder_unit", "wt%") or "wt%"
-            if pls_c.get("osc_ref") is not None:
-                _osc_src_c = "ST_mcr" if pls_c.get("osc_mcr_idx") is not None else "protein training mean"
+            _mcr_p_active = st.session_state.get("mcr_protein_comp")
+            if _mcr_p_active is not None:
                 st.info(
-                    f"OSC correction active for crowder PLS — protein spectral subspace "
-                    f"projected out at prediction time (reference: {_osc_src_c})."
+                    f"MCR-driven OSC active for crowder PLS — protein MCR component "
+                    f"{_mcr_p_active + 1} subtracted per spectrum before prediction."
                 )
             st.subheader("Molecular crowder PLS regression (independent PLS1)")
             c1, c2, c3 = st.columns(3)
@@ -1794,17 +1779,22 @@ with tab_calib:
                 f"**d)** X-loadings per LV."
             )
 
-            if pls_c.get("X_train_proc_raw") is not None:
-                with st.expander("OSC correction — before vs after"):
-                    _wn_osc_c = pls_c["wn"]
-                    _X_raw_c  = pls_c["X_train_proc_raw"]
-                    _X_osc_c  = pls_c["X_train_proc"]
+            _osc_res_c = next(
+                (r for r in (st.session_state.get("results") or [])
+                 if r.get("X_pls_c_before") is not None and r.get("X_pls_c_after") is not None),
+                None,
+            )
+            if _osc_res_c is not None:
+                with st.expander("MCR-driven OSC — linescan spectra before vs after"):
+                    _wn_osc_c = _osc_res_c["wn_pls_c"]
+                    _X_raw_c  = _osc_res_c["X_pls_c_before"]
+                    _X_osc_c  = _osc_res_c["X_pls_c_after"]
                     _fig_osc_c = make_subplots(
                         rows=1, cols=3,
                         subplot_titles=[
                             "a)  Raw preprocessed",
-                            "b)  OSC-corrected",
-                            "c)  Difference (raw − OSC)",
+                            "b)  MCR-corrected",
+                            "c)  Subtracted signal",
                         ],
                     )
                     for _si in range(_X_raw_c.shape[0]):
@@ -1824,18 +1814,18 @@ with tab_calib:
                             showlegend=False,
                         ), row=1, col=3)
                     for _col, _lbl in enumerate(
-                        ["Norm. intensity", "Norm. intensity", "Difference"], start=1
+                        ["Norm. intensity", "Norm. intensity", "Subtracted"], start=1
                     ):
                         _fig_osc_c.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=_col)
                         _fig_osc_c.update_yaxes(title_text=_lbl, row=1, col=_col)
                     _fig_osc_c.update_layout(height=320)
                     st.plotly_chart(_fig_osc_c, use_container_width=True)
                     st.caption(
-                        f"Effect of OSC on the {_X_raw_c.shape[0]} crowder training spectra. "
+                        f"Effect of MCR-driven OSC on the {_X_raw_c.shape[0]} crowder PLS input spectra "
+                        f"from the first linescan result. "
                         f"**a)** Raw preprocessed. "
-                        f"**b)** After projecting out the highest-concentration protein reference spectrum. "
-                        f"**c)** Removed signal (difference); peaks here are the protein spectral "
-                        f"contribution projected out by OSC."
+                        f"**b)** After subtracting the MCR-scaled protein component. "
+                        f"**c)** Removed signal — peaks here are the protein spectral contribution."
                     )
 
             with st.expander("PLS regression coefficients"):

@@ -36,19 +36,6 @@ from decomposition import (          # noqa: F401 (re-exported)
 # Full linescan pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _resolve_osc_ref(
-    model_info: dict,
-    ST_mcr: np.ndarray,
-    wn_mcr: np.ndarray,
-    wn_pls: np.ndarray,
-    mcr_idx: int = None,
-) -> np.ndarray:
-    """Return the OSC reference row interpolated onto wn_pls, or None."""
-    if mcr_idx is not None and ST_mcr is not None:
-        if 0 <= mcr_idx < ST_mcr.shape[0]:
-            return np.interp(wn_pls, wn_mcr, ST_mcr[mcr_idx])
-    return model_info.get("osc_ref")
-
 
 def process_linescan(
     wn_original:       np.ndarray,
@@ -93,50 +80,39 @@ def process_linescan(
                 where=C_mcr[:, 1] != 0,
             )
 
-    # Protein PLS1 (OSC-corrected if reference available)
+    # ── PLS prediction with MCR-based OSC ────────────────────────────────────
+    # When MCR has run and component indices are provided, subtract the
+    # MCR-reconstructed interferent contribution from each PLS input spectrum:
+    #   X_pls[i] -= C_mcr[i, interferent_comp] * interp(ST_mcr[interferent_comp])
+    # This converts each mixed spectrum into an approximate pure-component
+    # spectrum before feeding it to the PLS model trained on pure standards.
     pls_protein = pls_protein2 = pls_peg = None
+
+    wn_pls = wn_pls_c = None
+    X_pls = X_pls_c = None
+    X_pls_before = X_pls_c_before = None
+
     if pls_protein_info is not None:
         X_pls, wn_pls, _ = preprocess_matrix(X, wn_original, pls_settings)
-        osc_ref = _resolve_osc_ref(
-            pls_protein_info, ST_mcr, wn_proc, wn_pls,
-            mcr_idx=pls_protein_info.get("osc_mcr_idx"),
-        )
-        if osc_ref is not None:
-            X_pls = apply_osc(X_pls, osc_ref)
+        X_pls_before = X_pls.copy()
+        if C_mcr is not None and mcr_crowder_comp is not None:
+            st_crowd = np.interp(wn_pls, wn_proc, ST_mcr[mcr_crowder_comp])
+            X_pls = X_pls - np.outer(C_mcr[:, mcr_crowder_comp], st_crowd)
         pls_protein = pls_protein_info["model"].predict(
             X_pls[:, pls_protein_info["valid_features"]]
         ).flatten()
 
-    # Crowder PLS1 (OSC-corrected if reference available)
     if pls_crowder_info is not None:
         X_pls_c, wn_pls_c, _ = preprocess_matrix(X, wn_original, pls_settings)
-        osc_ref_c = _resolve_osc_ref(
-            pls_crowder_info, ST_mcr, wn_proc, wn_pls_c,
-            mcr_idx=pls_crowder_info.get("osc_mcr_idx"),
-        )
-        if osc_ref_c is not None:
-            X_pls_c = apply_osc(X_pls_c, osc_ref_c)
+        X_pls_c_before = X_pls_c.copy()
+        if C_mcr is not None and mcr_protein_comp is not None:
+            st_prot = np.interp(wn_pls_c, wn_proc, ST_mcr[mcr_protein_comp])
+            X_pls_c = X_pls_c - np.outer(C_mcr[:, mcr_protein_comp], st_prot)
         pls_peg = pls_crowder_info["model"].predict(
             X_pls_c[:, pls_crowder_info["valid_features"]]
         ).flatten()
 
-    # MCR-calibrated protein / crowder (OLS no-intercept against PLS predictions)
     pls_protein_mcr = pls_peg_mcr = None
-    if C_mcr is not None:
-        if mcr_protein_comp is not None and pls_protein is not None:
-            k = mcr_protein_comp
-            c = C_mcr[:, k]
-            denom = float(np.dot(c, c))
-            if denom > 0:
-                slope = float(np.dot(c, pls_protein)) / denom
-                pls_protein_mcr = c * slope
-        if mcr_crowder_comp is not None and pls_peg is not None:
-            k = mcr_crowder_comp
-            c = C_mcr[:, k]
-            denom = float(np.dot(c, c))
-            if denom > 0:
-                slope = float(np.dot(c, pls_peg)) / denom
-                pls_peg_mcr = c * slope
 
     # Salt PLS (optional, separate model on fingerprint region)
     pls_salt = None
@@ -161,6 +137,12 @@ def process_linescan(
         "pls_salt":         pls_salt,
         "pls_protein_mcr":  pls_protein_mcr,
         "pls_peg_mcr":      pls_peg_mcr,
+        "X_pls_before":     X_pls_before,
+        "X_pls_after":      X_pls,
+        "wn_pls":           wn_pls,
+        "X_pls_c_before":   X_pls_c_before,
+        "X_pls_c_after":    X_pls_c,
+        "wn_pls_c":         wn_pls_c,
     }
 
 
