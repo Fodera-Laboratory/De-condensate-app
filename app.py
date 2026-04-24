@@ -3655,7 +3655,7 @@ with tab_image:
         "and stage position, then choose a score to visualise as a colour-coded overlay along the linescan path."
     )
 
-    if "results" not in st.session_state:
+    if "results" not in st.session_state or not st.session_state["results"]:
         st.info("Run the analysis first to generate scores for overlay.")
     else:
         _ov_results = st.session_state["results"]
