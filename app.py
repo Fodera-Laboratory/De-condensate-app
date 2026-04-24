@@ -874,6 +874,7 @@ if build_btn:
                 wn_ref=wn_ref,
                 comp_labels=comp_labels,
                 mcr_wn_msg=_mcr_ref_wn_msg if ST_init is not None else None,
+                pls_settings=pls_settings,
             )
             st.session_state["settings"]       = settings
             st.session_state["n_components"]   = n_components
@@ -2214,6 +2215,205 @@ with tab_calib:
                     f"Max: {_r['pls_salt'].max():.3f} mM  \n"
                     f"Mean: {_r['pls_salt'].mean():.3f} mM  \n"
                     f"±CV RMSE: {_pls_s['cv_rmse']:.3f} mM"
+                )
+
+        # ── Spectral reconstruction ────────────────────────────────────────────
+        st.divider()
+        st.markdown("### Spectral reconstruction")
+        st.caption(
+            "Reconstructed spectrum = protein PLS contribution + crowder PLS contribution + "
+            "optimised water contribution.  "
+            "The water scaling factor shows how much of the mean MQ water spectrum is needed "
+            "to best explain the residual at each linescan point."
+        )
+
+        _wn_pls_rec = _r.get("wn_pls")
+        _X_pls_rec  = _r.get("X_pls")
+        _can_reconstruct = (
+            _pls_p is not None
+            and _X_pls_rec is not None
+            and _wn_pls_rec is not None
+            and _r.get("pls_protein") is not None
+        )
+
+        if not _can_reconstruct:
+            st.info("Re-run MCR Analysis to enable spectral reconstruction (requires PLS results).")
+        else:
+            # ── Load and preprocess MQ water spectra ──────────────────────────
+            @st.cache_data(show_spinner=False)
+            def _load_water_mean(_wn_ref_key, _pls_settings_frozen):
+                import glob as _glob
+                from raman_io import load_line_scan_from_txt as _lls
+                _pls_s_dict = dict(_pls_settings_frozen)
+                _base = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "training_data", "MQ spectra",
+                )
+                _txt_files = sorted(_glob.glob(os.path.join(_base, "*.txt")))
+                if not _txt_files:
+                    return None, None
+                wn_ref_arr = np.array(_wn_ref_key)
+                _all = []
+                for _tf in _txt_files:
+                    try:
+                        _ww, _Xw, _ = _lls(_tf)
+                        _Xp, _wnp, _ = an.preprocess_matrix(_Xw, _ww, _pls_s_dict)
+                        # align to PLS grid via interpolation if axes differ
+                        if not np.allclose(_wnp, wn_ref_arr[:len(_wnp)], atol=0.5):
+                            _Xp_aligned = np.array([
+                                np.interp(wn_ref_arr, _wnp, _row) for _row in _Xp
+                            ])
+                            _all.append(_Xp_aligned.mean(axis=0))
+                        else:
+                            _all.append(_Xp.mean(axis=0))
+                    except Exception:
+                        pass
+                if not _all:
+                    return None, None
+                return np.mean(_all, axis=0), _wnp
+
+            _saved_pls_s = _models.get("pls_settings", {})
+            _wn_ref_key  = tuple(_models.get("wn_ref", np.array([])).tolist())
+            _pls_s_frozen = tuple(sorted(_saved_pls_s.items()))
+            _water_mean, _wn_water = _load_water_mean(_wn_ref_key, _pls_s_frozen)
+
+            # ── Build full-grid coefficient vectors ───────────────────────────
+            _n_wn_pls = len(_wn_pls_rec)
+            _valid     = _pls_p["valid_features"]
+
+            def _full_coef_vec(model, col):
+                _c = _pls_coef(model, int(_valid.sum()))[:, col]
+                _b = np.zeros(_n_wn_pls)
+                _b[_valid] = _c
+                return _b
+
+            _b_prot = _full_coef_vec(_pls_p["model"], 0)
+
+            _b_crowd = None
+            if _dual and _has_peg:
+                _b_crowd = _full_coef_vec(_pls_p["model"], 1 if not _triple else 2)
+
+            # Normalise: b_inv = b / (b·b) so that c * b_inv has spectral units
+            def _b_inv(b):
+                d = float(np.dot(b, b))
+                return b / d if d > 0 else b
+
+            _b_prot_inv  = _b_inv(_b_prot)
+            _b_crowd_inv = _b_inv(_b_crowd) if _b_crowd is not None else None
+
+            # ── Compute contributions and water optimisation ───────────────────
+            _c_prot  = _r["pls_protein"]
+            _c_crowd = _r["pls_peg"] if _has_peg else None
+
+            _X_known = np.outer(_c_prot, _b_prot_inv)
+            if _c_crowd is not None and _b_crowd_inv is not None:
+                _X_known += np.outer(_c_crowd, _b_crowd_inv)
+
+            # Align water mean to PLS wn grid
+            if _water_mean is not None and _wn_water is not None:
+                if len(_water_mean) != _n_wn_pls or not np.allclose(_wn_water, _wn_pls_rec, atol=0.5):
+                    _water_on_pls = np.interp(_wn_pls_rec, _wn_water, _water_mean)
+                else:
+                    _water_on_pls = _water_mean
+                _w_norm2 = float(np.dot(_water_on_pls, _water_on_pls))
+                _residual = _X_pls_rec - _X_known
+                _c_water  = (_residual * _water_on_pls).sum(axis=1) / _w_norm2 if _w_norm2 > 0 else np.zeros(len(_c_prot))
+                _X_rec    = _X_known + np.outer(_c_water, _water_on_pls)
+            else:
+                _water_on_pls = None
+                _c_water      = None
+                _X_rec        = _X_known
+
+            # ── Layout: left = scrollable spectrum, right = water profile ─────
+            _dist_rec  = _r["distance"]
+            _n_spectra = len(_dist_rec)
+            _dist_label = "Depth (µm)" if _sm == "z" else "Distance (µm)"
+
+            _col_spec, _col_water = st.columns([3, 2])
+
+            with _col_water:
+                if _c_water is not None:
+                    _fig_water = go.Figure()
+                    _fig_water.add_trace(go.Scatter(
+                        x=_dist_rec, y=_c_water, mode="lines",
+                        line=dict(color=COLORS[4] if len(COLORS) > 4 else "steelblue", width=1.5),
+                        name="Water scaling",
+                    ))
+                    _pos_idx = st.slider(
+                        "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
+                        key="recon_slider",
+                    )
+                    _fig_water.add_vline(
+                        x=float(_dist_rec[_pos_idx]),
+                        line_dash="dash", line_color="black",
+                        annotation_text=f"{_dist_rec[_pos_idx]:.1f} µm",
+                        annotation_position="top right",
+                    )
+                    _fig_water.update_layout(
+                        xaxis_title=_dist_label,
+                        yaxis_title="Water scaling factor",
+                        height=320,
+                        margin=dict(t=30),
+                    )
+                    st.plotly_chart(_fig_water, use_container_width=True)
+                    st.caption(
+                        "Water scaling factor along the linescan. "
+                        "A value of 1 means the residual matches one mean MQ water spectrum. "
+                        "Dashed line: currently selected position."
+                    )
+                else:
+                    _pos_idx = st.slider(
+                        "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
+                        key="recon_slider",
+                    )
+                    st.info("MQ water spectra not found in training_data/MQ spectra/.")
+
+            with _col_spec:
+                _fig_rec = go.Figure()
+                _fig_rec.add_trace(go.Scatter(
+                    x=_wn_pls_rec, y=_X_pls_rec[_pos_idx],
+                    mode="lines", name="Measured",
+                    line=dict(color=COLORS[0], width=1.8),
+                ))
+                _fig_rec.add_trace(go.Scatter(
+                    x=_wn_pls_rec, y=_X_rec[_pos_idx],
+                    mode="lines", name="Reconstructed",
+                    line=dict(color="black", width=1.5, dash="dash"),
+                ))
+                _fig_rec.add_trace(go.Scatter(
+                    x=_wn_pls_rec, y=np.outer(_c_prot, _b_prot_inv)[_pos_idx],
+                    mode="lines", name="Protein contribution",
+                    line=dict(color=COLORS[1], width=1, dash="dot"),
+                ))
+                if _c_crowd is not None and _b_crowd_inv is not None:
+                    _fig_rec.add_trace(go.Scatter(
+                        x=_wn_pls_rec, y=np.outer(_c_crowd, _b_crowd_inv)[_pos_idx],
+                        mode="lines", name="Crowder contribution",
+                        line=dict(color=COLORS[2], width=1, dash="dot"),
+                    ))
+                if _c_water is not None and _water_on_pls is not None:
+                    _fig_rec.add_trace(go.Scatter(
+                        x=_wn_pls_rec, y=_c_water[_pos_idx] * _water_on_pls,
+                        mode="lines", name="Water contribution",
+                        line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1, dash="dot"),
+                    ))
+                _fig_rec.update_layout(
+                    xaxis_title="Wavenumber (cm⁻¹)",
+                    yaxis_title="Norm. intensity",
+                    height=380,
+                    legend=dict(orientation="h", y=-0.22),
+                    margin=dict(t=30),
+                )
+                st.plotly_chart(_fig_rec, use_container_width=True)
+                _pos_dist = float(_dist_rec[_pos_idx])
+                _rmse_rec = float(np.sqrt(np.mean((_X_pls_rec[_pos_idx] - _X_rec[_pos_idx]) ** 2)))
+                st.caption(
+                    f"Position {_pos_idx} ({_pos_dist:.1f} µm). "
+                    f"Reconstruction RMSE = {_rmse_rec:.4f}. "
+                    f"Protein: {float(_c_prot[_pos_idx]):.3f} {_unit}"
+                    + (f", crowder: {float(_c_crowd[_pos_idx]):.3f} wt%" if _c_crowd is not None else "")
+                    + (f", water factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
+                    + "."
                 )
 
 
@@ -5000,7 +5200,7 @@ with tab_tutorial:
     st.subheader("Tutorial")
 
     st.markdown(
-        "**PEARL** is an interactive tool for spatially resolved, quantitative "
+        "**PEARL** (Protein Evaluation and Analysis via Raman Linescans) is an interactive tool for spatially resolved, quantitative "
         "spectral analysis of Raman linescans recorded across protein condensates. "
         "All analytical steps are individually selectable — you can run only the parts "
         "relevant to your experiment."

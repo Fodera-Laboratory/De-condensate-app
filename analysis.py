@@ -78,8 +78,9 @@ def process_linescan(
     # Protein (and optionally molecular crowder) PLS (optional)
     # Preprocess with pls_settings to match the normalization used during training
     pls_protein = pls_protein2 = pls_peg = None
+    X_pls = wn_pls = None
     if pls_protein_info is not None:
-        X_pls, _, _ = preprocess_matrix(X, wn_original, pls_settings)
+        X_pls, wn_pls, _ = preprocess_matrix(X, wn_original, pls_settings)
         if pls_protein_info.get("triple"):
             Y_triple     = pls_protein_info["model"].predict(
                 X_pls[:, pls_protein_info["valid_features"]]
@@ -119,6 +120,8 @@ def process_linescan(
         "pls_protein2": pls_protein2,
         "pls_peg":      pls_peg,
         "pls_salt":     pls_salt,
+        "X_pls":        X_pls,
+        "wn_pls":       wn_pls,
     }
 
 
