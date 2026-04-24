@@ -1,5 +1,5 @@
 """
-analysis.py — Top-level pipeline for the De-condensate app.
+analysis.py — Top-level pipeline for the PEARL app.
 
 Re-exports all public functions from the sub-modules so that app.py can
 continue to use `import analysis as an` without changes.

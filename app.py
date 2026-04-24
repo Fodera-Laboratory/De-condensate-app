@@ -1,5 +1,5 @@
 """
-De-condensate — Raman linescan analysis GUI
+PEARL — Protein Evaluation and Analysis via Raman Linescans
 Run with:  streamlit run app.py
 """
 
@@ -28,7 +28,7 @@ import raman_preprocessing as rms
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config
 # ─────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="De-condensate", layout="wide", page_icon="🔬")
+st.set_page_config(page_title="PEARL", layout="wide", page_icon="🔬")
 
 # ── Background image ──────────────────────────────────────────────────────────
 _bg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "background.jpg")
@@ -3983,7 +3983,7 @@ with tab_download:
         st.download_button(
             "⬇  Download all linescan results (ZIP)",
             data=zip_buf.getvalue(),
-            file_name="de_condensate_results.zip",
+            file_name="pearl_results.zip",
             mime="application/zip",
             use_container_width=True,
         )
@@ -4980,7 +4980,7 @@ with tab_download:
                 _pub_c1.download_button(
                     "\u2b07  Download figures (.svg)",
                     data=_svg_bytes,
-                    file_name="de_condensate_figures.svg",
+                    file_name="pearl_figures.svg",
                     mime="image/svg+xml",
                     use_container_width=True,
                     key="dl_pub_svg",
@@ -4988,7 +4988,7 @@ with tab_download:
                 _pub_c2.download_button(
                     "\u2b07  Download captions (.txt)",
                     data=_cap_txt.encode("utf-8"),
-                    file_name="de_condensate_captions.txt",
+                    file_name="pearl_captions.txt",
                     mime="text/plain",
                     use_container_width=True,
                     key="dl_pub_cap",
@@ -5000,7 +5000,7 @@ with tab_tutorial:
     st.subheader("Tutorial")
 
     st.markdown(
-        "**De-condensate** is an interactive tool for spatially resolved, quantitative "
+        "**PEARL** is an interactive tool for spatially resolved, quantitative "
         "spectral analysis of Raman linescans recorded across protein condensates. "
         "All analytical steps are individually selectable — you can run only the parts "
         "relevant to your experiment."
@@ -5314,7 +5314,7 @@ with tab_training:
 
 # ── About ──────────────────────────────────────────────────────────────────────
 with tab_about:
-    st.subheader("About De-condensate")
+    st.subheader("About PEARL")
     st.markdown("### Contact")
     st.markdown(
         "- Dr. Lasse Skjoldborg Krog† — [lasse.krog@sund.ku.dk](mailto:lasse.krog@sund.ku.dk)\n"

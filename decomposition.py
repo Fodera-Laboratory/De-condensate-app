@@ -1,5 +1,5 @@
 """
-decomposition.py — Spectral decomposition for the De-condensate app.
+decomposition.py — Spectral decomposition for the PEARL app.
 
 Covers:
   - PLS calibration (single-output and dual protein+molecular crowder)

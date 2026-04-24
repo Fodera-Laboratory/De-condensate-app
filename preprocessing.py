@@ -1,5 +1,5 @@
 """
-preprocessing.py — Spectral preprocessing and file I/O for the De-condensate app.
+preprocessing.py — Spectral preprocessing and file I/O for the PEARL app.
 
 Covers:
   - Loading linescan .txt files from raw bytes
