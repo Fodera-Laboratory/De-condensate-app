@@ -306,11 +306,8 @@ def rolling_ball_baseline(y, ball_radius=50):
 
 def Min_max_normalisation(I_data):
     """Scale a spectrum to [0, 1] using min-max normalisation."""
-    I_data = np.asarray(I_data, dtype=float)
-    rng = I_data.max() - I_data.min()
-    if rng == 0:
-        return np.zeros_like(I_data)
-    return (I_data - I_data.min()) / rng
+    I_data = np.asarray(I_data)
+    return (I_data - I_data.min()) / (I_data.max() - I_data.min())
 
 
 def snv_normalization(data):

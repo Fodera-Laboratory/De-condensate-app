@@ -80,11 +80,11 @@ def process_linescan(
     distance = compute_cumulative_distance(positions, scan_mode)
     X_proc, wn_proc, _ = preprocess_matrix(X, wn_original, settings)
 
-    # MCR (optional)
+    # MCR (optional) — clip to non-negative as pymcr requires non-negative input
     C_mcr = ST_mcr = mcr_ratio = mcr_n_iter = None
     if ST_init is not None:
         C_mcr, ST_mcr, mcr_n_iter = run_mcr(
-            X_proc, ST_init, n_components, **mcr_params
+            np.clip(X_proc, 0, None), ST_init, n_components, **mcr_params
         )
         if C_mcr.shape[1] >= 2:
             mcr_ratio = np.divide(
