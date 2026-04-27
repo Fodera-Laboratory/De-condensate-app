@@ -436,6 +436,10 @@ def run_mcr(
     st_constraints = [ConstraintNonneg()]
     if fixed_st_idx:
         st_constraints.append(ConstraintFixedRows(fixed_st_idx, fixed_st_vals))
+        # Fixed rows prevent the residual from decreasing monotonically, so
+        # pymcr's divergence guard (tol_increase) would stop after 1 iteration.
+        # Disable it here; max_iter is the only stopping criterion when pinning.
+        tol_increase = 1e10
 
     mcr = McrAR(
         max_iter=max_iter,
