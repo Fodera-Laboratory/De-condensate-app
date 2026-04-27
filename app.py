@@ -553,9 +553,9 @@ with tab_files:
             wn_cut_max = c4.number_input("Gap to",   value=2750, step=50, key="wn_cut_max")
 
         c5, c6 = st.columns(2)
-        salt_wn_min = c5.number_input("Salt min (cm⁻¹)", value=900,  step=10, key="salt_wn_min",
+        salt_wn_min = c5.number_input("Salt min (cm⁻¹)", value=940,  step=10, key="salt_wn_min",
                                        help="Lower bound of the wavenumber region used for salt PLS.")
-        salt_wn_max = c6.number_input("Salt max (cm⁻¹)", value=1000, step=10, key="salt_wn_max",
+        salt_wn_max = c6.number_input("Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
                                        help="Upper bound of the salt region.")
 
         st.subheader("Concentration unit")
