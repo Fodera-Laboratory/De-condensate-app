@@ -317,13 +317,89 @@ def build_triple_pls_model(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ConstraintFixedRows(Constraint):
-    """Keep specified rows of ST fixed to their reference values each iteration."""
+    """
+    Fixed-row (hard equality) constraint for ST spectra.
+
+    After each ST update step in MCR-ALS, the specified rows of the spectral
+    matrix are reset to their reference values. This prevents selected pure-
+    component spectra from drifting during alternating least-squares iteration,
+    which is useful when one or more components are known a priori (e.g. a
+    pure-solvent spectrum) and should not be modified by the optimiser.
+
+    Bases: :class:`pymcr.constraints.Constraint`
+
+    Parameters
+    ----------
+    fixed_indices : list of int
+        Zero-based row indices of the ST matrix to hold fixed. Each index
+        must be in the range ``[0, n_components)``.
+    fixed_spectra : array-like, shape (n_fixed, n_wavenumbers)
+        Reference spectral intensities to restore at each iteration. Row *i*
+        corresponds to ``fixed_indices[i]``. Values are not required to be
+        non-negative; however, combining this constraint with
+        :class:`pymcr.constraints.ConstraintNonneg` (applied first) is
+        recommended to keep the overall ST matrix physically meaningful.
+
+    Attributes
+    ----------
+    fixed_indices : list of int
+        Stored copy of the row indices provided at initialisation.
+    fixed_spectra : ndarray, shape (n_fixed, n_wavenumbers)
+        Stored copy of the reference spectra provided at initialisation.
+
+    Notes
+    -----
+    * The constraint is applied as the *last* element of ``st_constraints``
+      in :class:`pymcr.mcr.McrAR`. Placing it after
+      :class:`~pymcr.constraints.ConstraintNonneg` ensures that the free
+      (non-fixed) rows are clipped to non-negative values first, while the
+      fixed rows are then restored exactly to their reference values,
+      overriding any clipping that may have been applied to those rows.
+    * Only the ST (spectral) matrix is affected. The concentration matrix C
+      is updated freely by the C-regression step and its own constraints.
+    * Setting ``fixed_indices`` to an empty list is equivalent to applying
+      no constraint; the ``transform`` method returns a copy of the input
+      unchanged.
+
+    Examples
+    --------
+    Pin the first row of ST to a known pure-water spectrum:
+
+    >>> import numpy as np
+    >>> from pymcr.mcr import McrAR
+    >>> from pymcr.constraints import ConstraintNonneg, ConstraintNorm
+    >>> water_ref = np.load("water_reference.npy")   # shape (n_wn,)
+    >>> constraint = ConstraintFixedRows(
+    ...     fixed_indices=[0],
+    ...     fixed_spectra=water_ref[np.newaxis, :],
+    ... )
+    >>> mcr = McrAR(
+    ...     st_constraints=[ConstraintNonneg(), constraint],
+    ...     c_constraints=[ConstraintNonneg(), ConstraintNorm()],
+    ... )
+    >>> mcr.fit(X, ST=ST_init)
+    """
+
     def __init__(self, fixed_indices, fixed_spectra):
         super().__init__(copy=True)
         self.fixed_indices = list(fixed_indices)
         self.fixed_spectra = np.array(fixed_spectra)
 
     def transform(self, A):
+        """
+        Reset fixed rows of A to their reference spectra.
+
+        Parameters
+        ----------
+        A : ndarray, shape (n_components, n_wavenumbers)
+            Spectral matrix ST as updated by the ST-regression step.
+
+        Returns
+        -------
+        A : ndarray, shape (n_components, n_wavenumbers)
+            Copy of the input with the fixed rows overwritten by their
+            reference values.
+        """
         A = A.copy()
         for i, idx in enumerate(self.fixed_indices):
             A[idx] = self.fixed_spectra[i]
