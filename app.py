@@ -362,8 +362,9 @@ _HELP_NORMALISATION = (
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
-tab_tutorial, tab_files, tab_pls, tab_mcr, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
-    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression", "🔬  MCR decomposition",
+tab_tutorial, tab_files, tab_pls, tab_mcr, tab_cls, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
+    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression",
+     "🔬  MCR-AR unmixing", "📐  Classical Least Squares (CLS) unmixing",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
     default=st.session_state.get("active_tab", "📖  Tutorial"),
@@ -718,65 +719,6 @@ with tab_mcr:
         help="Upload linescan files first (Files tab) to enable.",
         on_click=_goto_mcr,
     )
-
-    # ── CLS configuration ────────────────────────────────────────────────────
-    st.divider()
-    st.subheader("Classical Least Squares (CLS) unmixing")
-    st.caption(
-        "Decompose each spectrum into contributions from known pure-component "
-        "references via non-negative least squares. No iterative fitting — "
-        "concentrations are derived directly. "
-        "Requires a prior analysis run to supply preprocessed linescan data."
-    )
-    cls_ref_src  = _std_picker(
-        "CLS reference spectra CSV",
-        "Col 0: component label, remaining cols: reference intensities "
-        "(same format as MCR references).",
-        "cls", None, optional=False,
-    )
-    cls_comp_ids = None
-    if cls_ref_src:
-        try:
-            _df_cls  = _read_csv_src(cls_ref_src)
-            _all_cls = _df_cls.iloc[:, 0].tolist()
-            _sel_cls = st.multiselect(
-                "Select CLS components",
-                options=_all_cls, default=_all_cls, key="cls_comp_sel",
-                help="Choose which rows of the reference CSV to include.",
-            )
-            cls_comp_ids = _sel_cls if _sel_cls else _all_cls
-        except Exception:
-            pass
-    cls_btn = st.button(
-        "▶ Run CLS", key="run_cls_btn",
-        disabled=(cls_ref_src is None),
-        help="Load a reference CSV first.",
-    )
-    if cls_btn:
-        _results_for_cls = st.session_state.get("results", {})
-        _s_cls = st.session_state.get("settings", {})
-        if not _results_for_cls:
-            st.warning("Run the main analysis first (▶ Run MCR Analysis) to generate "
-                       "preprocessed linescan data.")
-        else:
-            try:
-                _df_r   = _read_csv_src(cls_ref_src)
-                _all_r  = _df_r.iloc[:, 0].tolist()
-                _sel_r  = cls_comp_ids if cls_comp_ids else _all_r
-                _rmask  = [j for j, cid in enumerate(_all_r) if cid in _sel_r]
-                _lbls   = [str(_all_r[j]) for j in _rmask]
-                _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
-                _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
-                _cls_out = {}
-                for _fn, _r in _results_for_cls.items():
-                    _cls_out[_fn] = an.run_cls(
-                        _r["X_proc"], _r["wn_proc"], _ST_raw, _wn_csv, _s_cls,
-                    )
-                st.session_state["cls_results"] = _cls_out
-                st.session_state["cls_labels"]  = _lbls
-                st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
-            except Exception as _ce:
-                st.error(f"CLS failed: {_ce}")
 
     st.divider()
     st.markdown("### Results")
@@ -2013,86 +1955,6 @@ with tab_results:
                         "or verifying that the number of components is correct."
                     )
 
-    # ── CLS results ───────────────────────────────────────────────────────────
-    _cls_results = st.session_state.get("cls_results", {})
-    _cls_labels  = st.session_state.get("cls_labels", [])
-    if _cls_results:
-        st.divider()
-        st.subheader("CLS results")
-        _r_all_cls = st.session_state.get("results", {})
-        for _fn, _cr in _cls_results.items():
-            _r_base = _r_all_cls.get(_fn, {})
-            _dist   = _r_base.get("distance", np.arange(_cr["C"].shape[0]))
-            _wn_c   = _r_base.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
-            _mR2    = float(_cr["R2"].mean())
-            _mRMSE  = float(_cr["RMSE"].mean())
-            with st.expander(
-                f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
-                expanded=True,
-            ):
-                _fig_cls = make_subplots(
-                    rows=1, cols=3,
-                    subplot_titles=(
-                        "Concentration profiles",
-                        "Fit quality per spectrum",
-                        "Mean residual spectrum ± 1 SD",
-                    ),
-                    horizontal_spacing=0.09,
-                )
-                for _k, _lbl in enumerate(_cls_labels):
-                    _fig_cls.add_trace(go.Scatter(
-                        x=_dist, y=_cr["C"][:, _k], name=_lbl,
-                        line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
-                    ), row=1, col=1)
-                _fig_cls.add_trace(go.Scatter(
-                    x=_dist, y=_cr["R2"], name="R²",
-                    line=dict(color="#1b85b8", width=1.5),
-                ), row=1, col=2)
-                _fig_cls.add_trace(go.Scatter(
-                    x=_dist, y=_cr["RMSE"], name="RMSE",
-                    line=dict(color="#ae5a41", width=1.5, dash="dot"),
-                ), row=1, col=2)
-                _mean_res = _cr["residual"].mean(axis=0)
-                _std_res  = _cr["residual"].std(axis=0)
-                _fig_cls.add_trace(go.Scatter(
-                    x=np.concatenate([_wn_c, _wn_c[::-1]]),
-                    y=np.concatenate([_mean_res + _std_res,
-                                      (_mean_res - _std_res)[::-1]]),
-                    fill="toself", fillcolor="rgba(85,158,131,0.2)",
-                    line=dict(color="rgba(0,0,0,0)"),
-                    showlegend=False, name="±1 SD",
-                ), row=1, col=3)
-                _fig_cls.add_trace(go.Scatter(
-                    x=_wn_c, y=_mean_res, name="Mean residual",
-                    line=dict(color="#559e83", width=1.5),
-                ), row=1, col=3)
-                _fig_cls.add_hline(
-                    y=0, line=dict(color="grey", width=0.5, dash="dash"),
-                    row=1, col=3,
-                )
-                _fig_cls.update_xaxes(title_text="Position (µm)", row=1, col=1)
-                _fig_cls.update_xaxes(title_text="Position (µm)", row=1, col=2)
-                _fig_cls.update_xaxes(title_text="Raman shift (cm⁻¹)", row=1, col=3)
-                _fig_cls.update_yaxes(title_text="Concentration (a.u.)", row=1, col=1)
-                _fig_cls.update_yaxes(title_text="Value", row=1, col=2)
-                _fig_cls.update_yaxes(title_text="Intensity (a.u.)", row=1, col=3)
-                _fig_cls.update_layout(height=380, margin=dict(t=40, b=20))
-                st.plotly_chart(_fig_cls, use_container_width=True)
-
-                with st.expander("Reference spectra used for CLS", expanded=False):
-                    _fig_ref = go.Figure()
-                    for _k, _lbl in enumerate(_cls_labels):
-                        _fig_ref.add_trace(go.Scatter(
-                            x=_wn_c, y=_cr["ST"][_k], name=_lbl,
-                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
-                        ))
-                    _fig_ref.update_layout(
-                        height=300,
-                        xaxis_title="Raman shift (cm⁻¹)",
-                        yaxis_title="Intensity (preprocessed)",
-                        margin=dict(t=20, b=20),
-                    )
-                    st.plotly_chart(_fig_ref, use_container_width=True)
 
 
 # ── PLS linescan results (bottom of PLS tab) ──────────────────────────────────
@@ -2658,6 +2520,226 @@ with tab_calib:
                     + (f", solvent factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
                     + f", background max: {float(_rb_all[_pos_idx].max()):.4f}."
                 )
+
+
+# ── CLS tab ───────────────────────────────────────────────────────────────────
+with tab_cls:
+    st.markdown(
+        "Decompose each spectrum into contributions from known pure-component "
+        "references via non-negative least squares (NNLS). "
+        "No iterative fitting — concentrations are derived directly from the data. "
+        "Run the main analysis first (MCR-AR tab) to provide preprocessed linescan data."
+    )
+
+    # ── Configuration ─────────────────────────────────────────────────────────
+    _cls_ref_src  = _std_picker(
+        "CLS reference spectra CSV",
+        "Col 0: component label, remaining cols: reference intensities "
+        "(same format as MCR references).",
+        "cls", None, optional=False,
+    )
+    _cls_comp_ids = None
+    if _cls_ref_src:
+        try:
+            _df_cls  = _read_csv_src(_cls_ref_src)
+            _all_cls = _df_cls.iloc[:, 0].tolist()
+            _sel_cls = st.multiselect(
+                "Select CLS components",
+                options=_all_cls, default=_all_cls, key="cls_comp_sel",
+                help="Choose which rows of the reference CSV to include.",
+            )
+            _cls_comp_ids = _sel_cls if _sel_cls else _all_cls
+        except Exception:
+            pass
+
+    _cls_btn = st.button(
+        "▶ Run CLS", key="run_cls_btn",
+        disabled=(_cls_ref_src is None),
+        help="Load a reference CSV first.",
+    )
+    if _cls_btn:
+        _results_for_cls = st.session_state.get("results", {})
+        _s_cls = st.session_state.get("settings", {})
+        if not _results_for_cls:
+            st.warning("Run the main analysis first (▶ Run MCR Analysis) to generate "
+                       "preprocessed linescan data.")
+        else:
+            try:
+                _df_r   = _read_csv_src(_cls_ref_src)
+                _all_r  = _df_r.iloc[:, 0].tolist()
+                _sel_r  = _cls_comp_ids if _cls_comp_ids else _all_r
+                _rmask  = [j for j, cid in enumerate(_all_r) if cid in _sel_r]
+                _lbls   = [str(_all_r[j]) for j in _rmask]
+                _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
+                _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
+                _cls_out = {}
+                for _fn, _r in _results_for_cls.items():
+                    _cls_out[_fn] = an.run_cls(
+                        _r["X_proc"], _r["wn_proc"], _ST_raw, _wn_csv, _s_cls,
+                    )
+                st.session_state["cls_results"] = _cls_out
+                st.session_state["cls_labels"]  = _lbls
+                st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
+            except Exception as _ce:
+                st.error(f"CLS failed: {_ce}")
+
+    # ── Results ───────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### Results")
+    _cls_results = st.session_state.get("cls_results", {})
+    _cls_labels  = st.session_state.get("cls_labels", [])
+
+    if not _cls_results:
+        st.info("Load a reference CSV, then click ▶ Run CLS to see results here.")
+    else:
+        _r_all_cls = st.session_state.get("results", {})
+        _sm_cls    = st.session_state.get("scan_mode", "xy")
+
+        for _fi, (_fn, _cr) in enumerate(_cls_results.items()):
+            _r_base      = _r_all_cls.get(_fn, {})
+            _dist_cls    = _r_base.get("distance", np.arange(_cr["C"].shape[0]))
+            _wn_c        = _r_base.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
+            _n_spec_cls  = _cr["C"].shape[0]
+            _mR2         = float(_cr["R2"].mean())
+            _mRMSE       = float(_cr["RMSE"].mean())
+            _dist_lbl    = "Depth (µm)" if _sm_cls == "z" else "Distance (µm)"
+
+            with st.expander(
+                f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
+                expanded=True,
+            ):
+                # ── Row 1: concentration profiles + fit quality ────────────
+                _fig_ov = make_subplots(
+                    rows=1, cols=2,
+                    subplot_titles=("Concentration profiles",
+                                    "Fit quality per spectrum"),
+                    horizontal_spacing=0.10,
+                )
+                for _k, _lbl in enumerate(_cls_labels):
+                    _fig_ov.add_trace(go.Scatter(
+                        x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
+                        line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                    ), row=1, col=1)
+                _fig_ov.add_trace(go.Scatter(
+                    x=_dist_cls, y=_cr["R2"], name="R²",
+                    line=dict(color="#1b85b8", width=1.5),
+                ), row=1, col=2)
+                _fig_ov.add_trace(go.Scatter(
+                    x=_dist_cls, y=_cr["RMSE"], name="RMSE",
+                    line=dict(color="#ae5a41", width=1.5, dash="dot"),
+                ), row=1, col=2)
+                _fig_ov.update_xaxes(title_text=_dist_lbl, row=1, col=1)
+                _fig_ov.update_xaxes(title_text=_dist_lbl, row=1, col=2)
+                _fig_ov.update_yaxes(title_text="Concentration (a.u.)", row=1, col=1)
+                _fig_ov.update_yaxes(title_text="Value", row=1, col=2)
+                _fig_ov.update_layout(height=320, margin=dict(t=40, b=10))
+                st.plotly_chart(_fig_ov, use_container_width=True)
+
+                # ── Row 2: per-spectrum reconstruction via slider ──────────
+                st.markdown("#### Spectral reconstruction")
+                _col_sl, _col_sp = st.columns([2, 3])
+
+                with _col_sl:
+                    _pos_cls = st.slider(
+                        "Linescan position",
+                        0, _n_spec_cls - 1, _n_spec_cls // 2,
+                        key=f"cls_slider_{_fi}",
+                    )
+                    # Concentration bar at this position
+                    _fig_bar = go.Figure(go.Bar(
+                        x=_cls_labels,
+                        y=_cr["C"][_pos_cls],
+                        marker_color=[COLORS[_k % len(COLORS)]
+                                      for _k in range(len(_cls_labels))],
+                    ))
+                    _fig_bar.add_annotation(
+                        text=f"R² = {_cr['R2'][_pos_cls]:.4f}   "
+                             f"RMSE = {_cr['RMSE'][_pos_cls]:.4e}",
+                        xref="paper", yref="paper", x=0.5, y=1.08,
+                        showarrow=False, font=dict(size=11),
+                    )
+                    _fig_bar.update_layout(
+                        xaxis_title="Component",
+                        yaxis_title="Concentration (a.u.)",
+                        height=280, margin=dict(t=40, b=10),
+                        showlegend=False,
+                    )
+                    st.plotly_chart(_fig_bar, use_container_width=True)
+
+                with _col_sp:
+                    _X_rec_cls = _cr["C"] @ _cr["ST"]
+                    _fig_sp = go.Figure()
+                    _fig_sp.add_trace(go.Scatter(
+                        x=_wn_c, y=_r_base["X_proc"][_pos_cls] if "X_proc" in _r_base else _cr["C"][_pos_cls] @ _cr["ST"],
+                        mode="lines", name="Measured",
+                        line=dict(color=COLORS[0], width=1.8),
+                    ))
+                    _fig_sp.add_trace(go.Scatter(
+                        x=_wn_c, y=_X_rec_cls[_pos_cls],
+                        mode="lines", name="Reconstructed",
+                        line=dict(color="black", width=1.5, dash="dash"),
+                    ))
+                    for _k, _lbl in enumerate(_cls_labels):
+                        _fig_sp.add_trace(go.Scatter(
+                            x=_wn_c,
+                            y=_cr["C"][_pos_cls, _k] * _cr["ST"][_k],
+                            mode="lines", name=_lbl,
+                            line=dict(color=COLORS[_k % len(COLORS)],
+                                      width=1, dash="dot"),
+                        ))
+                    _fig_sp.add_trace(go.Scatter(
+                        x=_wn_c, y=_cr["residual"][_pos_cls],
+                        mode="lines", name="Residual",
+                        line=dict(color="grey", width=1, dash="dot"),
+                    ))
+                    _fig_sp.update_layout(
+                        xaxis_title="Raman shift (cm⁻¹)",
+                        yaxis_title="Intensity (a.u.)",
+                        height=320, margin=dict(t=20, b=10),
+                        legend=dict(orientation="h", y=-0.25),
+                    )
+                    st.plotly_chart(_fig_sp, use_container_width=True)
+
+                # ── Mean residual ──────────────────────────────────────────
+                with st.expander("Mean residual spectrum ± 1 SD", expanded=False):
+                    _mean_res = _cr["residual"].mean(axis=0)
+                    _std_res  = _cr["residual"].std(axis=0)
+                    _fig_res = go.Figure()
+                    _fig_res.add_trace(go.Scatter(
+                        x=np.concatenate([_wn_c, _wn_c[::-1]]),
+                        y=np.concatenate([_mean_res + _std_res,
+                                          (_mean_res - _std_res)[::-1]]),
+                        fill="toself", fillcolor="rgba(85,158,131,0.2)",
+                        line=dict(color="rgba(0,0,0,0)"),
+                        showlegend=False, name="±1 SD",
+                    ))
+                    _fig_res.add_trace(go.Scatter(
+                        x=_wn_c, y=_mean_res, name="Mean residual",
+                        line=dict(color="#559e83", width=1.5),
+                    ))
+                    _fig_res.add_hline(y=0,
+                        line=dict(color="grey", width=0.5, dash="dash"))
+                    _fig_res.update_layout(
+                        xaxis_title="Raman shift (cm⁻¹)",
+                        yaxis_title="Intensity (a.u.)",
+                        height=280, margin=dict(t=10, b=10),
+                    )
+                    st.plotly_chart(_fig_res, use_container_width=True)
+
+                # ── Reference spectra used ─────────────────────────────────
+                with st.expander("Reference spectra used for CLS", expanded=False):
+                    _fig_ref = go.Figure()
+                    for _k, _lbl in enumerate(_cls_labels):
+                        _fig_ref.add_trace(go.Scatter(
+                            x=_wn_c, y=_cr["ST"][_k], name=_lbl,
+                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                        ))
+                    _fig_ref.update_layout(
+                        xaxis_title="Raman shift (cm⁻¹)",
+                        yaxis_title="Intensity (preprocessed)",
+                        height=280, margin=dict(t=10, b=10),
+                    )
+                    st.plotly_chart(_fig_ref, use_container_width=True)
 
 
 # ── Further analysis ──────────────────────────────────────────────────────────
