@@ -276,8 +276,8 @@ def _std_picker(label, caption, key_prefix, subdir, optional=False):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab-navigation callbacks (must be defined before any button that uses them)
-def _goto_pls():     st.session_state["active_tab"] = "📊  PLS regression"
-def _goto_mcr():     st.session_state["active_tab"] = "🔬  MCR-AR unmixing"
+def _goto_pls():     st.session_state["active_tab"] = "📊  PLS regression unmixing"
+def _goto_mcr():     st.session_state["active_tab"] = "🔬  MCR-ALS unmixing"
 def _goto_further(): st.session_state["active_tab"] = "🔍  Further analysis"
 
 
@@ -363,8 +363,8 @@ _HELP_NORMALISATION = (
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 tab_tutorial, tab_files, tab_pls, tab_mcr, tab_cls, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
-    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression",
-     "🔬  MCR-AR unmixing", "📐  Classical Least Squares (CLS) unmixing",
+    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression unmixing",
+     "🔬  MCR-ALS unmixing", "📐  CLS unmixing",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
 )
@@ -557,7 +557,7 @@ with tab_files:
 # PLS regression tab — configuration at top
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_pls:
-    st.markdown("## 📊 PLS Calibration")
+    st.markdown("## 📊 Partial Least Squares (PLS) regression unmixing")
     st.caption(
         "Upload standard CSV files and set cross-validation parameters, then click "
         "**▶ Build PLS Model**. Calibration results will appear below."
@@ -623,7 +623,7 @@ with tab_pls:
 # MCR decomposition tab — configuration at top
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_mcr:
-    st.markdown("## 🔬 MCR Decomposition")
+    st.markdown("## 🔬 Multivariate Curve Resolution — Alternating Least Squares (MCR-ALS) unmixing")
     st.caption(
         "Configure MCR-ALS initialisation and parameters, then click "
         "**▶ Run MCR Analysis**. Concentration profiles and recovered spectra will appear below."
@@ -2523,6 +2523,7 @@ with tab_calib:
 
 # ── CLS tab ───────────────────────────────────────────────────────────────────
 with tab_cls:
+    st.markdown("## 📐 Classical Least Squares (CLS) unmixing")
     st.markdown(
         "Decompose each spectrum into contributions from known pure-component "
         "references via non-negative least squares (NNLS). "
