@@ -663,18 +663,6 @@ with tab_mcr:
                         help="Choose which reference spectra rows to use.",
                     )
                     mcr_comp_ids = _sel if _sel else _all_ids
-                    mcr_fixed_ids = st.multiselect(
-                        "Fix these spectra (hold fixed during MCR iterations)",
-                        options=mcr_comp_ids,
-                        default=[],
-                        key="mcr_fixed_ids",
-                        help=(
-                            "Selected components are reset to their reference spectrum "
-                            "after every ST update and cannot drift. Pin known-pure "
-                            "components (e.g. water) to prevent MCR from redistributing "
-                            "their signal across other components."
-                        ),
-                    )
                 except Exception:
                     pass
         else:
@@ -730,6 +718,66 @@ with tab_mcr:
         help="Upload linescan files first (Files tab) to enable.",
         on_click=_goto_mcr,
     )
+
+    # ── CLS configuration ────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("Classical Least Squares (CLS) unmixing")
+    st.caption(
+        "Decompose each spectrum into contributions from known pure-component "
+        "references via non-negative least squares. No iterative fitting — "
+        "concentrations are derived directly. "
+        "Requires a prior analysis run to supply preprocessed linescan data."
+    )
+    cls_ref_src  = _std_picker(
+        "CLS reference spectra CSV",
+        "Col 0: component label, remaining cols: reference intensities "
+        "(same format as MCR references).",
+        "cls", None, optional=False,
+    )
+    cls_comp_ids = None
+    if cls_ref_src:
+        try:
+            _df_cls  = _read_csv_src(cls_ref_src)
+            _all_cls = _df_cls.iloc[:, 0].tolist()
+            _sel_cls = st.multiselect(
+                "Select CLS components",
+                options=_all_cls, default=_all_cls, key="cls_comp_sel",
+                help="Choose which rows of the reference CSV to include.",
+            )
+            cls_comp_ids = _sel_cls if _sel_cls else _all_cls
+        except Exception:
+            pass
+    cls_btn = st.button(
+        "▶ Run CLS", key="run_cls_btn",
+        disabled=(cls_ref_src is None),
+        help="Load a reference CSV first.",
+    )
+    if cls_btn:
+        _results_for_cls = st.session_state.get("results", {})
+        _s_cls = st.session_state.get("settings", settings)
+        if not _results_for_cls:
+            st.warning("Run the main analysis first (▶ Run MCR Analysis) to generate "
+                       "preprocessed linescan data.")
+        else:
+            try:
+                _df_r   = _read_csv_src(cls_ref_src)
+                _all_r  = _df_r.iloc[:, 0].tolist()
+                _sel_r  = cls_comp_ids if cls_comp_ids else _all_r
+                _rmask  = [j for j, cid in enumerate(_all_r) if cid in _sel_r]
+                _lbls   = [str(_all_r[j]) for j in _rmask]
+                _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
+                _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
+                _cls_out = {}
+                for _fn, _r in _results_for_cls.items():
+                    _cls_out[_fn] = an.run_cls(
+                        _r["X_proc"], _r["wn_proc"], _ST_raw, _wn_csv, _s_cls,
+                    )
+                st.session_state["cls_results"] = _cls_out
+                st.session_state["cls_labels"]  = _lbls
+                st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
+            except Exception as _ce:
+                st.error(f"CLS failed: {_ce}")
+
     st.divider()
     st.markdown("### Results")
 
@@ -892,18 +940,11 @@ if build_btn:
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
             st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
-            _fixed_ids    = st.session_state.get("mcr_fixed_ids", [])
-            _comp_labels  = comp_labels or []
-            _fixed_st_idx = [_comp_labels.index(n) for n in _fixed_ids if n in _comp_labels]
-            _fixed_st_vals = (ST_init[_fixed_st_idx] if _fixed_st_idx and ST_init is not None
-                              else None)
             st.session_state["mcr_params"]    = dict(
                 max_iter=int(mcr_max_iter),
                 tol_increase=float(mcr_tol),
                 c_regr=mcr_c_regr,
                 st_regr=mcr_st_regr,
-                fixed_st_idx=_fixed_st_idx or None,
-                fixed_st_vals=_fixed_st_vals,
             )
 
             msg_parts = []
@@ -981,16 +1022,6 @@ if run_btn:
             c_regr=mcr_c_regr,
             st_regr=mcr_st_regr,
         ))
-        # Always recompute fixed-spectrum constraint from current multiselect selection
-        _run_fixed_ids   = st.session_state.get("mcr_fixed_ids", [])
-        _run_comp_labels = (models.get("comp_labels") or [])
-        _run_ST_init     = models.get("ST_init")
-        _run_fixed_idx   = [_run_comp_labels.index(n) for n in _run_fixed_ids if n in _run_comp_labels]
-        _run_fixed_vals  = (_run_ST_init[_run_fixed_idx] if _run_fixed_idx and _run_ST_init is not None
-                            else None)
-        mcr_params = dict(mcr_params,
-                          fixed_st_idx=_run_fixed_idx or None,
-                          fixed_st_vals=_run_fixed_vals)
         # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
         _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)
         results       = {}
@@ -1981,6 +2012,87 @@ with tab_results:
                         "The solution may not be optimal — consider increasing **Max iterations** "
                         "or verifying that the number of components is correct."
                     )
+
+    # ── CLS results ───────────────────────────────────────────────────────────
+    _cls_results = st.session_state.get("cls_results", {})
+    _cls_labels  = st.session_state.get("cls_labels", [])
+    if _cls_results:
+        st.divider()
+        st.subheader("CLS results")
+        _r_all_cls = st.session_state.get("results", {})
+        for _fn, _cr in _cls_results.items():
+            _r_base = _r_all_cls.get(_fn, {})
+            _dist   = _r_base.get("distance", np.arange(_cr["C"].shape[0]))
+            _wn_c   = _r_base.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
+            _mR2    = float(_cr["R2"].mean())
+            _mRMSE  = float(_cr["RMSE"].mean())
+            with st.expander(
+                f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
+                expanded=True,
+            ):
+                _fig_cls = make_subplots(
+                    rows=1, cols=3,
+                    subplot_titles=(
+                        "Concentration profiles",
+                        "Fit quality per spectrum",
+                        "Mean residual spectrum ± 1 SD",
+                    ),
+                    horizontal_spacing=0.09,
+                )
+                for _k, _lbl in enumerate(_cls_labels):
+                    _fig_cls.add_trace(go.Scatter(
+                        x=_dist, y=_cr["C"][:, _k], name=_lbl,
+                        line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                    ), row=1, col=1)
+                _fig_cls.add_trace(go.Scatter(
+                    x=_dist, y=_cr["R2"], name="R²",
+                    line=dict(color="#1b85b8", width=1.5),
+                ), row=1, col=2)
+                _fig_cls.add_trace(go.Scatter(
+                    x=_dist, y=_cr["RMSE"], name="RMSE",
+                    line=dict(color="#ae5a41", width=1.5, dash="dot"),
+                ), row=1, col=2)
+                _mean_res = _cr["residual"].mean(axis=0)
+                _std_res  = _cr["residual"].std(axis=0)
+                _fig_cls.add_trace(go.Scatter(
+                    x=np.concatenate([_wn_c, _wn_c[::-1]]),
+                    y=np.concatenate([_mean_res + _std_res,
+                                      (_mean_res - _std_res)[::-1]]),
+                    fill="toself", fillcolor="rgba(85,158,131,0.2)",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    showlegend=False, name="±1 SD",
+                ), row=1, col=3)
+                _fig_cls.add_trace(go.Scatter(
+                    x=_wn_c, y=_mean_res, name="Mean residual",
+                    line=dict(color="#559e83", width=1.5),
+                ), row=1, col=3)
+                _fig_cls.add_hline(
+                    y=0, line=dict(color="grey", width=0.5, dash="dash"),
+                    row=1, col=3,
+                )
+                _fig_cls.update_xaxes(title_text="Position (µm)", row=1, col=1)
+                _fig_cls.update_xaxes(title_text="Position (µm)", row=1, col=2)
+                _fig_cls.update_xaxes(title_text="Raman shift (cm⁻¹)", row=1, col=3)
+                _fig_cls.update_yaxes(title_text="Concentration (a.u.)", row=1, col=1)
+                _fig_cls.update_yaxes(title_text="Value", row=1, col=2)
+                _fig_cls.update_yaxes(title_text="Intensity (a.u.)", row=1, col=3)
+                _fig_cls.update_layout(height=380, margin=dict(t=40, b=20))
+                st.plotly_chart(_fig_cls, use_container_width=True)
+
+                with st.expander("Reference spectra used for CLS", expanded=False):
+                    _fig_ref = go.Figure()
+                    for _k, _lbl in enumerate(_cls_labels):
+                        _fig_ref.add_trace(go.Scatter(
+                            x=_wn_c, y=_cr["ST"][_k], name=_lbl,
+                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                        ))
+                    _fig_ref.update_layout(
+                        height=300,
+                        xaxis_title="Raman shift (cm⁻¹)",
+                        yaxis_title="Intensity (preprocessed)",
+                        margin=dict(t=20, b=20),
+                    )
+                    st.plotly_chart(_fig_ref, use_container_width=True)
 
 
 # ── PLS linescan results (bottom of PLS tab) ──────────────────────────────────

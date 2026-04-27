@@ -126,6 +126,56 @@ def process_linescan(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Classical Least Squares (CLS)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_cls(X_proc, wn_proc, ST_ref_raw, wn_ref, settings):
+    """
+    Classical Least Squares unmixing via per-spectrum NNLS.
+
+    Parameters
+    ----------
+    X_proc     : ndarray (n_spectra, n_wn)   already-preprocessed linescan matrix
+    wn_proc    : ndarray (n_wn,)             wavenumber axis of X_proc
+    ST_ref_raw : ndarray (n_comp, n_wn_ref)  raw reference spectra (unprocessed)
+    wn_ref     : ndarray (n_wn_ref,)         wavenumber axis of ST_ref_raw
+    settings   : dict                        preprocessing settings (same as linescan)
+
+    Returns
+    -------
+    dict with keys
+        C        : (n_spectra, n_comp)        NNLS concentrations
+        ST       : (n_comp, n_wn)             preprocessed references on wn_proc axis
+        R2       : (n_spectra,)               per-spectrum R² of reconstruction
+        RMSE     : (n_spectra,)               per-spectrum RMSE
+        residual : (n_spectra, n_wn)          measured − reconstructed
+    """
+    from scipy.optimize import nnls as _nnls
+    from preprocessing import preprocess_matrix
+
+    wn_proc = np.asarray(wn_proc)
+    wn_ref  = np.asarray(wn_ref)
+
+    ST_aligned = np.vstack([np.interp(wn_proc, wn_ref, row) for row in ST_ref_raw])
+    ST_proc, _, _ = preprocess_matrix(ST_aligned, wn_proc, settings)
+
+    n_spectra = X_proc.shape[0]
+    n_comp    = ST_proc.shape[0]
+    C = np.zeros((n_spectra, n_comp))
+    for i in range(n_spectra):
+        C[i], _ = _nnls(ST_proc.T, X_proc[i])
+
+    X_rec    = C @ ST_proc
+    residual = X_proc - X_rec
+    ss_res   = (residual ** 2).sum(axis=1)
+    ss_tot   = ((X_proc - X_proc.mean(axis=1, keepdims=True)) ** 2).sum(axis=1)
+    R2   = np.where(ss_tot > 0, 1.0 - ss_res / ss_tot, 0.0)
+    RMSE = np.sqrt((residual ** 2).mean(axis=1))
+
+    return dict(C=C, ST=ST_proc, R2=R2, RMSE=RMSE, residual=residual)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Export
 # ─────────────────────────────────────────────────────────────────────────────
 
