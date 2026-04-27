@@ -754,7 +754,7 @@ with tab_mcr:
     )
     if cls_btn:
         _results_for_cls = st.session_state.get("results", {})
-        _s_cls = st.session_state.get("settings", settings)
+        _s_cls = st.session_state.get("settings", {})
         if not _results_for_cls:
             st.warning("Run the main analysis first (▶ Run MCR Analysis) to generate "
                        "preprocessed linescan data.")
