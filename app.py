@@ -663,6 +663,18 @@ with tab_mcr:
                         help="Choose which reference spectra rows to use.",
                     )
                     mcr_comp_ids = _sel if _sel else _all_ids
+                    mcr_fixed_ids = st.multiselect(
+                        "Fix these spectra (hold fixed during MCR iterations)",
+                        options=mcr_comp_ids,
+                        default=[],
+                        key="mcr_fixed_ids",
+                        help=(
+                            "Selected components are reset to their reference spectrum "
+                            "after every ST update and cannot drift. Pin known-pure "
+                            "components (e.g. water) to prevent MCR from redistributing "
+                            "their signal across other components."
+                        ),
+                    )
                 except Exception:
                     pass
         else:
@@ -880,11 +892,18 @@ if build_btn:
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
             st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
+            _fixed_ids    = st.session_state.get("mcr_fixed_ids", [])
+            _comp_labels  = comp_labels or []
+            _fixed_st_idx = [_comp_labels.index(n) for n in _fixed_ids if n in _comp_labels]
+            _fixed_st_vals = (ST_init[_fixed_st_idx] if _fixed_st_idx and ST_init is not None
+                              else None)
             st.session_state["mcr_params"]    = dict(
                 max_iter=int(mcr_max_iter),
                 tol_increase=float(mcr_tol),
                 c_regr=mcr_c_regr,
                 st_regr=mcr_st_regr,
+                fixed_st_idx=_fixed_st_idx or None,
+                fixed_st_vals=_fixed_st_vals,
             )
 
             msg_parts = []

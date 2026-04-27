@@ -9,7 +9,7 @@ Covers:
 
 import numpy as np
 from pymcr.mcr import McrAR
-from pymcr.constraints import ConstraintNonneg, ConstraintNorm
+from pymcr.constraints import ConstraintNonneg, ConstraintNorm, Constraint
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import KFold
@@ -316,17 +316,40 @@ def build_triple_pls_model(
 # MCR-ALS
 # ─────────────────────────────────────────────────────────────────────────────
 
+class ConstraintFixedRows(Constraint):
+    """Keep specified rows of ST fixed to their reference values each iteration."""
+    def __init__(self, fixed_indices, fixed_spectra):
+        super().__init__(copy=True)
+        self.fixed_indices = list(fixed_indices)
+        self.fixed_spectra = np.array(fixed_spectra)
+
+    def transform(self, A):
+        A = A.copy()
+        for i, idx in enumerate(self.fixed_indices):
+            A[idx] = self.fixed_spectra[i]
+        return A
+
+
 def run_mcr(
-    X_data:       np.ndarray,
-    ST_init:      np.ndarray,
-    n_components: int,
-    max_iter:     int   = 2000,
-    tol_increase: float = 1e-2,
-    c_regr:       str   = "OLS",
-    st_regr:      str   = "NNLS",
+    X_data:        np.ndarray,
+    ST_init:       np.ndarray,
+    n_components:  int,
+    max_iter:      int        = 2000,
+    tol_increase:  float      = 1e-2,
+    c_regr:        str        = "OLS",
+    st_regr:       str        = "NNLS",
+    fixed_st_idx:  list       = None,
+    fixed_st_vals: np.ndarray = None,
 ) -> tuple:
     """
     Run MCR-ALS on X_data initialised from ST_init.
+
+    Parameters
+    ----------
+    fixed_st_idx  : list of int, optional
+        0-based row indices in ST to hold fixed during every iteration.
+    fixed_st_vals : ndarray (n_fixed × n_wn), optional
+        Reference spectral values for the fixed rows.
 
     Returns
     -------
@@ -334,12 +357,16 @@ def run_mcr(
     ST_mcr : ndarray  (n_components × n_wn)        recovered pure spectra
     n_iter : int                                    iterations to convergence
     """
+    st_constraints = [ConstraintNonneg()]
+    if fixed_st_idx:
+        st_constraints.append(ConstraintFixedRows(fixed_st_idx, fixed_st_vals))
+
     mcr = McrAR(
         max_iter=max_iter,
         st_regr=st_regr,
         c_regr=c_regr,
         c_constraints=[ConstraintNonneg(), ConstraintNorm()],
-        st_constraints=[ConstraintNonneg()],
+        st_constraints=st_constraints,
         tol_increase=tol_increase,
     )
     mcr.fit(X_data, ST=ST_init[:n_components])
