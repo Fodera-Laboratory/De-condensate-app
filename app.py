@@ -2609,46 +2609,22 @@ with tab_cls:
                 f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
                 expanded=True,
             ):
-                # ── Spectral reconstruction (PLS-style layout) ─────────────
-                _col_sp, _col_prof = st.columns([3, 2])
+                # ── Slider (above all panels) ──────────────────────────────
+                _pos_cls = st.slider(
+                    "Linescan position",
+                    0, _n_spec_cls - 1, _n_spec_cls // 2,
+                    key=f"cls_slider_{_fi}",
+                )
+                _vline_x = float(_dist_cls[_pos_cls])
 
-                with _col_prof:
-                    _pos_cls = st.slider(
-                        "Linescan position",
-                        0, _n_spec_cls - 1, _n_spec_cls // 2,
-                        key=f"cls_slider_{_fi}",
-                    )
-                    _fig_prof = go.Figure()
-                    for _k, _lbl in enumerate(_cls_labels):
-                        _fig_prof.add_trace(go.Scatter(
-                            x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
-                            mode="lines",
-                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
-                        ))
-                    _fig_prof.add_vline(
-                        x=float(_dist_cls[_pos_cls]),
-                        line_dash="dash", line_color="black",
-                        annotation_text=f"{_dist_cls[_pos_cls]:.1f} µm",
-                        annotation_position="top right",
-                    )
-                    _fig_prof.update_layout(
-                        xaxis_title=_dist_lbl,
-                        yaxis_title="Concentration (a.u.)",
-                        height=320,
-                        legend=dict(orientation="h", y=-0.22),
-                        margin=dict(t=30),
-                    )
-                    st.plotly_chart(_fig_prof, use_container_width=True)
-                    st.caption(
-                        f"R² = {_cr['R2'][_pos_cls]:.4f}   "
-                        f"RMSE = {_cr['RMSE'][_pos_cls]:.4e}"
-                    )
+                # ── Row 1: spectral reconstruction | concentration profiles ─
+                _col_sp, _col_prof = st.columns([3, 2])
 
                 with _col_sp:
                     _X_rec_cls = _cr["C"] @ _cr["ST"]
                     _fig_sp = go.Figure()
                     _fig_sp.add_trace(go.Scatter(
-                        x=_wn_c, y=_cr["X_proc"][_pos_cls] if "X_proc" in _cr else _cr["C"][_pos_cls] @ _cr["ST"],
+                        x=_wn_c, y=_cr["X_proc"][_pos_cls] if "X_proc" in _cr else _X_rec_cls[_pos_cls],
                         mode="lines", name="Measured",
                         line=dict(color=COLORS[0], width=1.8),
                     ))
@@ -2665,18 +2641,85 @@ with tab_cls:
                             line=dict(color=COLORS[_k % len(COLORS)],
                                       width=1, dash="dot"),
                         ))
-                    _fig_sp.add_trace(go.Scatter(
-                        x=_wn_c, y=_cr["residual"][_pos_cls],
-                        mode="lines", name="Residual",
-                        line=dict(color="grey", width=1, dash="dot"),
-                    ))
                     _fig_sp.update_layout(
                         xaxis_title="Raman shift (cm⁻¹)",
                         yaxis_title="Intensity (a.u.)",
-                        height=320, margin=dict(t=20, b=10),
-                        legend=dict(orientation="h", y=-0.25),
+                        height=300, margin=dict(t=30, b=10),
+                        title="Spectral reconstruction",
+                        legend=dict(orientation="h", y=-0.28),
                     )
                     st.plotly_chart(_fig_sp, use_container_width=True)
+
+                with _col_prof:
+                    _fig_prof = go.Figure()
+                    for _k, _lbl in enumerate(_cls_labels):
+                        _fig_prof.add_trace(go.Scatter(
+                            x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
+                            mode="lines",
+                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                        ))
+                    _fig_prof.add_vline(
+                        x=_vline_x, line_dash="dash", line_color="black",
+                        annotation_text=f"{_vline_x:.1f} µm",
+                        annotation_position="top right",
+                    )
+                    _fig_prof.update_layout(
+                        xaxis_title=_dist_lbl,
+                        yaxis_title="Concentration (a.u.)",
+                        height=300,
+                        title="Concentration profiles",
+                        legend=dict(orientation="h", y=-0.28),
+                        margin=dict(t=40),
+                    )
+                    st.plotly_chart(_fig_prof, use_container_width=True)
+
+                # ── Row 2: residual spectrum | R²/RMSE profiles ────────────
+                _col_res, _col_fit = st.columns([3, 2])
+
+                with _col_res:
+                    _fig_res_pos = go.Figure()
+                    _fig_res_pos.add_trace(go.Scatter(
+                        x=_wn_c, y=_cr["residual"][_pos_cls],
+                        mode="lines", name="Residual",
+                        line=dict(color="#559e83", width=1.5),
+                    ))
+                    _fig_res_pos.add_hline(
+                        y=0, line=dict(color="grey", width=0.8, dash="dash")
+                    )
+                    _fig_res_pos.update_layout(
+                        xaxis_title="Raman shift (cm⁻¹)",
+                        yaxis_title="Intensity (a.u.)",
+                        height=260, margin=dict(t=40, b=10),
+                        title="Residual spectrum",
+                    )
+                    st.plotly_chart(_fig_res_pos, use_container_width=True)
+
+                with _col_fit:
+                    _fig_fit = go.Figure()
+                    _fig_fit.add_trace(go.Scatter(
+                        x=_dist_cls, y=_cr["R2"], name="R²",
+                        mode="lines",
+                        line=dict(color="#1b85b8", width=1.5),
+                    ))
+                    _fig_fit.add_trace(go.Scatter(
+                        x=_dist_cls, y=_cr["RMSE"], name="RMSE",
+                        mode="lines",
+                        line=dict(color="#ae5a41", width=1.5, dash="dot"),
+                    ))
+                    _fig_fit.add_vline(
+                        x=_vline_x, line_dash="dash", line_color="black",
+                        annotation_text=f"{_vline_x:.1f} µm",
+                        annotation_position="top right",
+                    )
+                    _fig_fit.update_layout(
+                        xaxis_title=_dist_lbl,
+                        yaxis_title="Value",
+                        height=260,
+                        title="Fit quality",
+                        legend=dict(orientation="h", y=-0.28),
+                        margin=dict(t=40),
+                    )
+                    st.plotly_chart(_fig_fit, use_container_width=True)
 
                 # ── Mean residual ──────────────────────────────────────────
                 with st.expander("Mean residual spectrum ± 1 SD", expanded=False):
