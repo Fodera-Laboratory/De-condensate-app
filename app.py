@@ -398,6 +398,18 @@ with tab_files:
                        + ", ".join(f.name for f in linescan_files))
 
         st.subheader("Preprocessing")
+        spike_remove = st.toggle("Spike removal", value=True)
+        spike_threshold = st.number_input(
+            "Spike detection threshold",
+            min_value=1.0, max_value=30.0, value=8.0, step=0.5,
+            key="spike_threshold",
+            help=(
+                "Modified Z-score threshold for the Whitaker-Hayes spike detector. "
+                "Lower values = more aggressive (removes more, risk of false positives). "
+                "Default 8; try 4–6 if spikes are being missed."
+            ),
+            disabled=not spike_remove,
+        )
         baseline = st.selectbox(
             "Baseline correction",
             ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls", "imodpoly", "modpoly", "poly", "endpoint", "linear", "none"],
@@ -475,6 +487,22 @@ with tab_files:
                 "**Min-max** — not recommended for PLS as a single spike can compress all features."
             ),
         )
+        second_deriv = st.toggle(
+            "Second-derivative preprocessing (PLS only)",
+            value=False,
+            key="second_deriv",
+            help=(
+                "Apply a Savitzky-Golay second derivative as the final preprocessing step "
+                "(after normalisation). Sharpens overlapping spectral features and can improve "
+                "discrimination between proteins with similar amide-band profiles. "
+                "Applied only to PLS standard and linescan spectra, not to MCR or CLS."
+            ),
+        )
+        sd_window = sd_poly = None
+        if second_deriv:
+            _sdc1, _sdc2 = st.columns(2)
+            sd_window = _sdc1.slider("SD window length (odd)", 5, 31, 11, step=2, key="sd_window")
+            sd_poly   = _sdc2.slider("SD polynomial order",    1,  5,  2,        key="sd_poly")
         normalize_mcr = st.selectbox(
             "MCR-ALS normalization",
             _norm_opts,
@@ -489,41 +517,26 @@ with tab_files:
                 "**Vector** — normalises to unit Euclidean norm."
             ),
         )
+        normalize_cls = st.selectbox(
+            "CLS normalization",
+            _norm_opts,
+            index=1,
+            format_func=_norm_fmt,
+            help=(
+                "Normalization applied to spectra before CLS unmixing. "
+                "**Area** (default) — divides by spectral integral; preserves relative peak ratios "
+                "and is consistent with the non-negativity constraint of NNLS. "
+                "Must match the normalization used to prepare the reference spectra CSV."
+            ),
+        )
         normalize = normalize_mcr  # used by salt and further-analysis paths
         salt_normalize = st.selectbox(
             "Salt PLS regression normalization",
-            ["none", "minmax", "snv"],
+            ["none", "snv", "area", "vector", "minmax"],
+            index=0,
             format_func=_norm_fmt,
             help="Normalization applied only to salt standards and linescan salt preprocessing.",
         )
-        spike_remove = st.toggle("Spike removal", value=True)
-        spike_threshold = st.number_input(
-            "Spike detection threshold",
-            min_value=1.0, max_value=30.0, value=8.0, step=0.5,
-            key="spike_threshold",
-            help=(
-                "Modified Z-score threshold for the Whitaker-Hayes spike detector. "
-                "Lower values = more aggressive (removes more, risk of false positives). "
-                "Default 8; try 4–6 if spikes are being missed."
-            ),
-            disabled=not spike_remove,
-        )
-        second_deriv = st.toggle(
-            "Second-derivative preprocessing",
-            value=False,
-            key="second_deriv",
-            help=(
-                "Apply a Savitzky-Golay second derivative as the final preprocessing step "
-                "(after normalisation). Sharpens overlapping spectral features and can improve "
-                "discrimination between proteins with similar amide-band profiles. "
-                "Applied to both linescan spectra and PLS/MCR standard spectra."
-            ),
-        )
-        sd_window = sd_poly = None
-        if second_deriv:
-            _sdc1, _sdc2 = st.columns(2)
-            sd_window = _sdc1.slider("SD window length (odd)", 5, 31, 11, step=2, key="sd_window")
-            sd_poly   = _sdc2.slider("SD polynomial order",    1,  5,  2,        key="sd_poly")
 
     with _fc2:
         st.subheader("Spectral Range")
@@ -738,12 +751,13 @@ settings = dict(
     normalize=normalize_mcr,
     normalize_pls=normalize_pls,
     normalize_mcr=normalize_mcr,
+    normalize_cls=normalize_cls,
     salt_normalize=salt_normalize,
     spike_remove=spike_remove,
     spike_threshold=spike_threshold,
-    second_deriv=second_deriv,
-    sd_window=sd_window if second_deriv else 11,
-    sd_poly=sd_poly   if second_deriv else 2,
+    second_deriv=False,   # second derivative is PLS-only; not applied to MCR/CLS
+    sd_window=11,
+    sd_poly=2,
     wn_min=wn_min,
     wn_max=wn_max,
     use_cut=use_cut,
@@ -752,8 +766,13 @@ settings = dict(
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
-# Settings override for PLS standard preprocessing
-pls_settings = dict(settings, normalize=normalize_pls)
+# PLS settings: use PLS normalization and honour the second-derivative toggle
+pls_settings = dict(settings, normalize=normalize_pls,
+                    second_deriv=second_deriv,
+                    sd_window=sd_window if second_deriv else 11,
+                    sd_poly=sd_poly   if second_deriv else 2)
+# CLS settings: use CLS normalization, no second derivative
+cls_settings = dict(settings, normalize=normalize_cls)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2558,7 +2577,7 @@ with tab_cls:
         help="Upload linescan files and load a reference CSV first.",
     )
     if _cls_btn:
-        _s_cls = st.session_state.get("settings", {})
+        _s_cls = cls_settings
         try:
             _df_r   = _read_csv_src(_cls_ref_src)
             _all_r  = _df_r.iloc[:, 0].tolist()
