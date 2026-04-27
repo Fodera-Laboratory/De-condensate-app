@@ -2377,20 +2377,43 @@ with tab_calib:
             _X_known = np.zeros((len(_c_prot), _n_wn_pls))
             _X_known[:, _valid] = _X_rec_v
 
-            # Align water mean to PLS wn grid
+            # Per-spectrum rubberband background
+            _rb_all = np.array([
+                rms.rubberband_correction(_wn_pls_rec, _X_pls_rec[i])
+                for i in range(len(_c_prot))
+            ])  # (n_samples, n_wn)
+
+            # Align solvent mean to PLS wn grid
             if _water_mean is not None and _wn_water is not None:
                 if len(_water_mean) != _n_wn_pls or not np.allclose(_wn_water, _wn_pls_rec, atol=0.5):
                     _water_on_pls = np.interp(_wn_pls_rec, _wn_water, _water_mean)
                 else:
                     _water_on_pls = _water_mean
-                _w_norm2 = float(np.dot(_water_on_pls, _water_on_pls))
-                _residual = _X_pls_rec - _X_known
-                _c_water  = (_residual * _water_on_pls).sum(axis=1) / _w_norm2 if _w_norm2 > 0 else np.zeros(len(_c_prot))
-                _X_rec    = _X_known + np.outer(_c_water, _water_on_pls)
             else:
                 _water_on_pls = None
+
+            # Joint OLS: fit solvent and rubberband to residual simultaneously
+            _residual = _X_pls_rec - _X_known
+            if _water_on_pls is not None:
+                # A[i] = [[solvent, rb_i]] — (n_wn, 2) per spectrum
+                _c_water = np.zeros(len(_c_prot))
+                _c_rb    = np.zeros(len(_c_prot))
+                for _ii in range(len(_c_prot)):
+                    _A = np.column_stack([_water_on_pls, _rb_all[_ii]])
+                    _coeffs, _, _, _ = np.linalg.lstsq(_A, _residual[_ii], rcond=None)
+                    _c_water[_ii] = _coeffs[0]
+                    _c_rb[_ii]    = _coeffs[1]
+                _X_rec = (_X_known
+                          + np.outer(_c_water, _water_on_pls)
+                          + _c_rb[:, np.newaxis] * _rb_all)
+            else:
+                # No solvent: fit rubberband only
                 _c_water      = None
-                _X_rec        = _X_known
+                _rb_norm2     = (_rb_all ** 2).sum(axis=1)
+                _c_rb = np.where(_rb_norm2 > 0,
+                                 (_residual * _rb_all).sum(axis=1) / _rb_norm2,
+                                 0.0)
+                _X_rec = _X_known + _c_rb[:, np.newaxis] * _rb_all
 
             # ── Layout: left = scrollable spectrum, right = water profile ─────
             _dist_rec  = _r["distance"]
@@ -2400,41 +2423,38 @@ with tab_calib:
             _col_spec, _col_water = st.columns([3, 2])
 
             with _col_water:
+                _pos_idx = st.slider(
+                    "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
+                    key="recon_slider",
+                )
+                _fig_profiles = go.Figure()
                 if _c_water is not None:
-                    _fig_water = go.Figure()
-                    _fig_water.add_trace(go.Scatter(
+                    _fig_profiles.add_trace(go.Scatter(
                         x=_dist_rec, y=_c_water, mode="lines",
-                        line=dict(color=COLORS[4] if len(COLORS) > 4 else "steelblue", width=1.5),
-                        name="Water scaling",
+                        line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1.5),
+                        name="Solvent",
                     ))
-                    _pos_idx = st.slider(
-                        "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
-                        key="recon_slider",
-                    )
-                    _fig_water.add_vline(
-                        x=float(_dist_rec[_pos_idx]),
-                        line_dash="dash", line_color="black",
-                        annotation_text=f"{_dist_rec[_pos_idx]:.1f} µm",
-                        annotation_position="top right",
-                    )
-                    _fig_water.update_layout(
-                        xaxis_title=_dist_label,
-                        yaxis_title="Solvent scaling factor",
-                        height=320,
-                        margin=dict(t=30),
-                    )
-                    st.plotly_chart(_fig_water, use_container_width=True)
-                    st.caption(
-                        "Solvent scaling factor along the linescan. "
-                        "A value of 1 means the residual matches one mean solvent spectrum. "
-                        "Dashed line: currently selected position."
-                    )
-                else:
-                    _pos_idx = st.slider(
-                        "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
-                        key="recon_slider",
-                    )
-                    st.info("No solvent reference spectra selected. Choose files in the 'Solvent reference spectra' expander above.")
+                _fig_profiles.add_trace(go.Scatter(
+                    x=_dist_rec, y=_c_rb, mode="lines",
+                    line=dict(color=COLORS[4] if len(COLORS) > 4 else "grey", width=1.5),
+                    name="Background",
+                ))
+                _fig_profiles.add_vline(
+                    x=float(_dist_rec[_pos_idx]),
+                    line_dash="dash", line_color="black",
+                    annotation_text=f"{_dist_rec[_pos_idx]:.1f} µm",
+                    annotation_position="top right",
+                )
+                _fig_profiles.update_layout(
+                    xaxis_title=_dist_label,
+                    yaxis_title="Scaling factor",
+                    height=320,
+                    legend=dict(orientation="h", y=-0.22),
+                    margin=dict(t=30),
+                )
+                st.plotly_chart(_fig_profiles, use_container_width=True)
+                if _c_water is None:
+                    st.info("No solvent reference selected. Choose files in the 'Solvent reference spectra' expander above.")
 
             with _col_spec:
                 _fig_rec = go.Figure()
@@ -2475,6 +2495,11 @@ with tab_calib:
                         mode="lines", name="Solvent contribution",
                         line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1, dash="dot"),
                     ))
+                _fig_rec.add_trace(go.Scatter(
+                    x=_wn_pls_rec, y=_c_rb[_pos_idx] * _rb_all[_pos_idx],
+                    mode="lines", name="Background",
+                    line=dict(color=COLORS[4] if len(COLORS) > 4 else "grey", width=1, dash="dot"),
+                ))
                 _fig_rec.update_layout(
                     xaxis_title="Wavenumber (cm⁻¹)",
                     yaxis_title="Norm. intensity",
@@ -2491,7 +2516,7 @@ with tab_calib:
                     f"Protein: {float(_c_prot[_pos_idx]):.3f} {_unit}"
                     + (f", crowder: {float(_c_crowd[_pos_idx]):.3f} wt%" if _c_crowd is not None else "")
                     + (f", solvent factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
-                    + "."
+                    + f", background factor: {float(_c_rb[_pos_idx]):.4f}."
                 )
 
 
