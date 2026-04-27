@@ -380,8 +380,8 @@ with tab_files:
     st.markdown("## 📂 Files & Preprocessing")
     st.caption(
         "Upload your linescan files and configure preprocessing and spectral range. "
-        "These settings apply to both PLS and MCR analysis. "
-        "Then go to the **PLS regression** or **MCR decomposition** tab to run the analysis."
+        "These settings apply to PLS, MCR-ALS, and CLS analysis. "
+        "Then go to the **📊 PLS regression unmixing**, **🔬 MCR-ALS unmixing**, or **📐 CLS unmixing** tab to run the analysis."
     )
     _fc1, _fc2 = st.columns([1, 1])
 
@@ -5590,31 +5590,21 @@ with tab_tutorial:
     # ── Step-by-step guide ───────────────────────────────────────────────────
     with st.expander("Step-by-step guide", expanded=True):
         st.markdown(
-            "#### 1 · Upload files  `📂 Files tab`\n"
+            "#### 1 · Upload linescans  `📂 Files & preprocessing tab`\n"
             "- **Linescans** *(required)* — one or more `.txt` files exported from WITec software. "
             "The scan mode (lateral XY or depth Z) is **auto-detected** from the stage position "
-            "data in each file — no manual selection needed.\n"
-            "- **Protein standard CSV** *(optional)* — enables PLS protein quantification. "
-            "Choose from the built-in training library or upload your own.\n"
-            "- **Molecular crowder standard CSV** *(optional)* — when combined with the protein "
-            "standard, a single dual-output PLS2 model predicts both concentrations simultaneously.\n"
-            "- **Salt standard CSV** *(optional)* — trains a separate PLS model on the fingerprint "
-            "region for ion concentration prediction.\n"
-            "- **MCR reference CSV** *(optional)* — pure-component reference spectra used to "
-            "initialise MCR-ALS. Alternatively, select **PCA from linescans** to estimate initial "
-            "spectra automatically — no reference file needed.\n"
-            "- **MCR components** — set the number of components (1–10) just below the MCR "
-            "initialisation selector.\n\n"
+            "data in each file — no manual selection needed.\n\n"
 
-            "#### 2 · Set spectral range  `📂 Files tab → Spectral range`\n"
+            "#### 2 · Set spectral range  `📂 Files & preprocessing tab → Spectral range`\n"
             "- **Protein range** — wavenumber window used for PLS, MCR, and CLS (default 700–3900 cm⁻¹). "
             "This setting does **not** affect Further analysis, which always uses the full raw range.\n"
             "- **Exclude gap region** *(toggle)* — remove a spectral gap from the model, e.g. the "
             "silent region 1850–2750 cm⁻¹.\n"
             "- **Salt range** — separate narrow window for the salt fingerprint band "
-            "(default 940–1020 cm⁻¹).\n\n"
+            "(default 940–1020 cm⁻¹).\n"
+            "- **Concentration unit** and **protein MW** (for mM ↔ mg/mL conversion).\n\n"
 
-            "#### 3 · Set preprocessing  `📂 Files tab → Preprocessing`\n"
+            "#### 3 · Set preprocessing  `📂 Files & preprocessing tab → Preprocessing`\n"
             "Each step can be switched or disabled independently:\n"
             "- **Spike removal** *(toggle, top)* — detects and replaces cosmic-ray spikes using "
             "the Whitaker-Hayes modified Z-score algorithm. Applied first, before baseline correction.\n"
@@ -5633,28 +5623,29 @@ with tab_tutorial:
             "- **Salt PLS regression normalisation** — *None* (default), *SNV*, *Area*, *Vector*, "
             "or *Min-max*. Applied only to salt standards and salt linescan preprocessing.\n\n"
 
-            "#### 4 · Configure analysis settings  `📂 Files tab → Analysis settings`\n"
-            "- **Concentration unit** and **protein MW** (for mM ↔ mg/mL conversion).\n"
-            "- **MCR-ALS parameters** *(advanced)* — max iterations, convergence tolerance, "
-            "regression method for C and Sᵀ (OLS or NNLS).\n"
-            "- **PLS cross-validation** *(advanced)* — number of folds and max latent variables.\n\n"
-
-            "#### 5 · Build PLS model  `📊 PLS regression unmixing tab → ▶ Build PLS Model`  *(optional)*\n"
-            "Trains PLS model(s) on the uploaded standard spectra. "
+            "#### 4 · Build PLS model  `📊 PLS regression unmixing tab → ▶ Build PLS Model`  *(optional)*\n"
+            "Upload standard CSV files, set cross-validation parameters, then click **▶ Build PLS Model**. "
+            "Standard CSVs can be chosen from the built-in training library or uploaded directly.\n"
+            "- **Protein standard CSV** — enables protein quantification.\n"
+            "- **Protein 2 / Molecular crowder CSV** *(optional)* — when provided together with a protein "
+            "standard, a dual or triple multi-output PLS2 model is trained.\n"
+            "- **Salt standard CSV** *(optional)* — trains a separate model on the salt fingerprint window.\n"
+            "- **Cross-validation** — number of folds (default 5) and max latent variables (default 20).\n\n"
             "Once built, PLS predictions run automatically on all linescan files — results appear "
             "immediately below in the same tab. "
-            "A single model can cover protein only, protein + molecular crowder (dual PLS2), "
-            "or protein + crowder + a second protein (triple PLS2). "
-            "An optional salt PLS model runs on a separate fingerprint window. "
             "Skip this step if you only want MCR, CLS, or further spectral analysis.\n\n"
 
-            "#### 6 · Run MCR-ALS  `🔬 MCR-ALS unmixing tab → ▶ Run MCR Analysis`  *(optional)*\n"
-            "Decomposes each linescan into spectral components using MCR-ALS. "
-            "Requires either a reference CSV or PCA initialisation (configured in step 1). "
+            "#### 5 · Run MCR-ALS  `🔬 MCR-ALS unmixing tab → ▶ Run MCR Analysis`  *(optional)*\n"
+            "Configure MCR-ALS initialisation and parameters, then click **▶ Run MCR Analysis**.\n"
+            "- **Initialisation** — choose *Reference CSV* (upload or select pure-component reference "
+            "spectra) or *PCA from linescans* (no reference file needed; components auto-labelled).\n"
+            "- **MCR components** — number of components to resolve (1–10).\n"
+            "- **MCR-ALS parameters** *(advanced)* — max iterations, convergence tolerance, "
+            "regression method for **C** and **Sᵀ** (OLS or NNLS).\n\n"
             "Results — concentration profiles **C** and recovered spectra **Sᵀ** — appear in the "
-            "same tab. If PLS was also built, a co-localisation scatter plot is shown automatically.\n\n"
+            "same tab. If a PLS model was also built, a co-localisation scatter plot is shown automatically.\n\n"
 
-            "#### 7 · Run CLS  `📐 CLS unmixing tab → ▶ Run CLS`  *(optional)*\n"
+            "#### 6 · Run CLS  `📐 CLS unmixing tab → ▶ Run CLS`  *(optional)*\n"
             "Unmixes each spectrum into contributions from known pure-component reference spectra "
             "using non-negative least squares (NNLS). Unlike MCR-ALS, CLS has no iterative fitting — "
             "concentrations are derived directly and uniquely from the references. "
@@ -5678,7 +5669,7 @@ with tab_tutorial:
             "- **Mean residual ± 1 SD** *(expander)* — average residual over all spectra.\n"
             "- **Reference spectra used** *(expander)* — preprocessed reference spectra as passed to NNLS.\n\n"
 
-            "#### 8 · Further analysis  `🔍 Further analysis tab`  *(independent)*\n"
+            "#### 7 · Further analysis  `🔍 Further analysis tab`  *(independent)*\n"
             "Available as soon as linescans have been processed (PLS/MCR not required). "
             "Each sub-tool reads the raw linescan data and applies its own independent "
             "preprocessing pipeline — the settings in the Files tab have no effect here. "
@@ -5720,7 +5711,7 @@ with tab_tutorial:
             "- **c. Peak ratio** — integrates two band windows and plots their ratio spatially "
             "and against any available score.\n\n"
 
-            "#### 9 · Image overlay  `🗺️ Image overlay tab`\n"
+            "#### 8 · Image overlay  `🗺️ Image overlay tab`\n"
             "Upload a microscopy image and map any score onto its spatial coordinates.\n"
             "- Select an objective magnification preset (100× / 20× / 5×) or enter custom dimensions.\n"
             "- **XY scan** — dots are placed at their true stage XY positions relative to the image "
@@ -5728,7 +5719,7 @@ with tab_tutorial:
             "- **Z-scan** — image shows the acquisition position; a score-vs-depth plot appears alongside.\n"
             "- **Crop controls** — trim µm from any edge (left / right / top / bottom).\n\n"
 
-            "#### 10 · Download  `⬇ Download tab`\n"
+            "#### 9 · Download  `⬇ Download tab`\n"
             "- **PLS / MCR results** — per-linescan Excel files or a bundled ZIP.\n"
             "- **Further analysis** — PCA scores/loadings/variance, amide fit parameters, "
             "and peak ratio profiles as separate downloads.\n"
@@ -5770,13 +5761,13 @@ with tab_tutorial:
             "the CV curve is flat, the **1-standard-error rule** is applied: the "
             "simplest model whose CV RMSE lies within one standard error of the "
             "minimum is preferred. The CV vs. training RMSE curve and the selected "
-            "optimum are shown in the **📊 Calibration** tab.\n\n"
+            "optimum are shown in the **📊 PLS regression unmixing** tab.\n\n"
             "**Dual PLS (PLS2)** — when both a protein and a molecular crowder standard are uploaded, "
             "a single multi-output model is trained on the stacked dataset (protein "
             "spectra with crowder = 0, crowder spectra with protein = 0) and predicts both "
             "concentrations simultaneously.\n\n"
             "**Salt PLS** — a separate model trained on the fingerprint region "
-            "(default 900–1000 cm⁻¹) to quantify ion concentrations independently "
+            "(default 940–1020 cm⁻¹) to quantify ion concentrations independently "
             "of the protein signal."
         )
 
@@ -5787,7 +5778,7 @@ with tab_tutorial:
             "where **C** holds the concentration profiles and **Sᵀ** the pure-component "
             "spectra. The algorithm alternates between solving for **C** and **Sᵀ** with "
             "non-negativity constraints until convergence.\n\n"
-            "**Initialisation** — two options, selectable in the Files tab:\n"
+            "**Initialisation** — two options, selectable in the MCR-ALS unmixing tab:\n"
             "- *Reference CSV* — measured or literature reference spectra used as the "
             "initial **Sᵀ**. The reference spectra are preprocessed with the same pipeline "
             "as the linescans before being passed to MCR. Gives chemically interpretable "
@@ -5797,7 +5788,7 @@ with tab_tutorial:
             "file needed; components are labelled comp\\_1, comp\\_2, … and represent "
             "dominant spectral patterns, not known pure species.\n\n"
             "MCR-ALS parameters (max iterations, convergence tolerance, regression method) "
-            "are adjustable in the Files tab under Analysis settings."
+            "are adjustable in the **🔬 MCR-ALS unmixing** tab."
         )
 
         st.markdown(
@@ -5827,8 +5818,9 @@ with tab_tutorial:
     # ── Further analysis ─────────────────────────────────────────────────────
     with st.expander("Further analysis — details"):
         st.markdown(
-            "All three tools are in the **🔍 Further analysis** tab after running the "
-            "main analysis. They re-read the raw linescan data and apply their own "
+            "All three tools are in the **🔍 Further analysis** tab and are available "
+            "as soon as linescan files have been uploaded — PLS, MCR, and CLS do not need "
+            "to have been run first. They re-read the raw linescan data and apply their own "
             "independent preprocessing — the spectral range and preprocessing set in "
             "the Files tab have no effect here. "
             "A **dataset selector** lets you include or exclude individual linescans. "
