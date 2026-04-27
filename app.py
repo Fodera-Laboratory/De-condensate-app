@@ -2222,8 +2222,8 @@ with tab_calib:
         st.markdown("### Spectral reconstruction")
         st.caption(
             "Reconstructed spectrum = protein PLS contribution + crowder PLS contribution + "
-            "optimised water contribution.  "
-            "The water scaling factor shows how much of the mean MQ water spectrum is needed "
+            "optimised solvent contribution.  "
+            "The solvent scaling factor shows how much of the mean solvent spectrum is needed "
             "to best explain the residual at each linescan point."
         )
 
@@ -2239,48 +2239,97 @@ with tab_calib:
         if not _can_reconstruct:
             st.info("Re-run MCR Analysis to enable spectral reconstruction (requires PLS results).")
         else:
-            # ── Load and preprocess MQ water spectra ──────────────────────────
-            @st.cache_data(show_spinner=False)
-            def _load_water_mean(_wn_ref_key, _pls_settings_frozen):
-                import glob as _glob
-                _pls_s_dict = dict(_pls_settings_frozen)
-                _base = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    "training_data", "MQ spectra",
+            # ── Solvent reference selection ────────────────────────────────────
+            import glob as _glob
+
+            _builtin_dir  = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "training_data", "MQ spectra"
+            )
+            _builtin_files = sorted(_glob.glob(os.path.join(_builtin_dir, "*.txt")))
+            _builtin_names = [os.path.basename(f) for f in _builtin_files]
+
+            with st.expander("Solvent reference spectra", expanded=False):
+                st.caption(
+                    "Select built-in spectra and/or upload your own .txt files "
+                    "(WITec single-point ASCII export). All selected files are averaged."
                 )
-                _txt_files = sorted(_glob.glob(os.path.join(_base, "*.txt")))
-                if not _txt_files:
-                    return None, None
-                wn_ref_arr = np.array(_wn_ref_key)
+                _sel_builtin = st.multiselect(
+                    "Built-in solvent spectra (training_data/MQ spectra/)",
+                    options=_builtin_names,
+                    default=_builtin_names,
+                    key="solvent_builtin_sel",
+                )
+                _uploaded_solvent = st.file_uploader(
+                    "Upload additional solvent spectra (.txt)",
+                    type=["txt"],
+                    accept_multiple_files=True,
+                    key="solvent_upload",
+                )
+
+            # ── Load and preprocess solvent spectra ───────────────────────────
+            @st.cache_data(show_spinner=False)
+            def _load_solvent_mean(_wn_ref_key, _pls_settings_frozen,
+                                   _builtin_sel_tuple, _upload_bytes_tuple):
+                _pls_s_dict = dict(_pls_settings_frozen)
+                wn_ref_arr  = np.array(_wn_ref_key)
                 _all = []
-                for _tf in _txt_files:
+
+                def _read_witec_txt(path=None, raw_bytes=None):
+                    """Read a WITec single-point ASCII .txt and return (wn, X)."""
+                    _skiprows = 0
+                    lines = (raw_bytes.decode("latin1") if raw_bytes is not None
+                             else open(path, encoding="latin1").read()).splitlines()
+                    for _li, _line in enumerate(lines):
+                        if _line.strip() == "[Data]":
+                            _skiprows = _li + 3
+                            break
+                    import io as _io
+                    _src = _io.StringIO("\n".join(lines[_skiprows:]))
+                    _df  = pd.read_csv(_src, sep="\t", header=None)
+                    _ww  = _df.iloc[:, 0].astype(float).values
+                    _Xw  = _df.iloc[:, 1:].to_numpy().T
+                    if _Xw.ndim == 1:
+                        _Xw = _Xw[np.newaxis, :]
+                    return _ww, _Xw
+
+                # Built-in files
+                _builtin_dir_inner = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), "training_data", "MQ spectra"
+                )
+                for _name in _builtin_sel_tuple:
                     try:
-                        # Read WITec single-point ASCII export (no ScanStart/Stop keys)
-                        _skiprows = 0
-                        with open(_tf, "r", encoding="latin1") as _fh:
-                            for _li, _line in enumerate(_fh):
-                                if _line.strip() == "[Data]":
-                                    _skiprows = _li + 3  # skip [Data], col-names, units rows
-                                    break
-                        _df = pd.read_csv(_tf, sep="\t", skiprows=_skiprows, encoding="latin1", header=None)
-                        _ww = _df.iloc[:, 0].astype(float).values
-                        _Xw = _df.iloc[:, 1:].to_numpy().T  # (n_spectra, n_wn)
-                        if _Xw.ndim == 1:
-                            _Xw = _Xw[np.newaxis, :]
+                        _ww, _Xw = _read_witec_txt(
+                            path=os.path.join(_builtin_dir_inner, _name)
+                        )
                         _Xp, _wnp, _ = an.preprocess_matrix(_Xw, _ww, _pls_s_dict)
-                        # always interpolate onto wn_ref_arr so all arrays share the same axis
-                        _row_mean = _Xp.mean(axis=0)
-                        _all.append(np.interp(wn_ref_arr, _wnp, _row_mean))
+                        _all.append(np.interp(wn_ref_arr, _wnp, _Xp.mean(axis=0)))
                     except Exception:
                         pass
+
+                # Uploaded files
+                for _raw in _upload_bytes_tuple:
+                    try:
+                        _ww, _Xw = _read_witec_txt(raw_bytes=_raw)
+                        _Xp, _wnp, _ = an.preprocess_matrix(_Xw, _ww, _pls_s_dict)
+                        _all.append(np.interp(wn_ref_arr, _wnp, _Xp.mean(axis=0)))
+                    except Exception:
+                        pass
+
                 if not _all:
                     return None, None
                 return np.mean(_all, axis=0), wn_ref_arr
 
-            _saved_pls_s = _models.get("pls_settings", {})
-            _wn_ref_key  = tuple(_models.get("wn_ref", np.array([])).tolist())
+            _saved_pls_s  = _models.get("pls_settings", {})
+            _wn_ref_key   = tuple(_models.get("wn_ref", np.array([])).tolist())
             _pls_s_frozen = tuple(sorted(_saved_pls_s.items()))
-            _water_mean, _wn_water = _load_water_mean(_wn_ref_key, _pls_s_frozen)
+            _upload_bytes_tuple = tuple(
+                f.read() for f in (_uploaded_solvent or [])
+            )
+            _water_mean, _wn_water = _load_solvent_mean(
+                _wn_ref_key, _pls_s_frozen,
+                tuple(_sel_builtin),
+                _upload_bytes_tuple,
+            )
 
             # ── Loadings-based spectral reconstruction ────────────────────────
             # Recover latent scores T from predicted concentrations via Y-loadings
@@ -2370,14 +2419,14 @@ with tab_calib:
                     )
                     _fig_water.update_layout(
                         xaxis_title=_dist_label,
-                        yaxis_title="Water scaling factor",
+                        yaxis_title="Solvent scaling factor",
                         height=320,
                         margin=dict(t=30),
                     )
                     st.plotly_chart(_fig_water, use_container_width=True)
                     st.caption(
-                        "Water scaling factor along the linescan. "
-                        "A value of 1 means the residual matches one mean MQ water spectrum. "
+                        "Solvent scaling factor along the linescan. "
+                        "A value of 1 means the residual matches one mean solvent spectrum. "
                         "Dashed line: currently selected position."
                     )
                 else:
@@ -2385,7 +2434,7 @@ with tab_calib:
                         "Linescan position", 0, _n_spectra - 1, _n_spectra // 2,
                         key="recon_slider",
                     )
-                    st.info("MQ water spectra not found in training_data/MQ spectra/.")
+                    st.info("No solvent reference spectra selected. Choose files in the 'Solvent reference spectra' expander above.")
 
             with _col_spec:
                 _fig_rec = go.Figure()
@@ -2423,7 +2472,7 @@ with tab_calib:
                 if _c_water is not None and _water_on_pls is not None:
                     _fig_rec.add_trace(go.Scatter(
                         x=_wn_pls_rec, y=_c_water[_pos_idx] * _water_on_pls,
-                        mode="lines", name="Water contribution",
+                        mode="lines", name="Solvent contribution",
                         line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1, dash="dot"),
                     ))
                 _fig_rec.update_layout(
@@ -2441,7 +2490,7 @@ with tab_calib:
                     f"Reconstruction RMSE = {_rmse_rec:.4f}. "
                     f"Protein: {float(_c_prot[_pos_idx]):.3f} {_unit}"
                     + (f", crowder: {float(_c_crowd[_pos_idx]):.3f} wt%" if _c_crowd is not None else "")
-                    + (f", water factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
+                    + (f", solvent factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
                     + "."
                 )
 
