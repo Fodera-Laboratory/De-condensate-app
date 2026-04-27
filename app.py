@@ -2368,12 +2368,10 @@ with tab_calib:
             else:
                 _Y_hat_c = (_c_prot - _y_mean[0])[:, np.newaxis]
 
-            # Min-norm latent scores and spectral reconstruction (without x_mean).
-            # x_mean is NOT added here so that the water OLS absorbs the full
-            # background water signal and c_water remains physically positive.
+            # Min-norm latent scores and spectral reconstruction (with x_mean).
             _QQt     = _Q @ _Q.T
             _T_est   = _Y_hat_c @ np.linalg.solve(_QQt, _Q)   # (n_samples, n_comp)
-            _X_rec_v = _T_est @ _P.T                            # centered, no mean
+            _X_rec_v = _T_est @ _P.T + _x_mean_v               # (n_samples, n_valid)
             _X_known = np.zeros((len(_c_prot), _n_wn_pls))
             _X_known[:, _valid] = _X_rec_v
 
@@ -2463,6 +2461,11 @@ with tab_calib:
                     x=_wn_pls_rec, y=_X_rec[_pos_idx],
                     mode="lines", name="Reconstructed",
                     line=dict(color="black", width=1.5, dash="dash"),
+                ))
+                _fig_rec.add_trace(go.Scatter(
+                    x=_wn_pls_rec, y=_x_mean_full,
+                    mode="lines", name="Mean spectrum",
+                    line=dict(color="silver", width=1, dash="dot"),
                 ))
                 # Per-component contribution = reconstruction with only that output non-zero
                 _Y_prot_only = np.zeros_like(_Y_hat_c)
