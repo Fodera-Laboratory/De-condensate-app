@@ -5577,16 +5577,14 @@ with tab_tutorial:
             "Every analysis step is independent. Mix and match as needed:\n\n"
             "| Step | Required input | What you get |\n"
             "|---|---|---|\n"
-            "| **MCR-ALS only** | Linescans + reference CSV *or* PCA init | Spatial component profiles, recovered pure spectra |\n"
-            "| **PLS only** | Linescans + protein standard CSV | Quantitative protein (and optionally molecular crowder/salt) concentration profiles |\n"
-            "| **MCR + PLS** | All of the above | Both, with spatial co-localisation scatter |\n"
-            "| **CLS only** | Linescans + reference CSV with pure-component spectra | Non-negative concentration profiles, spectral reconstruction, R², RMSE, residuals |\n"
-            "| **Further analysis only** | Linescans (no standards needed) | PCA score plots, amide I deconvolution, peak ratio profiles |\n\n"
+            "| **PLS regression** | Linescans + protein standard CSV | Quantitative protein (and optionally molecular crowder/salt) concentration profiles |\n"
+            "| **MCR-ALS** | Linescans + reference CSV *or* PCA init | Spatial component profiles, recovered pure spectra |\n"
+            "| **CLS** | Linescans + pure-component reference CSV | Non-negative concentration profiles, spectral reconstruction, R², RMSE, residuals |\n"
+            "| **Further analysis** | Linescans only | PCA score plots, amide I deconvolution, peak ratio profiles |\n\n"
             "**Nothing is mandatory except the linescan file(s).** "
-            "**▶ Build PLS Model** is only needed if you want PLS concentration calibration. "
-            "PLS predictions run automatically on all linescans immediately after building the model. "
-            "MCR and CLS are fully independent of each other and of PLS — each can be run "
-            "without the others."
+            "Every method runs independently. If both PLS and MCR have been run, a "
+            "co-localisation scatter plot appears automatically in the PLS tab — but neither "
+            "method requires the other."
         )
 
     # ── Step-by-step guide ───────────────────────────────────────────────────
