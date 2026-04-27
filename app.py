@@ -277,7 +277,7 @@ def _std_picker(label, caption, key_prefix, subdir, optional=False):
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab-navigation callbacks (must be defined before any button that uses them)
 def _goto_pls():     st.session_state["active_tab"] = "📊  PLS regression"
-def _goto_mcr():     st.session_state["active_tab"] = "🔬  MCR decomposition"
+def _goto_mcr():     st.session_state["active_tab"] = "🔬  MCR-AR unmixing"
 def _goto_further(): st.session_state["active_tab"] = "🔍  Further analysis"
 
 
@@ -367,7 +367,6 @@ tab_tutorial, tab_files, tab_pls, tab_mcr, tab_cls, tab_further, tab_image, tab_
      "🔬  MCR-AR unmixing", "📐  Classical Least Squares (CLS) unmixing",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
-    default=st.session_state.get("active_tab", "📖  Tutorial"),
 )
 # Alias old tab variables so existing with-blocks render in the right new tabs
 tab_preview  = tab_files   # data preview appears at bottom of Files tab
