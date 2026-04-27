@@ -2609,63 +2609,40 @@ with tab_cls:
                 f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
                 expanded=True,
             ):
-                # ── Row 1: concentration profiles + fit quality ────────────
-                _fig_ov = make_subplots(
-                    rows=1, cols=2,
-                    subplot_titles=("Concentration profiles",
-                                    "Fit quality per spectrum"),
-                    horizontal_spacing=0.10,
-                )
-                for _k, _lbl in enumerate(_cls_labels):
-                    _fig_ov.add_trace(go.Scatter(
-                        x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
-                        line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
-                    ), row=1, col=1)
-                _fig_ov.add_trace(go.Scatter(
-                    x=_dist_cls, y=_cr["R2"], name="R²",
-                    line=dict(color="#1b85b8", width=1.5),
-                ), row=1, col=2)
-                _fig_ov.add_trace(go.Scatter(
-                    x=_dist_cls, y=_cr["RMSE"], name="RMSE",
-                    line=dict(color="#ae5a41", width=1.5, dash="dot"),
-                ), row=1, col=2)
-                _fig_ov.update_xaxes(title_text=_dist_lbl, row=1, col=1)
-                _fig_ov.update_xaxes(title_text=_dist_lbl, row=1, col=2)
-                _fig_ov.update_yaxes(title_text="Concentration (a.u.)", row=1, col=1)
-                _fig_ov.update_yaxes(title_text="Value", row=1, col=2)
-                _fig_ov.update_layout(height=320, margin=dict(t=40, b=10))
-                st.plotly_chart(_fig_ov, use_container_width=True)
+                # ── Spectral reconstruction (PLS-style layout) ─────────────
+                _col_sp, _col_prof = st.columns([3, 2])
 
-                # ── Row 2: per-spectrum reconstruction via slider ──────────
-                st.markdown("#### Spectral reconstruction")
-                _col_sl, _col_sp = st.columns([2, 3])
-
-                with _col_sl:
+                with _col_prof:
                     _pos_cls = st.slider(
                         "Linescan position",
                         0, _n_spec_cls - 1, _n_spec_cls // 2,
                         key=f"cls_slider_{_fi}",
                     )
-                    # Concentration bar at this position
-                    _fig_bar = go.Figure(go.Bar(
-                        x=_cls_labels,
-                        y=_cr["C"][_pos_cls],
-                        marker_color=[COLORS[_k % len(COLORS)]
-                                      for _k in range(len(_cls_labels))],
-                    ))
-                    _fig_bar.add_annotation(
-                        text=f"R² = {_cr['R2'][_pos_cls]:.4f}   "
-                             f"RMSE = {_cr['RMSE'][_pos_cls]:.4e}",
-                        xref="paper", yref="paper", x=0.5, y=1.08,
-                        showarrow=False, font=dict(size=11),
+                    _fig_prof = go.Figure()
+                    for _k, _lbl in enumerate(_cls_labels):
+                        _fig_prof.add_trace(go.Scatter(
+                            x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
+                            mode="lines",
+                            line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
+                        ))
+                    _fig_prof.add_vline(
+                        x=float(_dist_cls[_pos_cls]),
+                        line_dash="dash", line_color="black",
+                        annotation_text=f"{_dist_cls[_pos_cls]:.1f} µm",
+                        annotation_position="top right",
                     )
-                    _fig_bar.update_layout(
-                        xaxis_title="Component",
+                    _fig_prof.update_layout(
+                        xaxis_title=_dist_lbl,
                         yaxis_title="Concentration (a.u.)",
-                        height=280, margin=dict(t=40, b=10),
-                        showlegend=False,
+                        height=320,
+                        legend=dict(orientation="h", y=-0.22),
+                        margin=dict(t=30),
                     )
-                    st.plotly_chart(_fig_bar, use_container_width=True)
+                    st.plotly_chart(_fig_prof, use_container_width=True)
+                    st.caption(
+                        f"R² = {_cr['R2'][_pos_cls]:.4f}   "
+                        f"RMSE = {_cr['RMSE'][_pos_cls]:.4e}"
+                    )
 
                 with _col_sp:
                     _X_rec_cls = _cr["C"] @ _cr["ST"]
