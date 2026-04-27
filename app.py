@@ -5639,10 +5639,10 @@ with tab_tutorial:
             "regression method for C and Sᵀ (OLS or NNLS).\n"
             "- **PLS cross-validation** *(advanced)* — number of folds and max latent variables.\n\n"
 
-            "#### 5 · Build PLS model  `📂 Files tab → ▶ Build PLS Model`  *(optional)*\n"
+            "#### 5 · Build PLS model  `📊 PLS regression unmixing tab → ▶ Build PLS Model`  *(optional)*\n"
             "Trains PLS model(s) on the uploaded standard spectra. "
             "Once built, PLS predictions run automatically on all linescan files — results appear "
-            "immediately in the **📊 PLS regression unmixing** tab. "
+            "immediately below in the same tab. "
             "A single model can cover protein only, protein + molecular crowder (dual PLS2), "
             "or protein + crowder + a second protein (triple PLS2). "
             "An optional salt PLS model runs on a separate fingerprint window. "
