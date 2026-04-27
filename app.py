@@ -2527,7 +2527,7 @@ with tab_cls:
         "Decompose each spectrum into contributions from known pure-component "
         "references via non-negative least squares (NNLS). "
         "No iterative fitting — concentrations are derived directly from the data. "
-        "Run the main analysis first (MCR-AR tab) to provide preprocessed linescan data."
+        "Linescan files are loaded and preprocessed independently."
     )
 
     # ── Configuration ─────────────────────────────────────────────────────────
@@ -2553,34 +2553,38 @@ with tab_cls:
 
     _cls_btn = st.button(
         "▶ Run CLS", key="run_cls_btn",
-        disabled=(_cls_ref_src is None),
-        help="Load a reference CSV first.",
+        disabled=(_cls_ref_src is None or not linescan_files),
+        help="Upload linescan files and load a reference CSV first.",
     )
     if _cls_btn:
-        _results_for_cls = st.session_state.get("results", {})
         _s_cls = st.session_state.get("settings", {})
-        if not _results_for_cls:
-            st.warning("Run the main analysis first (▶ Run MCR Analysis) to generate "
-                       "preprocessed linescan data.")
-        else:
-            try:
-                _df_r   = _read_csv_src(_cls_ref_src)
-                _all_r  = _df_r.iloc[:, 0].tolist()
-                _sel_r  = _cls_comp_ids if _cls_comp_ids else _all_r
-                _rmask  = [j for j, cid in enumerate(_all_r) if cid in _sel_r]
-                _lbls   = [str(_all_r[j]) for j in _rmask]
-                _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
-                _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
-                _cls_out = {}
-                for _fn, _r in _results_for_cls.items():
-                    _cls_out[_fn] = an.run_cls(
-                        _r["X_proc"], _r["wn_proc"], _ST_raw, _wn_csv, _s_cls,
-                    )
-                st.session_state["cls_results"] = _cls_out
-                st.session_state["cls_labels"]  = _lbls
-                st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
-            except Exception as _ce:
-                st.error(f"CLS failed: {_ce}")
+        try:
+            _df_r   = _read_csv_src(_cls_ref_src)
+            _all_r  = _df_r.iloc[:, 0].tolist()
+            _sel_r  = _cls_comp_ids if _cls_comp_ids else _all_r
+            _rmask  = [j for j, cid in enumerate(_all_r) if cid in _sel_r]
+            _lbls   = [str(_all_r[j]) for j in _rmask]
+            _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
+            _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
+            _cls_out = {}
+            for _f_cls in linescan_files:
+                _wn_c_raw, _X_c_raw, _pos_c = an.load_linescan_bytes(_f_cls.read(), _f_cls.name)
+                _f_cls.seek(0)
+                _sm_c = an.detect_scan_mode(_pos_c)
+                _X_c_proc, _wn_c_proc, _ = an.preprocess_matrix(_X_c_raw, _wn_c_raw, _s_cls)
+                _dist_c = an.compute_cumulative_distance(_pos_c, _sm_c)
+                _cls_out[_f_cls.name] = dict(
+                    **an.run_cls(_X_c_proc, _wn_c_proc, _ST_raw, _wn_csv, _s_cls),
+                    distance=_dist_c,
+                    X_proc=_X_c_proc,
+                    wn_proc=_wn_c_proc,
+                    scan_mode=_sm_c,
+                )
+            st.session_state["cls_results"] = _cls_out
+            st.session_state["cls_labels"]  = _lbls
+            st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
+        except Exception as _ce:
+            st.error(f"CLS failed: {_ce}")
 
     # ── Results ───────────────────────────────────────────────────────────────
     st.divider()
@@ -2591,13 +2595,10 @@ with tab_cls:
     if not _cls_results:
         st.info("Load a reference CSV, then click ▶ Run CLS to see results here.")
     else:
-        _r_all_cls = st.session_state.get("results", {})
-        _sm_cls    = st.session_state.get("scan_mode", "xy")
-
         for _fi, (_fn, _cr) in enumerate(_cls_results.items()):
-            _r_base      = _r_all_cls.get(_fn, {})
-            _dist_cls    = _r_base.get("distance", np.arange(_cr["C"].shape[0]))
-            _wn_c        = _r_base.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
+            _dist_cls    = _cr.get("distance", np.arange(_cr["C"].shape[0]))
+            _wn_c        = _cr.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
+            _sm_cls      = _cr.get("scan_mode", "xy")
             _n_spec_cls  = _cr["C"].shape[0]
             _mR2         = float(_cr["R2"].mean())
             _mRMSE       = float(_cr["RMSE"].mean())
@@ -2669,7 +2670,7 @@ with tab_cls:
                     _X_rec_cls = _cr["C"] @ _cr["ST"]
                     _fig_sp = go.Figure()
                     _fig_sp.add_trace(go.Scatter(
-                        x=_wn_c, y=_r_base["X_proc"][_pos_cls] if "X_proc" in _r_base else _cr["C"][_pos_cls] @ _cr["ST"],
+                        x=_wn_c, y=_cr["X_proc"][_pos_cls] if "X_proc" in _cr else _cr["C"][_pos_cls] @ _cr["ST"],
                         mode="lines", name="Measured",
                         line=dict(color=COLORS[0], width=1.8),
                     ))
