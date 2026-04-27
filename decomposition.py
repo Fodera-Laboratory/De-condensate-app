@@ -434,12 +434,17 @@ def run_mcr(
     n_iter : int                                    iterations to convergence
     """
     st_constraints = [ConstraintNonneg()]
+    # tol_n_increase / tol_n_above_min to use (overridden when rows are fixed)
+    _tol_n_increase  = 10
+    _tol_n_above_min = 10
     if fixed_st_idx:
         st_constraints.append(ConstraintFixedRows(fixed_st_idx, fixed_st_vals))
-        # Fixed rows prevent the residual from decreasing monotonically, so
-        # pymcr's divergence guard (tol_increase) would stop after 1 iteration.
-        # Disable it here; max_iter is the only stopping criterion when pinning.
-        tol_increase = 1e10
+        # Fixed rows cause the residual to bounce rather than decrease
+        # monotonically, so all three tolerance-based stopping criteria fire
+        # prematurely.  Set them all to None so only max_iter controls stopping.
+        tol_increase     = None
+        _tol_n_increase  = None
+        _tol_n_above_min = None
 
     mcr = McrAR(
         max_iter=max_iter,
@@ -448,6 +453,8 @@ def run_mcr(
         c_constraints=[ConstraintNonneg(), ConstraintNorm()],
         st_constraints=st_constraints,
         tol_increase=tol_increase,
+        tol_n_increase=_tol_n_increase,
+        tol_n_above_min=_tol_n_above_min,
     )
     mcr.fit(X_data, ST=ST_init[:n_components])
     return mcr.C_, mcr.ST_, mcr.n_iter

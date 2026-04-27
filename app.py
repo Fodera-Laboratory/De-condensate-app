@@ -1041,11 +1041,11 @@ if run_btn:
                             _comp_raw_run, _wn_msg_run = _align_refs_to_wn(
                                 _comp_raw_run, _wn_csv_run, _wn_for_refs
                             )
-                            if _wn_msg_run:
-                                st.session_state["models"]["mcr_wn_msg"] = _wn_msg_run
                             _st_init, _, _ = an.preprocess_matrix(_comp_raw_run, _wn_for_refs, s)
                             if "models" not in st.session_state:
                                 st.session_state["models"] = {}
+                            if _wn_msg_run:
+                                st.session_state["models"]["mcr_wn_msg"] = _wn_msg_run
                             st.session_state["models"]["ST_init"] = _st_init
                             st.session_state["models"]["comp_labels"] = _labels_run
                         except Exception as _re:
