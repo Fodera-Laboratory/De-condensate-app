@@ -981,6 +981,16 @@ if run_btn:
             c_regr=mcr_c_regr,
             st_regr=mcr_st_regr,
         ))
+        # Always recompute fixed-spectrum constraint from current multiselect selection
+        _run_fixed_ids   = st.session_state.get("mcr_fixed_ids", [])
+        _run_comp_labels = (models.get("comp_labels") or [])
+        _run_ST_init     = models.get("ST_init")
+        _run_fixed_idx   = [_run_comp_labels.index(n) for n in _run_fixed_ids if n in _run_comp_labels]
+        _run_fixed_vals  = (_run_ST_init[_run_fixed_idx] if _run_fixed_idx and _run_ST_init is not None
+                            else None)
+        mcr_params = dict(mcr_params,
+                          fixed_st_idx=_run_fixed_idx or None,
+                          fixed_st_vals=_run_fixed_vals)
         # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
         _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)
         results       = {}
