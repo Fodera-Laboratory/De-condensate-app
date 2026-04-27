@@ -433,15 +433,27 @@ def run_mcr(
     ST_mcr : ndarray  (n_components × n_wn)        recovered pure spectra
     n_iter : int                                    iterations to convergence
     """
+    # ── CLS mode: all components are fixed → direct NNLS unmixing ────────────
+    # When every spectral component is pinned, MCR-ALS is degenerate: it can
+    # drive the fixed component's concentration to zero and let the free
+    # components absorb its variance.  If all n_components rows are fixed,
+    # bypass ALS entirely and solve one NNLS problem per spectrum instead.
+    if fixed_st_idx and len(fixed_st_idx) >= n_components:
+        from scipy.optimize import nnls as _nnls
+        ST_fixed = fixed_st_vals[:n_components]          # (n_comp, n_wn)
+        C_cls = np.zeros((X_data.shape[0], n_components))
+        for i in range(X_data.shape[0]):
+            C_cls[i], _ = _nnls(ST_fixed.T, X_data[i])
+        return C_cls, ST_fixed, 0                        # 0 ALS iterations
+
+    # ── Partial-fix MCR mode ──────────────────────────────────────────────────
     st_constraints = [ConstraintNonneg()]
-    # tol_n_increase / tol_n_above_min to use (overridden when rows are fixed)
     _tol_n_increase  = 10
     _tol_n_above_min = 10
     if fixed_st_idx:
         st_constraints.append(ConstraintFixedRows(fixed_st_idx, fixed_st_vals))
-        # Fixed rows cause the residual to bounce rather than decrease
-        # monotonically, so all three tolerance-based stopping criteria fire
-        # prematurely.  Set them all to None so only max_iter controls stopping.
+        # Fixed rows cause the residual to bounce; disable all tolerance-based
+        # stopping so only max_iter controls when the loop ends.
         tol_increase     = None
         _tol_n_increase  = None
         _tol_n_above_min = None
