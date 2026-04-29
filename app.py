@@ -2664,8 +2664,9 @@ with tab_cls:
                     wn_proc=_wn_c_proc,
                     scan_mode=_sm_c,
                 )
-            st.session_state["cls_results"] = _cls_out
-            st.session_state["cls_labels"]  = _lbls
+            st.session_state["cls_results"]        = _cls_out
+            st.session_state["cls_labels"]         = _lbls
+            st.session_state["cls_settings_stored"] = _s_cls
             st.success(f"CLS complete — {len(_cls_out)} file(s) processed.")
         except Exception as _ce:
             st.error(f"CLS failed: {_ce}")
@@ -2876,13 +2877,9 @@ with tab_cls:
         _wc_ready = (
             _wc_w_lbl != "— none —" and _wc_p_lbl != "— none —"
             and _wc_w_lbl in _cls_labels and _wc_p_lbl in _cls_labels
-            and _pls_p_wc is not None
         )
         if not _wc_ready:
-            st.info(
-                "Select water and protein CLS components above, and ensure a PLS model "
-                "has been built, to calibrate response factors."
-            )
+            st.info("Select water and protein CLS components above to calibrate response factors.")
         else:
             _wi_wc   = _cls_labels.index(_wc_w_lbl)
             _pi_wc   = _cls_labels.index(_wc_p_lbl)
@@ -2892,183 +2889,205 @@ with tab_cls:
                 else None
             )
 
-            # Interpolate CLS reference spectra onto PLS wavenumber grid
             _first_cr_wc = next(iter(_cls_results.values()))
-            _ST_wc     = _first_cr_wc["ST"]        # (n_comp, n_wn_cls)
-            _wn_cls_wc = _first_cr_wc["wn_proc"]   # CLS wn grid
-            _wn_pls_wc = _pls_p_wc["wn"]           # PLS training wn grid
-            _sort_cls  = np.argsort(_wn_cls_wc)
-            _ST_on_pls = np.array([
-                np.interp(_wn_pls_wc,
-                          _wn_cls_wc[_sort_cls],
-                          _ST_wc[k][_sort_cls])
-                for k in range(_ST_wc.shape[0])
-            ])  # (n_comp, n_wn_pls)
+            _ST_wc     = _first_cr_wc["ST"]       # (n_comp, n_wn_cls)
+            _wn_cls_wc = _first_cr_wc["wn_proc"]  # CLS wn grid
 
-            # Select training spectra and concentrations
-            _dual_wc   = _pls_p_wc.get("dual",   False)
-            _triple_wc = _pls_p_wc.get("triple", False)
-            if _triple_wc or _dual_wc:
-                _X_prot_cal = _pls_p_wc["X_prot_proc"]
-                _y_prot_cal = _pls_p_wc["y_prot_raw"]
-                _X_peg_cal  = _pls_p_wc.get("X_peg_proc")
-                _y_peg_cal  = _pls_p_wc.get("y_peg_raw")
+            _cls_s_wc  = st.session_state.get("cls_settings_stored")
+            _wn_ref_wc = st.session_state.get("models", {}).get("wn_ref")
+
+            st.markdown("#### Calibration standards")
+            st.caption(
+                "Upload the same CSV files used for PLS training "
+                "(column 1 = concentration; remaining columns = spectral intensities). "
+                "Spectra are re-preprocessed with the CLS settings so they match the reference set."
+            )
+            _up_col_p, _up_col_peg = st.columns(2)
+            _cal_prot_src = _up_col_p.file_uploader(
+                "Protein standards CSV (mg/mL)", type="csv", key="wc_cal_prot_csv",
+            )
+            _cal_peg_src = _up_col_peg.file_uploader(
+                "Crowder standards CSV (wt%)" if _peg_i_wc is not None
+                else "Crowder standards CSV (optional, wt%)",
+                type="csv", key="wc_cal_peg_csv",
+            )
+
+            if _cal_prot_src is None:
+                st.info("Upload a protein standards CSV to calibrate response factors.")
+            elif _cls_s_wc is None or _wn_ref_wc is None:
+                st.warning("CLS settings not found — re-run CLS unmixing first.")
             else:
-                _X_prot_cal = _pls_p_wc["X_train_proc"]
-                _y_prot_cal = _pls_p_wc["y_raw"]
-                _X_peg_cal  = None
-                _y_peg_cal  = None
+                from scipy.optimize import nnls as _nnls_fn
+                from scipy.stats import linregress as _linreg_fn
 
-            # Run NNLS on protein calibration spectra using the CLS references
-            from scipy.optimize import nnls as _nnls_fn
-            _C_prot_cal = np.zeros((_X_prot_cal.shape[0], len(_cls_labels)))
-            for _si in range(_X_prot_cal.shape[0]):
-                _C_prot_cal[_si], _ = _nnls_fn(_ST_on_pls.T, _X_prot_cal[_si])
+                # Parse and preprocess protein calibration spectra with CLS settings
+                _df_p_cal   = _read_csv_src(_cal_prot_src)
+                _y_prot_cal = _df_p_cal.iloc[:, 0].to_numpy(dtype=float)
+                _X_p_raw    = _df_p_cal.iloc[:, 1:].to_numpy()
+                _X_p_proc, _wn_p_cal, _ = an.preprocess_matrix(_X_p_raw, _wn_ref_wc, _cls_s_wc)
+                _sort_p = np.argsort(_wn_p_cal)
+                _X_p_on_cls = np.array([
+                    np.interp(_wn_cls_wc, _wn_p_cal[_sort_p], _X_p_proc[i][_sort_p])
+                    for i in range(_X_p_proc.shape[0])
+                ])
+                _C_prot_cal = np.zeros((_X_p_on_cls.shape[0], len(_cls_labels)))
+                for _si in range(_X_p_on_cls.shape[0]):
+                    _C_prot_cal[_si], _ = _nnls_fn(_ST_wc.T, _X_p_on_cls[_si])
 
-            # Mass fractions: protein standards assumed to be protein + water only
-            _prot_frac_cal  = np.clip(_y_prot_cal, 0, None) / (_wc_rho * 1000)
-            _water_frac_cal = np.clip(1.0 - _prot_frac_cal, 0.0, 1.0)
+                _prot_frac_cal  = np.clip(_y_prot_cal, 0, None) / (_wc_rho * 1000)
+                _water_frac_cal = np.clip(1.0 - _prot_frac_cal, 0.0, 1.0)
+                _Sw_cal   = _C_prot_cal[:, _wi_wc]
+                _Sp_cal   = _C_prot_cal[:, _pi_wc]
+                _mask_cal = (_Sp_cal > 1e-10) & (_Sw_cal > 1e-10) & (_prot_frac_cal > 1e-8)
 
-            # Sw/Sp and mw/mp per calibration sample
-            _Sw_cal   = _C_prot_cal[:, _wi_wc]
-            _Sp_cal   = _C_prot_cal[:, _pi_wc]
-            _mask_cal = (_Sp_cal > 1e-10) & (_Sw_cal > 1e-10) & (_prot_frac_cal > 1e-8)
+                _R_protein_wc = None
+                _lr_p_wc      = None
+                _mwmp_cal     = None
+                _swsp_cal     = None
+                if _mask_cal.sum() >= 2:
+                    _mwmp_cal = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
+                    _swsp_cal = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
+                    _lr_p_wc  = _linreg_fn(_mwmp_cal, _swsp_cal)
+                    _R_protein_wc = _lr_p_wc.slope
 
-            from scipy.stats import linregress as _linreg_fn
-            _R_protein_wc = None
-            _lr_p_wc      = None
-            if _mask_cal.sum() >= 2:
-                _mwmp_cal = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
-                _swsp_cal = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
-                _lr_p_wc  = _linreg_fn(_mwmp_cal, _swsp_cal)
-                _R_protein_wc = _lr_p_wc.slope  # Sw/Sp = R_protein × mw/mp
+                # PEG calibration (optional)
+                _R_peg_wc   = None
+                _lr_peg_wc  = None
+                _swspeg_cal = None
+                _mwmpeg_cal = None
+                _mask_peg   = None
+                if _peg_i_wc is not None and _cal_peg_src is not None:
+                    _df_peg_cal  = _read_csv_src(_cal_peg_src)
+                    _y_peg_cal   = _df_peg_cal.iloc[:, 0].to_numpy(dtype=float)
+                    _X_peg_raw   = _df_peg_cal.iloc[:, 1:].to_numpy()
+                    _X_peg_proc_c, _wn_peg_cal, _ = an.preprocess_matrix(
+                        _X_peg_raw, _wn_ref_wc, _cls_s_wc
+                    )
+                    _sort_peg = np.argsort(_wn_peg_cal)
+                    _X_peg_on_cls = np.array([
+                        np.interp(_wn_cls_wc, _wn_peg_cal[_sort_peg], _X_peg_proc_c[i][_sort_peg])
+                        for i in range(_X_peg_proc_c.shape[0])
+                    ])
+                    _C_peg_cal = np.zeros((_X_peg_on_cls.shape[0], len(_cls_labels)))
+                    for _si in range(_X_peg_on_cls.shape[0]):
+                        _C_peg_cal[_si], _ = _nnls_fn(_ST_wc.T, _X_peg_on_cls[_si])
+                    _peg_frac_cal       = np.clip(_y_peg_cal, 0, None) / 100
+                    _water_frac_peg_cal = np.clip(1.0 - _peg_frac_cal, 0.0, 1.0)
+                    _Sw_peg_cal = _C_peg_cal[:, _wi_wc]
+                    _Speg_cal   = _C_peg_cal[:, _peg_i_wc]
+                    _mask_peg   = (_Speg_cal > 1e-10) & (_Sw_peg_cal > 1e-10) & (_peg_frac_cal > 1e-8)
+                    if _mask_peg.sum() >= 2:
+                        _mwmpeg_cal = _water_frac_peg_cal[_mask_peg] / _peg_frac_cal[_mask_peg]
+                        _swspeg_cal = _Sw_peg_cal[_mask_peg] / _Speg_cal[_mask_peg]
+                        _lr_peg_wc  = _linreg_fn(_mwmpeg_cal, _swspeg_cal)
+                        _R_peg_wc   = _lr_peg_wc.slope
 
-            # PEG calibration (optional)
-            _R_peg_wc    = None
-            _lr_peg_wc   = None
-            _swspeg_cal  = None
-            _mwmpeg_cal  = None
-            _mask_peg    = None
-            if _peg_i_wc is not None and _X_peg_cal is not None and _y_peg_cal is not None:
-                _C_peg_cal = np.zeros((_X_peg_cal.shape[0], len(_cls_labels)))
-                for _si in range(_X_peg_cal.shape[0]):
-                    _C_peg_cal[_si], _ = _nnls_fn(_ST_on_pls.T, _X_peg_cal[_si])
-                _peg_frac_cal      = np.clip(_y_peg_cal, 0, None) / 100
-                _water_frac_peg_cal = np.clip(1.0 - _peg_frac_cal, 0.0, 1.0)
-                _Sw_peg_cal = _C_peg_cal[:, _wi_wc]
-                _Speg_cal   = _C_peg_cal[:, _peg_i_wc]
-                _mask_peg   = (_Speg_cal > 1e-10) & (_Sw_peg_cal > 1e-10) & (_peg_frac_cal > 1e-8)
-                if _mask_peg.sum() >= 2:
-                    _mwmpeg_cal = _water_frac_peg_cal[_mask_peg] / _peg_frac_cal[_mask_peg]
-                    _swspeg_cal = _Sw_peg_cal[_mask_peg] / _Speg_cal[_mask_peg]
-                    _lr_peg_wc  = _linreg_fn(_mwmpeg_cal, _swspeg_cal)
-                    _R_peg_wc   = _lr_peg_wc.slope
-
-            if _R_protein_wc is None:
-                st.warning(
-                    "Could not calibrate R_protein — check that the CLS and PLS "
-                    "wavenumber ranges overlap and training spectra are available."
-                )
-            else:
-                # ── Calibration plot ─────────────────────────────────────────
-                _wc_cal_col, _wc_met_col = st.columns([3, 1])
-                with _wc_cal_col:
-                    _fig_wc_cal = go.Figure()
-                    _x_fit_p = np.linspace(0, _mwmp_cal.max() * 1.05, 60)
-                    _fig_wc_cal.add_trace(go.Scatter(
-                        x=_mwmp_cal, y=_swsp_cal, mode="markers",
-                        marker=dict(color=COLORS[0], size=7),
-                        name=f"Protein (n={int(_mask_cal.sum())})",
-                    ))
-                    _fig_wc_cal.add_trace(go.Scatter(
-                        x=_x_fit_p,
-                        y=_lr_p_wc.slope * _x_fit_p + _lr_p_wc.intercept,
-                        mode="lines",
-                        line=dict(color=COLORS[0], dash="dash", width=1),
-                        name=f"Fit R²={_lr_p_wc.rvalue**2:.3f}",
-                    ))
-                    if _R_peg_wc is not None:
-                        _x_fit_peg = np.linspace(0, _mwmpeg_cal.max() * 1.05, 60)
+                if _R_protein_wc is None:
+                    st.warning(
+                        f"Could not calibrate R_protein — only {_mask_cal.sum()} usable "
+                        "calibration sample(s). Check that the CSV is formatted correctly "
+                        "(concentration in column 1, intensities in remaining columns)."
+                    )
+                else:
+                    # ── Calibration plot ─────────────────────────────────────
+                    _wc_cal_col, _wc_met_col = st.columns([3, 1])
+                    with _wc_cal_col:
+                        _fig_wc_cal = go.Figure()
+                        _x_fit_p = np.linspace(0, _mwmp_cal.max() * 1.05, 60)
                         _fig_wc_cal.add_trace(go.Scatter(
-                            x=_mwmpeg_cal, y=_swspeg_cal, mode="markers",
-                            marker=dict(color=COLORS[2], size=7, symbol="diamond"),
-                            name=f"Crowder (n={int(_mask_peg.sum())})",
+                            x=_mwmp_cal, y=_swsp_cal, mode="markers",
+                            marker=dict(color=COLORS[0], size=7),
+                            name=f"Protein (n={int(_mask_cal.sum())})",
                         ))
                         _fig_wc_cal.add_trace(go.Scatter(
-                            x=_x_fit_peg,
-                            y=_lr_peg_wc.slope * _x_fit_peg + _lr_peg_wc.intercept,
+                            x=_x_fit_p,
+                            y=_lr_p_wc.slope * _x_fit_p + _lr_p_wc.intercept,
                             mode="lines",
-                            line=dict(color=COLORS[2], dash="dash", width=1),
-                            name=f"Crowder fit R²={_lr_peg_wc.rvalue**2:.3f}",
+                            line=dict(color=COLORS[0], dash="dash", width=1),
+                            name=f"Fit R²={_lr_p_wc.rvalue**2:.3f}",
                         ))
-                    _fig_wc_cal.update_layout(
-                        xaxis_title="m_water / m_solute",
-                        yaxis_title="S_water / S_solute",
-                        height=320,
-                        title="Response factor calibration",
-                        legend=dict(orientation="h", y=-0.28),
-                        margin=dict(t=40, b=10),
-                    )
-                    st.plotly_chart(_fig_wc_cal, use_container_width=True)
-
-                with _wc_met_col:
-                    st.metric("R_protein", f"{_R_protein_wc:.4f}",
-                              help="Slope of S_w/S_p vs m_w/m_p (Zhang et al. 2019, eq. 2).")
-                    if _R_peg_wc is not None:
-                        st.metric("R_crowder", f"{_R_peg_wc:.4f}",
-                                  help="Slope of S_w/S_crowder vs m_w/m_crowder.")
-                    st.caption(
-                        "Response factors determined by re-applying the CLS reference set "
-                        "to your PLS training spectra at known concentrations."
-                    )
-
-                # ── Mass fraction profiles ─────────────────────────────────
-                st.markdown("#### Mass fraction profiles")
-                for _fi_wc, (_fn_wc, _cr_wc) in enumerate(_cls_results.items()):
-                    st.markdown(f"**{_fn_wc}**")
-                    _Sw_ls   = _cr_wc["C"][:, _wi_wc]
-                    _Sp_ls   = _cr_wc["C"][:, _pi_wc]
-                    _dist_wc = _cr_wc.get("distance", np.arange(_cr_wc["C"].shape[0]))
-                    _sm_wc   = _cr_wc.get("scan_mode", "xy")
-                    _dlbl_wc = "Depth (µm)" if _sm_wc == "z" else "Distance (µm)"
-
-                    # P_water = S_w / (S_w + S_p × R_p + S_peg × R_peg)
-                    _denom_wc = _Sw_ls + _Sp_ls * _R_protein_wc
-                    _Speg_ls_wc = None
-                    if _peg_i_wc is not None and _R_peg_wc is not None:
-                        _Speg_ls_wc = _cr_wc["C"][:, _peg_i_wc]
-                        _denom_wc  += _Speg_ls_wc * _R_peg_wc
-                    _denom_wc   = np.maximum(_denom_wc, 1e-10)
-
-                    _P_water_ls = np.clip(_Sw_ls / _denom_wc, 0, 1)
-                    _P_prot_ls  = np.clip(_Sp_ls * _R_protein_wc / _denom_wc, 0, 1)
-
-                    _fig_wc_mf = go.Figure()
-                    _fig_wc_mf.add_trace(go.Scatter(
-                        x=_dist_wc, y=_P_water_ls * 100, name="Water",
-                        mode="lines", line=dict(color=COLORS[0], width=1.5),
-                    ))
-                    _fig_wc_mf.add_trace(go.Scatter(
-                        x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
-                        mode="lines", line=dict(color=COLORS[1], width=1.5, dash="dot"),
-                    ))
-                    if _Speg_ls_wc is not None and _R_peg_wc is not None:
-                        _P_peg_ls = np.clip(
-                            _Speg_ls_wc * _R_peg_wc / _denom_wc, 0, 1
+                        if _R_peg_wc is not None:
+                            _x_fit_peg = np.linspace(0, _mwmpeg_cal.max() * 1.05, 60)
+                            _fig_wc_cal.add_trace(go.Scatter(
+                                x=_mwmpeg_cal, y=_swspeg_cal, mode="markers",
+                                marker=dict(color=COLORS[2], size=7, symbol="diamond"),
+                                name=f"Crowder (n={int(_mask_peg.sum())})",
+                            ))
+                            _fig_wc_cal.add_trace(go.Scatter(
+                                x=_x_fit_peg,
+                                y=_lr_peg_wc.slope * _x_fit_peg + _lr_peg_wc.intercept,
+                                mode="lines",
+                                line=dict(color=COLORS[2], dash="dash", width=1),
+                                name=f"Crowder fit R²={_lr_peg_wc.rvalue**2:.3f}",
+                            ))
+                        _fig_wc_cal.update_layout(
+                            xaxis_title="m_water / m_solute",
+                            yaxis_title="S_water / S_solute",
+                            height=320,
+                            title="Response factor calibration",
+                            legend=dict(orientation="h", y=-0.28),
+                            margin=dict(t=40, b=10),
                         )
+                        st.plotly_chart(_fig_wc_cal, use_container_width=True)
+
+                    with _wc_met_col:
+                        st.metric("R_protein", f"{_R_protein_wc:.4f}",
+                                  help="Slope of S_w/S_p vs m_w/m_p (Zhang et al. 2019, eq. 2).")
+                        if _R_peg_wc is not None:
+                            st.metric("R_crowder", f"{_R_peg_wc:.4f}",
+                                      help="Slope of S_w/S_crowder vs m_w/m_crowder.")
+                        st.caption(
+                            "Response factors calibrated by re-preprocessing your training "
+                            "spectra with CLS settings and unmixing against the CLS reference set."
+                        )
+
+                    # ── Mass fraction profiles ─────────────────────────────
+                    st.markdown("#### Mass fraction profiles")
+                    for _fi_wc, (_fn_wc, _cr_wc) in enumerate(_cls_results.items()):
+                        st.markdown(f"**{_fn_wc}**")
+                        _Sw_ls   = _cr_wc["C"][:, _wi_wc]
+                        _Sp_ls   = _cr_wc["C"][:, _pi_wc]
+                        _dist_wc = _cr_wc.get("distance", np.arange(_cr_wc["C"].shape[0]))
+                        _sm_wc   = _cr_wc.get("scan_mode", "xy")
+                        _dlbl_wc = "Depth (µm)" if _sm_wc == "z" else "Distance (µm)"
+
+                        # P_water = S_w / (S_w + S_p × R_p + S_peg × R_peg)
+                        _denom_wc = _Sw_ls + _Sp_ls * _R_protein_wc
+                        _Speg_ls_wc = None
+                        if _peg_i_wc is not None and _R_peg_wc is not None:
+                            _Speg_ls_wc = _cr_wc["C"][:, _peg_i_wc]
+                            _denom_wc  += _Speg_ls_wc * _R_peg_wc
+                        _denom_wc   = np.maximum(_denom_wc, 1e-10)
+
+                        _P_water_ls = np.clip(_Sw_ls / _denom_wc, 0, 1)
+                        _P_prot_ls  = np.clip(_Sp_ls * _R_protein_wc / _denom_wc, 0, 1)
+
+                        _fig_wc_mf = go.Figure()
                         _fig_wc_mf.add_trace(go.Scatter(
-                            x=_dist_wc, y=_P_peg_ls * 100, name="Crowder",
-                            mode="lines", line=dict(color=COLORS[2], width=1.5, dash="dot"),
+                            x=_dist_wc, y=_P_water_ls * 100, name="Water",
+                            mode="lines", line=dict(color=COLORS[0], width=1.5),
                         ))
-                    _fig_wc_mf.update_layout(
-                        xaxis_title=_dlbl_wc,
-                        yaxis_title="Mass fraction (wt%)",
-                        height=300,
-                        legend=dict(orientation="h", y=-0.25),
-                        yaxis=dict(range=[0, 100]),
-                        margin=dict(t=10),
-                    )
-                    st.plotly_chart(_fig_wc_mf, use_container_width=True)
+                        _fig_wc_mf.add_trace(go.Scatter(
+                            x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
+                            mode="lines", line=dict(color=COLORS[1], width=1.5, dash="dot"),
+                        ))
+                        if _Speg_ls_wc is not None and _R_peg_wc is not None:
+                            _P_peg_ls = np.clip(
+                                _Speg_ls_wc * _R_peg_wc / _denom_wc, 0, 1
+                            )
+                            _fig_wc_mf.add_trace(go.Scatter(
+                                x=_dist_wc, y=_P_peg_ls * 100, name="Crowder",
+                                mode="lines", line=dict(color=COLORS[2], width=1.5, dash="dot"),
+                            ))
+                        _fig_wc_mf.update_layout(
+                            xaxis_title=_dlbl_wc,
+                            yaxis_title="Mass fraction (wt%)",
+                            height=300,
+                            legend=dict(orientation="h", y=-0.25),
+                            yaxis=dict(range=[0, 100]),
+                            margin=dict(t=10),
+                        )
+                        st.plotly_chart(_fig_wc_mf, use_container_width=True)
 
 
 # ── Further analysis ──────────────────────────────────────────────────────────
