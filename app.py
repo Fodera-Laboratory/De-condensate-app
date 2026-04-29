@@ -828,6 +828,9 @@ if build_btn:
                             pls_protein["X_prot_proc"] = X_prot_proc
                             pls_protein["X_p2_proc"]   = X_p2_proc
                             pls_protein["X_peg_proc"]  = X_peg_proc
+                            pls_protein["X_prot_raw"]  = X_prot_raw
+                            pls_protein["X_p2_raw"]    = X_p2_raw
+                            pls_protein["X_peg_raw"]   = X_peg_raw
                             pls_protein["y_prot_raw"]  = y_prot
                             pls_protein["y_p2_raw"]    = y_p2
                             pls_protein["y_peg_raw"]   = y_peg
@@ -837,9 +840,11 @@ if build_btn:
                                 X_prot_proc, y_prot, X_peg_proc, y_peg,
                                 max_components=int(max_pls_components), cv_folds=int(cv_folds),
                             )
-                            pls_protein["wn"] = wn_prot
+                            pls_protein["wn"]          = wn_prot
                             pls_protein["X_prot_proc"] = X_prot_proc
                             pls_protein["X_peg_proc"]  = X_peg_proc
+                            pls_protein["X_prot_raw"]  = X_prot_raw
+                            pls_protein["X_peg_raw"]   = X_peg_raw
                             pls_protein["y_prot_raw"]  = y_prot
                             pls_protein["y_peg_raw"]   = y_peg
                 else:
@@ -848,9 +853,10 @@ if build_btn:
                             X_prot_proc, y_prot,
                             max_components=int(max_pls_components), cv_folds=int(cv_folds),
                         )
-                        pls_protein["wn"] = wn_prot
+                        pls_protein["wn"]          = wn_prot
                         pls_protein["X_train_proc"] = X_prot_proc
-                        pls_protein["y_raw"] = y_prot
+                        pls_protein["X_train_raw"]  = X_prot_raw
+                        pls_protein["y_raw"]        = y_prot
 
             # ── Salt PLS (optional, fingerprint region) ─────────────────────
             pls_salt = None
@@ -2870,8 +2876,10 @@ with tab_cls:
         _wc_p_lbl   = _wcb.selectbox("Protein component", _wc_lbl_opts, key="wc_p_lbl")
         _wc_peg_lbl = _wcc.selectbox("Crowder component", _wc_lbl_opts, index=0, key="wc_peg_lbl")
         _wc_rho     = _wcd.number_input(
-            "Solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
-            help="Converts training concentrations (mg/mL) to mass fractions.",
+            "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
+            help="Used to convert protein concentration (mg/mL) to mass fraction: "
+                 "φ_p = c_p / (ρ × 1000). Crowder concentration is in wt% which "
+                 "is already a mass fraction, so crowder density is not needed here.",
         )
 
         _wc_ready = (
@@ -2896,23 +2904,69 @@ with tab_cls:
             _cls_s_wc  = st.session_state.get("cls_settings_stored")
             _wn_ref_wc = st.session_state.get("models", {}).get("wn_ref")
 
-            st.markdown("#### Calibration standards")
-            st.caption(
-                "Upload the same CSV files used for PLS training "
-                "(column 1 = concentration; remaining columns = spectral intensities). "
-                "Spectra are re-preprocessed with the CLS settings so they match the reference set."
+            # ── Data source: stored PLS training data or uploaded CSVs ─────────
+            _has_pls_raw = (
+                _pls_p_wc is not None
+                and ("X_prot_raw" in _pls_p_wc or "X_train_raw" in _pls_p_wc)
             )
-            _up_col_p, _up_col_peg = st.columns(2)
-            _cal_prot_src = _up_col_p.file_uploader(
-                "Protein standards CSV (mg/mL)", type="csv", key="wc_cal_prot_csv",
-            )
-            _cal_peg_src = _up_col_peg.file_uploader(
-                "Crowder standards CSV (wt%)" if _peg_i_wc is not None
-                else "Crowder standards CSV (optional, wt%)",
-                type="csv", key="wc_cal_peg_csv",
-            )
+            if _has_pls_raw:
+                _use_pls_data = st.checkbox(
+                    "Use PLS training data for calibration", value=True,
+                    key="wc_use_pls_data",
+                    help="Re-preprocesses the stored PLS training spectra with CLS "
+                         "settings to ensure they are on the same basis as the CLS "
+                         "reference set.",
+                )
+            else:
+                _use_pls_data = False
 
-            if _cal_prot_src is None:
+            if _use_pls_data:
+                _dual_wc   = _pls_p_wc.get("dual",   False)
+                _triple_wc = _pls_p_wc.get("triple", False)
+                if _triple_wc or _dual_wc:
+                    _cal_X_prot_raw = _pls_p_wc["X_prot_raw"]
+                    _cal_y_prot     = _pls_p_wc["y_prot_raw"]
+                    _cal_X_peg_raw  = _pls_p_wc.get("X_peg_raw") if _peg_i_wc is not None else None
+                    _cal_y_peg      = _pls_p_wc.get("y_peg_raw") if _peg_i_wc is not None else None
+                else:
+                    _cal_X_prot_raw = _pls_p_wc["X_train_raw"]
+                    _cal_y_prot     = _pls_p_wc["y_raw"]
+                    _cal_X_peg_raw  = None
+                    _cal_y_peg      = None
+                _cal_prot_ready = True
+            else:
+                st.markdown("#### Calibration standards")
+                st.caption(
+                    "Upload the same CSV files used for PLS training "
+                    "(column 1 = concentration; remaining columns = spectral intensities). "
+                    "Spectra are re-preprocessed with the CLS settings so they match the reference set."
+                )
+                _up_col_p, _up_col_peg = st.columns(2)
+                _cal_prot_src = _up_col_p.file_uploader(
+                    "Protein standards CSV (mg/mL)", type="csv", key="wc_cal_prot_csv",
+                )
+                _cal_peg_src = _up_col_peg.file_uploader(
+                    "Crowder standards CSV (wt%)" if _peg_i_wc is not None
+                    else "Crowder standards CSV (optional, wt%)",
+                    type="csv", key="wc_cal_peg_csv",
+                )
+                if _cal_prot_src is not None:
+                    _df_p_cal       = _read_csv_src(_cal_prot_src)
+                    _cal_y_prot     = _df_p_cal.iloc[:, 0].to_numpy(dtype=float)
+                    _cal_X_prot_raw = _df_p_cal.iloc[:, 1:].to_numpy()
+                    _cal_prot_ready = True
+                    if _cal_peg_src is not None and _peg_i_wc is not None:
+                        _df_peg_cal    = _read_csv_src(_cal_peg_src)
+                        _cal_y_peg     = _df_peg_cal.iloc[:, 0].to_numpy(dtype=float)
+                        _cal_X_peg_raw = _df_peg_cal.iloc[:, 1:].to_numpy()
+                    else:
+                        _cal_X_peg_raw = None
+                        _cal_y_peg     = None
+                else:
+                    _cal_prot_ready = False
+                    _cal_X_prot_raw = _cal_y_prot = _cal_X_peg_raw = _cal_y_peg = None
+
+            if not _cal_prot_ready:
                 st.info("Upload a protein standards CSV to calibrate response factors.")
             elif _cls_s_wc is None or _wn_ref_wc is None:
                 st.warning("CLS settings not found — re-run CLS unmixing first.")
@@ -2920,11 +2974,8 @@ with tab_cls:
                 from scipy.optimize import nnls as _nnls_fn
                 from scipy.stats import linregress as _linreg_fn
 
-                # Parse and preprocess protein calibration spectra with CLS settings
-                _df_p_cal   = _read_csv_src(_cal_prot_src)
-                _y_prot_cal = _df_p_cal.iloc[:, 0].to_numpy(dtype=float)
-                _X_p_raw    = _df_p_cal.iloc[:, 1:].to_numpy()
-                _X_p_proc, _wn_p_cal, _ = an.preprocess_matrix(_X_p_raw, _wn_ref_wc, _cls_s_wc)
+                # Preprocess protein calibration spectra with CLS settings
+                _X_p_proc, _wn_p_cal, _ = an.preprocess_matrix(_cal_X_prot_raw, _wn_ref_wc, _cls_s_wc)
                 _sort_p = np.argsort(_wn_p_cal)
                 _X_p_on_cls = np.array([
                     np.interp(_wn_cls_wc, _wn_p_cal[_sort_p], _X_p_proc[i][_sort_p])
@@ -2934,7 +2985,7 @@ with tab_cls:
                 for _si in range(_X_p_on_cls.shape[0]):
                     _C_prot_cal[_si], _ = _nnls_fn(_ST_wc.T, _X_p_on_cls[_si])
 
-                _prot_frac_cal  = np.clip(_y_prot_cal, 0, None) / (_wc_rho * 1000)
+                _prot_frac_cal  = np.clip(_cal_y_prot, 0, None) / (_wc_rho * 1000)
                 _water_frac_cal = np.clip(1.0 - _prot_frac_cal, 0.0, 1.0)
                 _Sw_cal   = _C_prot_cal[:, _wi_wc]
                 _Sp_cal   = _C_prot_cal[:, _pi_wc]
@@ -2956,12 +3007,9 @@ with tab_cls:
                 _swspeg_cal = None
                 _mwmpeg_cal = None
                 _mask_peg   = None
-                if _peg_i_wc is not None and _cal_peg_src is not None:
-                    _df_peg_cal  = _read_csv_src(_cal_peg_src)
-                    _y_peg_cal   = _df_peg_cal.iloc[:, 0].to_numpy(dtype=float)
-                    _X_peg_raw   = _df_peg_cal.iloc[:, 1:].to_numpy()
+                if _peg_i_wc is not None and _cal_X_peg_raw is not None and _cal_y_peg is not None:
                     _X_peg_proc_c, _wn_peg_cal, _ = an.preprocess_matrix(
-                        _X_peg_raw, _wn_ref_wc, _cls_s_wc
+                        _cal_X_peg_raw, _wn_ref_wc, _cls_s_wc
                     )
                     _sort_peg = np.argsort(_wn_peg_cal)
                     _X_peg_on_cls = np.array([
@@ -2971,7 +3019,7 @@ with tab_cls:
                     _C_peg_cal = np.zeros((_X_peg_on_cls.shape[0], len(_cls_labels)))
                     for _si in range(_X_peg_on_cls.shape[0]):
                         _C_peg_cal[_si], _ = _nnls_fn(_ST_wc.T, _X_peg_on_cls[_si])
-                    _peg_frac_cal       = np.clip(_y_peg_cal, 0, None) / 100
+                    _peg_frac_cal       = np.clip(_cal_y_peg, 0, None) / 100
                     _water_frac_peg_cal = np.clip(1.0 - _peg_frac_cal, 0.0, 1.0)
                     _Sw_peg_cal = _C_peg_cal[:, _wi_wc]
                     _Speg_cal   = _C_peg_cal[:, _peg_i_wc]
