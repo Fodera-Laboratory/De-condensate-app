@@ -2551,24 +2551,19 @@ with tab_calib:
         st.caption(
             "Water mass fraction estimated from PLS predictions: "
             "P_water = 1 − P_protein − P_crowder. "
-            "Concentrations (mg/mL) are converted to mass fractions using the respective solution densities."
+            "Protein (mg/mL) is converted to mass fraction using solution density; "
+            "crowder (wt%) is divided by 100."
         )
-        _mb_col1, _mb_col2 = st.columns(2)
-        _wc_mb_rho = _mb_col1.number_input(
+        _wc_mb_rho = st.number_input(
             "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
             key="pls_mb_density",
             help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000).",
         )
-        _wc_mb_rho_peg = _mb_col2.number_input(
-            "Crowder solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
-            key="pls_mb_density_peg",
-            help="Converts crowder mg/mL to mass fraction: f = c / (ρ × 1000).",
-        )
         _prot_frac_mb = np.clip(np.array(_r["pls_protein"]), 0, None) / (_wc_mb_rho * 1000)
         if _has_peg:
-            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / (_wc_mb_rho_peg * 1000)
+            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / 100
         elif _has_p2 and _r.get("pls_peg") is not None:
-            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / (_wc_mb_rho_peg * 1000)
+            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / 100
         else:
             _peg_frac_mb = np.zeros_like(_prot_frac_mb)
         if _has_p2 and _r.get("pls_protein2") is not None:
@@ -2876,18 +2871,14 @@ with tab_cls:
         _unit_wc   = st.session_state.get("unit", "mg/mL")
 
         _wc_lbl_opts = ["— none —"] + list(_cls_labels)
-        _wca, _wcb, _wcc = st.columns(3)
+        _wca, _wcb, _wcc, _wcd = st.columns(4)
         _wc_w_lbl   = _wca.selectbox("Water component",   _wc_lbl_opts, key="wc_w_lbl")
         _wc_p_lbl   = _wcb.selectbox("Protein component", _wc_lbl_opts, key="wc_p_lbl")
         _wc_peg_lbl = _wcc.selectbox("Crowder component", _wc_lbl_opts, index=0, key="wc_peg_lbl")
-        _wcd, _wce = st.columns(2)
         _wc_rho     = _wcd.number_input(
             "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
-            help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000).",
-        )
-        _wc_rho_peg = _wce.number_input(
-            "Crowder solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho_peg",
-            help="Converts crowder concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000).",
+            help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000). "
+                 "Crowder is in wt% and is converted directly as φ = wt% / 100.",
         )
 
         _wc_ready = (
@@ -3027,7 +3018,7 @@ with tab_cls:
                     _C_peg_cal = np.zeros((_X_peg_on_cls.shape[0], len(_cls_labels)))
                     for _si in range(_X_peg_on_cls.shape[0]):
                         _C_peg_cal[_si], _ = _nnls_fn(_ST_wc.T, _X_peg_on_cls[_si])
-                    _peg_frac_cal       = np.clip(_cal_y_peg, 0, None) / (_wc_rho_peg * 1000)
+                    _peg_frac_cal       = np.clip(_cal_y_peg, 0, None) / 100
                     _water_frac_peg_cal = np.clip(1.0 - _peg_frac_cal, 0.0, 1.0)
                     _Sw_peg_cal = _C_peg_cal[:, _wi_wc]
                     _Speg_cal   = _C_peg_cal[:, _peg_i_wc]
