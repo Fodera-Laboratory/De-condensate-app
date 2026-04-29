@@ -4528,10 +4528,12 @@ with tab_image:
 
 # ── Download ──────────────────────────────────────────────────────────────────
 with tab_download:
-    if "results" not in st.session_state or not st.session_state["results"]:
+    _tab_dl_has_mcr_pls = bool(st.session_state.get("results"))
+    _tab_dl_has_cls     = bool(st.session_state.get("cls_results"))
+    if not _tab_dl_has_mcr_pls and not _tab_dl_has_cls:
         st.info("Run the analysis first.")
     else:
-        results_all = st.session_state["results"]
+        results_all = st.session_state.get("results") or {}
         unit        = st.session_state.get("unit", "mg/mL")
         sm          = st.session_state.get("scan_mode", "xy")
 
@@ -4564,6 +4566,54 @@ with tab_download:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_{fname}",
                 )
+
+        # ── CLS linescan results ─────────────────────────────────────────────
+        _cls_dl_res = st.session_state.get("cls_results", {})
+        if _cls_dl_res:
+            st.divider()
+            st.subheader("CLS linescan results")
+            import openpyxl as _opxl_cls
+
+            def _cls_to_xlsx(cr):
+                _wb = _opxl_cls.Workbook()
+                _ws = _wb.active
+                _ws.title = "CLS concentrations"
+                _lbls = st.session_state.get("cls_labels",
+                        [f"Comp {i+1}" for i in range(cr["C"].shape[1])])
+                _dlbl = "Depth (µm)" if cr.get("scan_mode") == "z" else "Distance (µm)"
+                _ws.append([_dlbl] + list(_lbls) + ["R²", "RMSE"])
+                for _si in range(cr["C"].shape[0]):
+                    _rw = [float(cr["distance"][_si])]
+                    _rw += [float(cr["C"][_si, _ki]) for _ki in range(cr["C"].shape[1])]
+                    _rw += [float(cr["R2"][_si]), float(cr["RMSE"][_si])]
+                    _ws.append(_rw)
+                _buf = io.BytesIO()
+                _wb.save(_buf)
+                return _buf.getvalue()
+
+            _cls_zip_buf = io.BytesIO()
+            with zipfile.ZipFile(_cls_zip_buf, "w", zipfile.ZIP_DEFLATED) as _cls_zf:
+                for _cls_fn, _cls_cr in _cls_dl_res.items():
+                    _cls_sn = os.path.splitext(_cls_fn)[0].replace(" ", "_")
+                    _cls_zf.writestr(f"{_cls_sn}_cls.xlsx", _cls_to_xlsx(_cls_cr))
+
+            st.download_button(
+                "⬇  Download all CLS results (ZIP)",
+                data=_cls_zip_buf.getvalue(),
+                file_name="pearl_cls_results.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+            with st.expander("Individual CLS files"):
+                for _cls_fn, _cls_cr in _cls_dl_res.items():
+                    _cls_sn = os.path.splitext(_cls_fn)[0].replace(" ", "_")
+                    st.download_button(
+                        f"⬇  {_cls_sn}_cls.xlsx",
+                        data=_cls_to_xlsx(_cls_cr),
+                        file_name=f"{_cls_sn}_cls.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_cls_{_cls_fn}",
+                    )
 
         # ── Further analysis results ────────────────────────────────────────
         st.divider()
@@ -4731,10 +4781,11 @@ with tab_download:
             (results_all and any(r.get("C_mcr") is not None or r.get("pls_protein") is not None
                                  for r in results_all.values()))
             or _has_pca or _has_amide or _has_ratio
+            or bool(st.session_state.get("cls_results"))
         )
 
         if not _pub_has:
-            st.info("Run MCR/PLS analysis or further analysis to generate figures.")
+            st.info("Run MCR/PLS analysis, CLS unmixing, or further analysis to generate figures.")
         else:
             # ── Global style (applies to all figures) ─────────────────────
             _DEFAULT_COLS = ["#1b85b8", "#5a5255", "#559e83", "#ae5a41",
@@ -4764,6 +4815,7 @@ with tab_download:
             _ALL_CATS = [
                 ("linescan_spectra", "Preprocessed linescan spectra",  5.0, 2.8),
                 ("mcr_scores",       "MCR concentration scores",        7.0, 3.5),
+                ("cls_profiles",     "CLS concentration profiles",      7.0, 3.5),
                 ("pls_profiles",     "PLS concentration profiles",      7.0, 3.5),
                 ("pls_tr_spectra",   "PLS training spectra",            5.0, 2.8),
                 ("pls_cal_scatter",  "PLS calibration scatter & RMSE",  7.0, 3.5),
@@ -5045,6 +5097,37 @@ with tab_download:
                             f"b) Salt vs protein; error bars = \u00b1CV RMSE."
                         )
                     _cap_parts.append(_cap_pls)
+
+            # ── CLS concentration profiles ─────────────────────────────────
+            _cls_rs_sv  = st.session_state.get("cls_results", {})
+            _cls_lbs_sv = st.session_state.get("cls_labels", [])
+            for _cls_rs_fn, _cls_rs_r in _cls_rs_sv.items():
+                _cls_rs_safe = os.path.splitext(_cls_rs_fn)[0]
+                _dlbl_cls    = ("Depth (µm)" if _cls_rs_r.get("scan_mode") == "z"
+                                else "Distance (µm)")
+
+                def _draw_cls_profiles(axs, cr=_cls_rs_r,
+                                       clbls=_cls_lbs_sv, dlbl=_dlbl_cls):
+                    _C_c    = cr["C"]
+                    _dist_c = cr["distance"]
+                    for _k in range(_C_c.shape[1]):
+                        _lb = clbls[_k] if _k < len(clbls) else f"Comp {_k+1}"
+                        axs[0].plot(_dist_c, _C_c[:, _k],
+                                    color=_MCOLS[_k % len(_MCOLS)],
+                                    lw=_LW, label=_lb)
+                    axs[0].set_xlabel(dlbl)
+                    axs[0].set_ylabel("CLS fraction (a.u.)")
+                    axs[0].legend(fontsize=_LG, frameon=False, loc="upper right")
+                    _style_ax(axs[0])
+
+                _row_specs.append((_ps("cls_profiles"), _draw_cls_profiles,
+                                   _fig_styles["cls_profiles"]))
+                _row_tags.append("cls_profiles")
+                _nc_cls = _cls_rs_r["C"].shape[1]
+                _cap_parts.append(
+                    f"CLS concentration profiles — {_cls_rs_safe}. "
+                    f"{_nc_cls} component(s) vs {_dlbl_cls.lower()}."
+                )
 
             # ── PLS calibration rows (once, model-level) ─────────────────
             def _rmse_row(ax, pp_or_ps, label="RMSE"):
