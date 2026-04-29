@@ -2934,10 +2934,10 @@ with tab_cls:
             _Sp_cal   = _C_prot_cal[:, _pi_wc]
             _mask_cal = (_Sp_cal > 1e-10) & (_Sw_cal > 1e-10) & (_prot_frac_cal > 1e-8)
 
+            from scipy.stats import linregress as _linreg_fn
             _R_protein_wc = None
             _lr_p_wc      = None
             if _mask_cal.sum() >= 2:
-                from scipy.stats import linregress as _linreg_fn
                 _mwmp_cal = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
                 _swsp_cal = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
                 _lr_p_wc  = _linreg_fn(_mwmp_cal, _swsp_cal)
