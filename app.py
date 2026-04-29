@@ -2714,17 +2714,18 @@ with tab_cls:
                     st.plotly_chart(_fig_res_pos, use_container_width=True)
 
                 with _col_fit:
-                    _fig_fit = go.Figure()
+                    from plotly.subplots import make_subplots as _make_sp
+                    _fig_fit = _make_sp(specs=[[{"secondary_y": True}]])
                     _fig_fit.add_trace(go.Scatter(
                         x=_dist_cls, y=_cr["R2"], name="R²",
                         mode="lines",
                         line=dict(color="#1b85b8", width=1.5),
-                    ))
+                    ), secondary_y=False)
                     _fig_fit.add_trace(go.Scatter(
                         x=_dist_cls, y=_cr["RMSE"], name="RMSE",
                         mode="lines",
                         line=dict(color="#ae5a41", width=1.5, dash="dot"),
-                    ))
+                    ), secondary_y=True)
                     _fig_fit.add_vline(
                         x=_vline_x, line_dash="dash", line_color="black",
                         annotation_text=f"{_vline_x:.1f} µm",
@@ -2732,12 +2733,17 @@ with tab_cls:
                     )
                     _fig_fit.update_layout(
                         xaxis_title=_dist_lbl,
-                        yaxis_title="Value",
                         height=260,
                         title="Fit quality",
                         legend=dict(orientation="h", y=-0.28),
                         margin=dict(t=40),
                     )
+                    _fig_fit.update_yaxes(title_text="R²", secondary_y=False,
+                                          title_font=dict(color="#1b85b8"),
+                                          tickfont=dict(color="#1b85b8"))
+                    _fig_fit.update_yaxes(title_text="RMSE", secondary_y=True,
+                                          title_font=dict(color="#ae5a41"),
+                                          tickfont=dict(color="#ae5a41"))
                     st.plotly_chart(_fig_fit, use_container_width=True)
 
                 # ── Mean residual ──────────────────────────────────────────
