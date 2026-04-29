@@ -2553,13 +2553,12 @@ with tab_calib:
             "P_water = 1 − P_protein − P_crowder. "
             "Both concentrations (mg/mL) are converted to mass fractions using the respective solution densities."
         )
-        _mb_col1, _mb_col2 = st.columns(2)
-        _wc_mb_rho = _mb_col1.number_input(
+        _wc_mb_rho = st.number_input(
             "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
             key="pls_mb_density",
             help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000).",
         )
-        _wc_mb_rho_peg = _mb_col2.number_input(
+        _wc_mb_rho_peg = st.number_input(
             "Crowder solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
             key="pls_mb_density_peg",
             help="Converts crowder mg/mL to mass fraction: f = c / (ρ × 1000).",
@@ -2876,7 +2875,7 @@ with tab_cls:
         _unit_wc   = st.session_state.get("unit", "mg/mL")
 
         _wc_lbl_opts = ["— none —"] + list(_cls_labels)
-        _wca, _wcb, _wcc, _wcd, _wce = st.columns(5)
+        _wca, _wcb, _wcc, _wcd = st.columns(4)
         _wc_w_lbl   = _wca.selectbox("Water component",   _wc_lbl_opts, key="wc_w_lbl")
         _wc_p_lbl   = _wcb.selectbox("Protein component", _wc_lbl_opts, key="wc_p_lbl")
         _wc_peg_lbl = _wcc.selectbox("Crowder component", _wc_lbl_opts, index=0, key="wc_peg_lbl")
@@ -2884,7 +2883,7 @@ with tab_cls:
             "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
             help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000).",
         )
-        _wc_rho_peg = _wce.number_input(
+        _wc_rho_peg = _wcd.number_input(
             "Crowder solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho_peg",
             help="Converts crowder concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000).",
         )
