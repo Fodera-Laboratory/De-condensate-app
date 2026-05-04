@@ -68,7 +68,7 @@ _ram_mb  = _psutil.Process(_os_ram.getpid()).memory_info().rss / 1e6
 _ram_pct = _ram_mb / 1000 * 100
 _ram_col = "#d9534f" if _ram_mb > 900 else "#f0ad4e" if _ram_mb > 700 else "#5a5255"
 st.markdown(
-    f"""<div style="position:fixed;top:55px;right:18px;z-index:2147483647;
+    f"""<div style="position:fixed;bottom:18px;left:18px;z-index:2147483647;
         background:rgba(255,255,255,0.92);border:1px solid #ddd;border-radius:6px;
         padding:4px 10px;font-size:12px;font-family:Arial,sans-serif;line-height:1.5;
         box-shadow:0 1px 4px rgba(0,0,0,0.10);">
@@ -2482,12 +2482,12 @@ with tab_calib:
                 _fig_rec.add_trace(go.Scatter(
                     x=_wn_pls_rec, y=_X_pls_rec[_pos_idx],
                     mode="lines", name="Measured",
-                    line=dict(color=COLORS[0], width=1.8),
+                    line=dict(color="black", width=1.8),
                 ))
                 _fig_rec.add_trace(go.Scatter(
                     x=_wn_pls_rec, y=_X_rec[_pos_idx],
                     mode="lines", name="Reconstructed",
-                    line=dict(color="black", width=1.5, dash="dash"),
+                    line=dict(color="red", width=1.5, dash="dash"),
                 ))
                 _fig_rec.add_trace(go.Scatter(
                     x=_wn_pls_rec, y=_x_mean_full,
@@ -2502,7 +2502,7 @@ with tab_calib:
                 _fig_rec.add_trace(go.Scatter(
                     x=_wn_pls_rec, y=_X_prot_only[_pos_idx],
                     mode="lines", name="Protein contribution",
-                    line=dict(color=COLORS[1], width=1, dash="dot"),
+                    line=dict(color=COLORS[1], width=1),
                 ))
                 if _c_crowd is not None and _Y_hat_c.shape[1] >= 2:
                     _crowd_col = 2 if _triple else 1
@@ -2513,18 +2513,18 @@ with tab_calib:
                     _fig_rec.add_trace(go.Scatter(
                         x=_wn_pls_rec, y=_X_crowd_only[_pos_idx],
                         mode="lines", name="Crowder contribution",
-                        line=dict(color=COLORS[2], width=1, dash="dot"),
+                        line=dict(color=COLORS[2], width=1),
                     ))
                 if _c_water is not None and _water_on_pls is not None:
                     _fig_rec.add_trace(go.Scatter(
                         x=_wn_pls_rec, y=_c_water[_pos_idx] * _water_on_pls,
                         mode="lines", name="Solvent contribution",
-                        line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1, dash="dot"),
+                        line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1),
                     ))
                 _fig_rec.add_trace(go.Scatter(
                     x=_wn_pls_rec, y=_rb_all[_pos_idx],
                     mode="lines", name="Background",
-                    line=dict(color=COLORS[4] if len(COLORS) > 4 else "grey", width=1, dash="dot"),
+                    line=dict(color=COLORS[4] if len(COLORS) > 4 else "grey", width=1),
                 ))
                 _fig_rec.update_layout(
                     xaxis_title="Wavenumber (cm⁻¹)",
@@ -2576,21 +2576,21 @@ with tab_calib:
         _fig_mb = go.Figure()
         _fig_mb.add_trace(go.Scatter(
             x=_dist, y=_water_frac_mb * 100, name="Water",
-            mode="lines", line=dict(color=COLORS[0], width=1.5),
+            mode="lines", line=dict(color="cyan", width=1.5),
         ))
         _fig_mb.add_trace(go.Scatter(
             x=_dist, y=_prot_frac_mb * 100, name="Protein",
-            mode="lines", line=dict(color=COLORS[1], width=1.5, dash="dot"),
+            mode="lines", line=dict(color="blue", width=1.5),
         ))
         if _has_p2 and _r.get("pls_protein2") is not None:
             _fig_mb.add_trace(go.Scatter(
                 x=_dist, y=_prot2_frac_mb * 100, name=_p2name,
-                mode="lines", line=dict(color=COLORS[3], width=1.5, dash="dot"),
+                mode="lines", line=dict(color=COLORS[3], width=1.5),
             ))
         if np.any(_peg_frac_mb > 0):
             _fig_mb.add_trace(go.Scatter(
                 x=_dist, y=_peg_frac_mb * 100, name="Crowder",
-                mode="lines", line=dict(color=COLORS[2], width=1.5, dash="dot"),
+                mode="lines", line=dict(color="green", width=1.5),
             ))
         _fig_mb.update_layout(
             xaxis_title=_dl,
@@ -2716,20 +2716,19 @@ with tab_cls:
                     _fig_sp.add_trace(go.Scatter(
                         x=_wn_c, y=_cr["X_proc"][_pos_cls] if "X_proc" in _cr else _X_rec_cls[_pos_cls],
                         mode="lines", name="Measured",
-                        line=dict(color=COLORS[0], width=1.8),
+                        line=dict(color="black", width=1.8),
                     ))
                     _fig_sp.add_trace(go.Scatter(
                         x=_wn_c, y=_X_rec_cls[_pos_cls],
                         mode="lines", name="Reconstructed",
-                        line=dict(color="black", width=1.5, dash="dash"),
+                        line=dict(color="red", width=1.5, dash="dash"),
                     ))
                     for _k, _lbl in enumerate(_cls_labels):
                         _fig_sp.add_trace(go.Scatter(
                             x=_wn_c,
                             y=_cr["C"][_pos_cls, _k] * _cr["ST"][_k],
                             mode="lines", name=_lbl,
-                            line=dict(color=COLORS[_k % len(COLORS)],
-                                      width=1, dash="dot"),
+                            line=dict(color=COLORS[_k % len(COLORS)], width=1),
                         ))
                     _fig_sp.update_layout(
                         xaxis_title="Raman shift (cm⁻¹)",
@@ -3112,11 +3111,11 @@ with tab_cls:
                         _fig_wc_mf = go.Figure()
                         _fig_wc_mf.add_trace(go.Scatter(
                             x=_dist_wc, y=_P_water_ls * 100, name="Water",
-                            mode="lines", line=dict(color=COLORS[0], width=1.5),
+                            mode="lines", line=dict(color="cyan", width=1.5),
                         ))
                         _fig_wc_mf.add_trace(go.Scatter(
                             x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
-                            mode="lines", line=dict(color=COLORS[1], width=1.5, dash="dot"),
+                            mode="lines", line=dict(color="blue", width=1.5),
                         ))
                         if _Speg_ls_wc is not None and _R_peg_wc is not None:
                             _P_peg_ls = np.clip(
@@ -3124,7 +3123,7 @@ with tab_cls:
                             )
                             _fig_wc_mf.add_trace(go.Scatter(
                                 x=_dist_wc, y=_P_peg_ls * 100, name="Crowder",
-                                mode="lines", line=dict(color=COLORS[2], width=1.5, dash="dot"),
+                                mode="lines", line=dict(color="green", width=1.5),
                             ))
                         _fig_wc_mf.update_layout(
                             xaxis_title=_dlbl_wc,
