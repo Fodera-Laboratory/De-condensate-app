@@ -359,11 +359,140 @@ _HELP_NORMALISATION = (
     "**Min-max** — scales to [0, 1]; simple but sensitive to outlier peaks."
 )
 
+_NORM_OPTS = ["snv", "area", "vector", "minmax", "none"]
+_NORM_FMT  = lambda x: {
+    "snv": "SNV", "area": "Area (unit area)", "vector": "Vector (unit norm)",
+    "minmax": "Min-max [0, 1]", "none": "None",
+}[x]
+_BASELINE_OPTS = [
+    "rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls",
+    "imodpoly", "modpoly", "poly", "endpoint", "linear", "none",
+]
+_BASELINE_FMT = lambda x: {
+    "rubberband":  "Rubberband (convex hull)",
+    "rolling_ball": "Rolling ball",
+    "als":         "ALS (Asymmetric Least Squares)",
+    "arpls":       "ARPLS (Asymmetrically Reweighted PLS)",
+    "airpls":      "AIRPLS (Adaptive Iterative Reweighted PLS)",
+    "iasls":       "IASLS (Improved ALS)",
+    "drpls":       "DRPLS (Doubly Reweighted PLS)",
+    "imodpoly":    "IModPoly (Improved Modified Polynomial)",
+    "modpoly":     "ModPoly (Modified Polynomial)",
+    "poly":        "Poly (Polynomial)",
+    "endpoint":    "Endpoint (anchors ends to zero)",
+    "linear":      "Linear (fit to spectral edges)",
+    "none":        "None",
+}[x]
+
+
+def _render_preprocessing(pfx: str, normalize_default: int = 0,
+                           include_second_deriv: bool = False) -> dict:
+    """Render full preprocessing widget panel (spike → baseline → smooth → normalize → range).
+
+    All widget keys are prefixed with *pfx* so the same function can be called
+    independently inside the PLS, MCR, and CLS tabs without key collisions.
+    Returns a settings dict compatible with preprocess_matrix().
+    """
+    _sr1, _sr2 = st.columns(2)
+    spike_remove = _sr1.toggle("Spike removal", value=True, key=f"{pfx}_spike_remove")
+    spike_threshold = _sr2.number_input(
+        "Spike threshold", min_value=1.0, max_value=30.0, value=8.0, step=0.5,
+        key=f"{pfx}_spike_threshold",
+        help="Modified Z-score threshold (Whitaker-Hayes). Default 8; lower = more aggressive.",
+        disabled=not spike_remove,
+    )
+    baseline = st.selectbox(
+        "Baseline correction", _BASELINE_OPTS,
+        format_func=_BASELINE_FMT, key=f"{pfx}_baseline", help=_HELP_BASELINE,
+    )
+    ball_radius, als_lam, als_p, rs_lam, rs_poly_order = 50, 1e5, 0.01, 1e5, 2
+    if baseline == "rolling_ball":
+        ball_radius = st.slider("Ball radius", 10, 300, 50, key=f"{pfx}_ball_radius")
+    elif baseline == "als":
+        _b1, _b2 = st.columns(2)
+        als_lam = _b1.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8,
+                                   format="%.0e", key=f"{pfx}_als_lam")
+        als_p   = _b2.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5,
+                                   format="%.3f", key=f"{pfx}_als_p")
+    elif baseline in ("arpls", "airpls", "iasls", "drpls"):
+        rs_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9,
+                                 format="%.0e", key=f"{pfx}_rs_lam")
+    elif baseline in ("imodpoly", "modpoly", "poly"):
+        rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key=f"{pfx}_rs_poly")
+    smooth = st.selectbox(
+        "Smoothing", ["none", "savgol", "gaussian", "fft_lowpass"],
+        format_func=lambda x: {
+            "none": "None", "savgol": "Savitzky-Golay",
+            "gaussian": "Gaussian", "fft_lowpass": "FFT low-pass filter",
+        }[x],
+        key=f"{pfx}_smooth", help=_HELP_SMOOTHING,
+    )
+    sg_window, sg_poly, gaussian_sigma, fft_cutoff = 11, 3, 1, 0.1
+    if smooth == "savgol":
+        _s1, _s2 = st.columns(2)
+        sg_window = _s1.slider("Window (odd)", 5, 51, 11, step=2, key=f"{pfx}_sg_window")
+        sg_poly   = _s2.slider("Polynomial order", 1, 9, 3,       key=f"{pfx}_sg_poly")
+    elif smooth == "gaussian":
+        gaussian_sigma = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5,
+                                   key=f"{pfx}_gauss_sigma")
+    elif smooth == "fft_lowpass":
+        fft_cutoff = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
+                               key=f"{pfx}_fft_cut",
+                               help="Fraction of Fourier components to keep (0.1 = lowest 10%).")
+    normalize = st.selectbox(
+        "Normalization", _NORM_OPTS, index=normalize_default,
+        format_func=_NORM_FMT, key=f"{pfx}_normalize", help=_HELP_NORMALISATION,
+    )
+    _w1, _w2 = st.columns(2)
+    wn_min = _w1.number_input("Min (cm⁻¹)", value=700,  step=50, key=f"{pfx}_wn_min")
+    wn_max = _w2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{pfx}_wn_max")
+    use_cut = st.toggle(
+        "Exclude gap region", value=True, key=f"{pfx}_use_cut",
+        help="Remove silent region (e.g. 1850–2750 cm⁻¹).",
+    )
+    wn_cut_min = wn_cut_max = None
+    if use_cut:
+        _g1, _g2 = st.columns(2)
+        wn_cut_min = _g1.number_input("Gap from", value=1850, step=50, key=f"{pfx}_wn_cut_min")
+        wn_cut_max = _g2.number_input("Gap to",   value=2750, step=50, key=f"{pfx}_wn_cut_max")
+    out = dict(
+        spike_remove=spike_remove, spike_threshold=spike_threshold,
+        baseline=baseline, ball_radius=ball_radius,
+        als_lam=als_lam, als_p=als_p, rs_lam=rs_lam, rs_poly_order=rs_poly_order,
+        smooth=smooth, sg_window=sg_window, sg_poly=sg_poly,
+        gaussian_sigma=gaussian_sigma, fft_cutoff=fft_cutoff,
+        normalize=normalize,
+        wn_min=wn_min, wn_max=wn_max,
+        use_cut=use_cut, wn_cut_min=wn_cut_min, wn_cut_max=wn_cut_max,
+        second_deriv=False, sd_window=11, sd_poly=2,
+    )
+    if include_second_deriv:
+        second_deriv = st.toggle(
+            "Second-derivative preprocessing",
+            value=False, key=f"{pfx}_second_deriv",
+            help=(
+                "Apply a Savitzky-Golay second derivative as the final preprocessing step "
+                "(after normalisation). Sharpens overlapping spectral features."
+            ),
+        )
+        sd_window_val = sd_poly_val = None
+        if second_deriv:
+            _d1, _d2 = st.columns(2)
+            sd_window_val = _d1.slider("SD window (odd)", 5, 31, 11, step=2,
+                                       key=f"{pfx}_sd_window")
+            sd_poly_val   = _d2.slider("SD polynomial",    1,  5,  2,
+                                       key=f"{pfx}_sd_poly")
+        out["second_deriv"] = second_deriv
+        out["sd_window"]    = sd_window_val if second_deriv else 11
+        out["sd_poly"]      = sd_poly_val   if second_deriv else 2
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 tab_tutorial, tab_files, tab_pls, tab_mcr, tab_cls, tab_further, tab_image, tab_download, tab_training, tab_about = st.tabs(
-    ["📖  Tutorial", "📂  Files & preprocessing", "📊  PLS regression unmixing",
+    ["📖  Tutorial", "📂  Linescan files", "📊  PLS regression unmixing",
      "🔬  MCR-ALS unmixing", "📐  CLS unmixing",
      "🔍  Further analysis", "🗺️  Image overlay", "⬇  Download",
      "🗂  Training data", "ℹ  About"],
@@ -377,218 +506,31 @@ tab_results  = tab_mcr     # linescan results appear at bottom of MCR tab
 # Files tab — linescan upload + global preprocessing + spectral range
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_files:
-    st.markdown("## 📂 Files & Preprocessing")
+    st.markdown("## 📂 Linescan files")
     st.caption(
-        "Upload your linescan files and configure preprocessing and spectral range. "
-        "These settings apply to PLS, MCR-ALS, and CLS analysis. "
-        "Then go to the **📊 PLS regression unmixing**, **🔬 MCR-ALS unmixing**, or **📐 CLS unmixing** tab to run the analysis."
+        "Upload linescan .txt files from the Raman microscope. "
+        "Optionally rename files — the new names are used throughout results and plots. "
+        "Configure preprocessing in the **PLS**, **MCR**, or **CLS** tabs."
     )
-    _fc1, _fc2 = st.columns([1, 1])
-
-    with _fc1:
-        st.subheader("Linescan files")
-        linescan_files = st.file_uploader(
-            "Linescan .txt files",
-            type=["txt"],
-            accept_multiple_files=True,
-            help="Raw linescan files from the Raman microscope (one or more).",
-        )
-        if linescan_files:
-            st.caption(f"{len(linescan_files)} file(s) uploaded: "
-                       + ", ".join(f.name for f in linescan_files))
-
-        st.subheader("Preprocessing")
-        spike_remove = st.toggle("Spike removal", value=True)
-        spike_threshold = st.number_input(
-            "Spike detection threshold",
-            min_value=1.0, max_value=30.0, value=8.0, step=0.5,
-            key="spike_threshold",
-            help=(
-                "Modified Z-score threshold for the Whitaker-Hayes spike detector. "
-                "Lower values = more aggressive (removes more, risk of false positives). "
-                "Default 8; try 4–6 if spikes are being missed."
-            ),
-            disabled=not spike_remove,
-        )
-        baseline = st.selectbox(
-            "Baseline correction",
-            ["rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls", "imodpoly", "modpoly", "poly", "endpoint", "linear", "none"],
-            format_func=lambda x: {
-                "rubberband":  "Rubberband (convex hull)",
-                "rolling_ball":"Rolling ball",
-                "als":         "ALS (Asymmetric Least Squares)",
-                "arpls":       "ARPLS (Asymmetrically Reweighted PLS)",
-                "airpls":      "AIRPLS (Adaptive Iterative Reweighted PLS)",
-                "iasls":       "IASLS (Improved ALS)",
-                "drpls":       "DRPLS (Doubly Reweighted PLS)",
-                "imodpoly":    "IModPoly (Improved Modified Polynomial)",
-                "modpoly":     "ModPoly (Modified Polynomial)",
-                "poly":        "Poly (Polynomial)",
-                "endpoint":    "Endpoint (anchors ends to zero)",
-                "linear":      "Linear (fit to spectral edges)",
-                "none":        "None",
-            }[x],
-            help=_HELP_BASELINE,
-        )
-        ball_radius, als_lam, als_p = 50, 1e5, 0.01
-        rs_lam, rs_poly_order = 1e5, 2
-        if baseline == "rolling_ball":
-            ball_radius = st.slider("Ball radius", 10, 300, 50)
-        elif baseline == "als":
-            als_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8, format="%.0e")
-            als_p   = st.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5, format="%.3f")
-        elif baseline in ("arpls", "airpls", "iasls", "drpls"):
-            rs_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9, format="%.0e",
-                                     key="rs_lam")
-        elif baseline in ("imodpoly", "modpoly", "poly"):
-            rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key="rs_poly")
-
-        smooth = st.selectbox(
-            "Smoothing",
-            ["none", "savgol", "gaussian", "fft_lowpass"],
-            format_func=lambda x: {
-                "none":        "None",
-                "savgol":      "Savitzky-Golay",
-                "gaussian":    "Gaussian",
-                "fft_lowpass": "FFT low-pass filter",
-            }[x],
-            help=_HELP_SMOOTHING,
-        )
-        sg_window, sg_poly, gaussian_sigma, fft_cutoff = 11, 3, 1, 0.1
-        if smooth == "savgol":
-            sg_window = st.slider("Window length (odd)", 5, 51, 11, step=2, key="sg_win_main")
-            sg_poly   = st.slider("Polynomial order",    1,  9,  3,        key="sg_poly_main")
-        elif smooth == "gaussian":
-            gaussian_sigma = st.slider("σ (sigma)", 0.5, 5.0, 1.0, step=0.5, key="gauss_sigma")
-        elif smooth == "fft_lowpass":
-            fft_cutoff = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01, key="fft_cut",
-                                   help="Fraction of Fourier components to keep (0.1 = keep lowest 10%).")
-
-        _norm_opts = ["snv", "area", "vector", "minmax", "none"]
-        _norm_fmt  = lambda x: {
-            "snv":    "SNV",
-            "area":   "Area (unit area)",
-            "vector": "Vector (unit norm)",
-            "minmax": "Min-max [0, 1]",
-            "none":   "None",
-        }[x]
-        normalize_pls = st.selectbox(
-            "PLS regression normalization",
-            _norm_opts,
-            index=0,
-            format_func=_norm_fmt,
-            help=(
-                "Normalization applied to spectra before PLS modelling. "
-                "**SNV** (default) — centres and scales to zero mean and unit variance; "
-                "the standard choice for PLS. "
-                "**Area** — divides by spectral integral; removes intensity differences while "
-                "preserving relative peak ratios. "
-                "**Vector** — divides by Euclidean norm; ensures all spectra have equal L2 norm. "
-                "**Min-max** — not recommended for PLS as a single spike can compress all features."
-            ),
-        )
-        second_deriv = st.toggle(
-            "Second-derivative preprocessing (PLS only)",
-            value=False,
-            key="second_deriv",
-            help=(
-                "Apply a Savitzky-Golay second derivative as the final preprocessing step "
-                "(after normalisation). Sharpens overlapping spectral features and can improve "
-                "discrimination between proteins with similar amide-band profiles. "
-                "Applied only to PLS standard and linescan spectra, not to MCR or CLS."
-            ),
-        )
-        sd_window = sd_poly = None
-        if second_deriv:
-            _sdc1, _sdc2 = st.columns(2)
-            sd_window = _sdc1.slider("SD window length (odd)", 5, 31, 11, step=2, key="sd_window")
-            sd_poly   = _sdc2.slider("SD polynomial order",    1,  5,  2,        key="sd_poly")
-        normalize_mcr = st.selectbox(
-            "MCR-ALS normalization",
-            _norm_opts,
-            index=1,
-            format_func=_norm_fmt,
-            help=(
-                "Normalization applied to spectra before MCR-ALS decomposition. "
-                "**Area** (default) — recommended for MCR as it preserves non-negativity and "
-                "ensures intensity differences reflect concentration rather than instrument artifacts. "
-                "**SNV** can cause MCR to converge in 1 iteration because it centres spectra around "
-                "zero, conflicting with non-negativity constraints. "
-                "**Vector** — normalises to unit Euclidean norm."
-            ),
-        )
-        normalize_cls = st.selectbox(
-            "CLS normalization",
-            _norm_opts,
-            index=1,
-            format_func=_norm_fmt,
-            help=(
-                "Normalization applied to spectra before CLS unmixing. "
-                "**Area** (default) — divides by spectral integral; preserves relative peak ratios "
-                "and is consistent with the non-negativity constraint of NNLS. "
-                "Must match the normalization used to prepare the reference spectra CSV."
-            ),
-        )
-        normalize = normalize_mcr  # used by salt and further-analysis paths
-        salt_normalize = st.selectbox(
-            "Salt PLS regression normalization",
-            ["none", "snv", "area", "vector", "minmax"],
-            index=0,
-            format_func=_norm_fmt,
-            help="Normalization applied only to salt standards and linescan salt preprocessing.",
-        )
-
-    with _fc2:
-        st.subheader("Spectral range")
-        st.markdown("**PLS preprocessing**")
-        _r1c1, _r1c2 = st.columns(2)
-        pls_wn_min = _r1c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="pls_wn_min")
-        pls_wn_max = _r1c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="pls_wn_max")
-
-        st.markdown("**MCR preprocessing**")
-        _r2c1, _r2c2 = st.columns(2)
-        mcr_wn_min = _r2c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="mcr_wn_min")
-        mcr_wn_max = _r2c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="mcr_wn_max")
-
-        st.markdown("**CLS preprocessing**")
-        _r3c1, _r3c2 = st.columns(2)
-        cls_wn_min = _r3c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="cls_wn_min")
-        cls_wn_max = _r3c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="cls_wn_max")
-
-        st.markdown("**Shared gap exclusion** (applied to all methods)")
-        use_cut = st.toggle("Exclude gap region", value=True, key="use_cut",
-                            help="E.g. remove the 1850–2750 cm⁻¹ silent region.")
-        wn_cut_min = wn_cut_max = None
-        if use_cut:
-            c3, c4 = st.columns(2)
-            wn_cut_min = c3.number_input("Gap from", value=1850, step=50, key="wn_cut_min")
-            wn_cut_max = c4.number_input("Gap to",   value=2750, step=50, key="wn_cut_max")
-
-        c5, c6 = st.columns(2)
-        salt_wn_min = c5.number_input("Salt min (cm⁻¹)", value=940,  step=10, key="salt_wn_min",
-                                       help="Lower bound of the wavenumber region used for salt PLS.")
-        salt_wn_max = c6.number_input("Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
-                                       help="Upper bound of the salt region.")
-
-        st.subheader("Concentration units")
-        unit = st.selectbox("Protein concentration unit", ["mg/mL", "mM"])
-        protein_mw = 5808.0
-        if unit == "mM":
-            protein_mw = float(st.number_input("Protein MW (g/mol)", value=5808, min_value=100))
-        conv = 1000.0 / protein_mw if unit == "mM" else 1.0
-
-        crowder_unit = st.selectbox(
-            "Molecular crowder unit",
-            ["wt%", "mg/mL", "mM"],
-            help="Unit of the concentration column in the crowder standards CSV.",
-        )
-        crowder_mw   = 1000.0
-        crowder_conv = 1.0
-        if crowder_unit == "mM":
-            crowder_mw   = float(st.number_input(
-                "Crowder MW (g/mol)", value=1000, min_value=10, key="crowder_mw_input",
-            ))
-            crowder_conv = 1000.0 / crowder_mw
+    linescan_files = st.file_uploader(
+        "Linescan .txt files",
+        type=["txt"],
+        accept_multiple_files=True,
+        help="Raw linescan files from the Raman microscope (one or more).",
+    )
+    if linescan_files:
+        st.caption(f"{len(linescan_files)} file(s) uploaded.")
+        st.subheader("File names")
+        st.caption("Edit to rename — names appear in result selectors, plots, and Excel exports.")
+        _renames = {}
+        for _f in linescan_files:
+            _renames[_f.name] = st.text_input(
+                _f.name, value=_f.name, key=f"rename_{_f.name}",
+                label_visibility="collapsed",
+            )
+        st.session_state["file_renames"] = _renames
+    else:
+        st.session_state.pop("file_renames", None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -644,6 +586,44 @@ with tab_pls:
             help="Maximum number of latent variables evaluated during CV. "
                  "The optimum is selected automatically by minimising CV RMSE.",
         )
+
+    st.divider()
+    st.subheader("Preprocessing")
+    _pp1, _pp2 = st.columns([1, 1])
+    with _pp1:
+        pls_prep = _render_preprocessing("pls", normalize_default=0, include_second_deriv=True)
+    with _pp2:
+        st.markdown("**Salt calibration range**")
+        _s1, _s2 = st.columns(2)
+        salt_wn_min = _s1.number_input("Salt min (cm⁻¹)", value=940,  step=10, key="salt_wn_min",
+                                       help="Lower bound of the wavenumber region for salt PLS.")
+        salt_wn_max = _s2.number_input("Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
+                                       help="Upper bound of the salt region.")
+        salt_normalize = st.selectbox(
+            "Salt normalization",
+            _NORM_OPTS, index=0, format_func=_NORM_FMT,
+            key="salt_normalize",
+            help="Normalization applied only to salt standards and linescan salt preprocessing.",
+        )
+        st.markdown("**Concentration units**")
+        unit = st.selectbox("Protein concentration unit", ["mg/mL", "mM"], key="pls_unit")
+        protein_mw = 5808.0
+        if unit == "mM":
+            protein_mw = float(st.number_input("Protein MW (g/mol)", value=5808, min_value=100,
+                                               key="pls_protein_mw"))
+        conv = 1000.0 / protein_mw if unit == "mM" else 1.0
+        crowder_unit = st.selectbox(
+            "Molecular crowder unit", ["wt%", "mg/mL", "mM"],
+            key="pls_crowder_unit",
+            help="Unit of the concentration column in the crowder standards CSV.",
+        )
+        crowder_mw   = 1000.0
+        crowder_conv = 1.0
+        if crowder_unit == "mM":
+            crowder_mw   = float(st.number_input(
+                "Crowder MW (g/mol)", value=1000, min_value=10, key="crowder_mw_input",
+            ))
+            crowder_conv = 1000.0 / crowder_mw
 
     build_btn = st.button(
         "▶ Build PLS Model",
@@ -748,6 +728,11 @@ with tab_mcr:
                  "NNLS enforces non-negative spectral values.",
         )
 
+    st.divider()
+    st.subheader("Preprocessing")
+    with st.expander("MCR preprocessing settings", expanded=True):
+        mcr_prep = _render_preprocessing("mcr", normalize_default=1)
+
     run_btn = st.button(
         "▶ Run MCR Analysis",
         use_container_width=True,
@@ -760,48 +745,33 @@ with tab_mcr:
     st.divider()
     st.markdown("### Results")
 
-# Collect settings into a dict used by analysis.py
+# Settings for MCR (uses mcr_prep from MCR tab)
 settings = dict(
-    baseline=baseline,
-    ball_radius=ball_radius,
-    als_lam=als_lam,
-    als_p=als_p,
-    rs_lam=rs_lam,
-    rs_poly_order=rs_poly_order,
-    smooth=smooth,
-    sg_window=sg_window,
-    sg_poly=sg_poly,
-    gaussian_sigma=gaussian_sigma,
-    fft_cutoff=fft_cutoff,
-    normalize=normalize_mcr,
-    normalize_pls=normalize_pls,
-    normalize_mcr=normalize_mcr,
-    normalize_cls=normalize_cls,
+    **mcr_prep,
+    normalize_pls=pls_prep["normalize"],
+    normalize_mcr=mcr_prep["normalize"],
+    normalize_cls=cls_prep["normalize"],
     salt_normalize=salt_normalize,
-    spike_remove=spike_remove,
-    spike_threshold=spike_threshold,
-    second_deriv=False,   # second derivative is PLS-only; not applied to MCR/CLS
-    sd_window=11,
-    sd_poly=2,
-    wn_min=mcr_wn_min,
-    wn_max=mcr_wn_max,
-    use_cut=use_cut,
-    wn_cut_min=wn_cut_min,
-    wn_cut_max=wn_cut_max,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
-# PLS settings: per-method spectral range, PLS normalization, optional second derivative
-pls_settings = dict(settings, normalize=normalize_pls,
-                    second_deriv=second_deriv,
-                    sd_window=sd_window if second_deriv else 11,
-                    sd_poly=sd_poly   if second_deriv else 2,
-                    wn_min=pls_wn_min,
-                    wn_max=pls_wn_max)
-# CLS settings: per-method spectral range, CLS normalization, no second derivative
-cls_settings = dict(settings, normalize=normalize_cls,
-                    wn_min=cls_wn_min,
-                    wn_max=cls_wn_max)
+# Settings for PLS (uses pls_prep from PLS tab)
+pls_settings = dict(
+    **pls_prep,
+    normalize_pls=pls_prep["normalize"],
+    normalize_mcr=mcr_prep["normalize"],
+    normalize_cls=cls_prep["normalize"],
+    salt_normalize=salt_normalize,
+    salt_wn_min=salt_wn_min,
+    salt_wn_max=salt_wn_max,
+)
+# Settings for CLS (uses cls_prep from CLS tab)
+cls_settings = dict(
+    **cls_prep,
+    normalize_cls=cls_prep["normalize"],
+    normalize_pls=pls_prep["normalize"],
+    normalize_mcr=mcr_prep["normalize"],
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -974,13 +944,15 @@ if build_btn:
                 _auto_results = {}
                 _auto_prog = st.progress(0, text="Applying PLS to linescans…")
                 _auto_sm = "xy"
+                _rn_auto = st.session_state.get("file_renames", {})
                 for _ai, _af in enumerate(linescan_files):
-                    _auto_prog.progress(_ai / len(linescan_files), text=f"Processing {_af.name}…")
+                    _adname = _rn_auto.get(_af.name, _af.name)
+                    _auto_prog.progress(_ai / len(linescan_files), text=f"Processing {_adname}…")
                     try:
                         _awn, _aX, _apos = an.load_linescan_bytes(_af.read(), _af.name)
                         _af.seek(0)
                         _auto_sm = an.detect_scan_mode(_apos)
-                        _auto_results[_af.name] = an.process_linescan(
+                        _auto_results[_adname] = an.process_linescan(
                             _awn, _aX, _apos,
                             scan_mode=_auto_sm,
                             pls_protein_info=pls_protein,
@@ -1022,10 +994,12 @@ if run_btn:
         # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
         _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)
         results       = {}
+        _rn           = st.session_state.get("file_renames", {})
 
         prog = st.progress(0, text="Processing linescans…")
         for i, f in enumerate(linescan_files):
-            prog.progress(i / len(linescan_files), text=f"Processing {f.name}…")
+            _dname = _rn.get(f.name, f.name)
+            prog.progress(i / len(linescan_files), text=f"Processing {_dname}…")
             try:
                 wn, X, positions = an.load_linescan_bytes(f.read(), f.name)
                 f.seek(0)
@@ -1094,9 +1068,9 @@ if run_btn:
                     _res["pca_var_exp"]  = _pca_var_exp
                     _res["pca_loadings"] = _pca_loadings_stored
                     _res["pca_wn"]       = _pca_wn_stored
-                results[f.name] = _res
+                results[_dname] = _res
             except Exception as exc:
-                st.warning(f"Could not process {f.name}: {exc}")
+                st.warning(f"Could not process {_dname}: {exc}")
         prog.progress(1.0, text="Done!")
         st.session_state["results"]   = results
         st.session_state["scan_mode"] = sm
@@ -2691,6 +2665,11 @@ with tab_cls:
         except Exception:
             pass
 
+    st.divider()
+    st.subheader("Preprocessing")
+    with st.expander("CLS preprocessing settings", expanded=True):
+        cls_prep = _render_preprocessing("cls", normalize_default=1)
+
     _cls_btn = st.button(
         "▶ Run CLS", key="run_cls_btn",
         disabled=(_cls_ref_src is None or not linescan_files),
@@ -2707,13 +2686,15 @@ with tab_cls:
             _ST_raw = _df_r.iloc[_rmask, 1:].to_numpy(dtype=float)
             _wn_csv = pd.to_numeric(_df_r.columns[1:], errors="coerce").values
             _cls_out = {}
+            _rn_cls = st.session_state.get("file_renames", {})
             for _f_cls in linescan_files:
+                _cls_dname = _rn_cls.get(_f_cls.name, _f_cls.name)
                 _wn_c_raw, _X_c_raw, _pos_c = an.load_linescan_bytes(_f_cls.read(), _f_cls.name)
                 _f_cls.seek(0)
                 _sm_c = an.detect_scan_mode(_pos_c)
                 _X_c_proc, _wn_c_proc, _ = an.preprocess_matrix(_X_c_raw, _wn_c_raw, _s_cls)
                 _dist_c = an.compute_cumulative_distance(_pos_c, _sm_c)
-                _cls_out[_f_cls.name] = dict(
+                _cls_out[_cls_dname] = dict(
                     **an.run_cls(_X_c_proc, _wn_c_proc, _ST_raw, _wn_csv, _s_cls),
                     distance=_dist_c,
                     X_proc=_X_c_proc,
