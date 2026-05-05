@@ -186,7 +186,9 @@ def preprocess_matrix(
         mask   = build_mask(wn_original, wn_min, wn_max)
         eff_settings = dict(
             settings,
-            normalize=settings.get("salt_normalize", "none"),
+            baseline  = settings.get("salt_baseline",  "none"),
+            smooth    = settings.get("salt_smooth",     "none"),
+            normalize = settings.get("salt_normalize",  "none"),
         )
     else:
         wn_min  = settings.get("wn_min", 700)

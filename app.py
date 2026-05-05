@@ -386,7 +386,8 @@ _BASELINE_FMT = lambda x: {
 
 
 def _render_preprocessing(pfx: str, normalize_default: int = 0,
-                           include_second_deriv: bool = False) -> dict:
+                           include_second_deriv: bool = False,
+                           section_label: str = "Spectral cut-and-keep") -> dict:
     """Render full preprocessing widget panel in chronological application order:
     spectral cut-and-keep → spike removal → baseline → smoothing → normalization → 2nd deriv.
 
@@ -394,14 +395,17 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
     independently inside the PLS, MCR, and CLS tabs without key collisions.
     Returns a settings dict compatible with preprocess_matrix().
     """
-    # ── 1. Spectral cut-and-keep (applied first: masking before per-spectrum steps) ──
-    st.markdown("**Spectral cut-and-keep**")
+    # ── 1. Spectral range (applied first: masking before per-spectrum steps) ──
+    st.markdown(f"**{section_label}**")
     _w1, _w2 = st.columns(2)
     wn_min = _w1.number_input("Min (cm⁻¹)", value=700,  step=50, key=f"{pfx}_wn_min")
     wn_max = _w2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{pfx}_wn_max")
     use_cut = st.toggle(
         "Exclude gap region", value=True, key=f"{pfx}_use_cut",
-        help="Remove silent region (e.g. 1850–2750 cm⁻¹).",
+        help=(
+            "Removes a spectral gap from the kept region. Applied at step 1 (masking), "
+            "before spike removal, baseline, smoothing, or normalisation."
+        ),
     )
     wn_cut_min = wn_cut_max = None
     if use_cut:
@@ -640,15 +644,17 @@ with tab_pls:
         )
 
     st.divider()
-    st.subheader("Preprocessing")
-    pls_prep = _render_preprocessing("pls", normalize_default=0, include_second_deriv=True)
+    pls_prep = _render_preprocessing(
+        "pls", normalize_default=0, include_second_deriv=True,
+        section_label="PLS calibration preprocessing",
+    )
 
     # Salt calibration preprocessing — only shown when a salt standard is provided
     if salt_std_src:
-        st.markdown("**Salt calibration preprocessing**")
+        st.markdown("**PLS salt calibration preprocessing**")
         st.caption(
             "Applied to salt spectra only. Typically a narrow fingerprint region "
-            "covering the sulphate/phosphate/chloride band."
+            "covering the sulphate or phosphate band."
         )
         _s1, _s2 = st.columns(2)
         salt_wn_min = _s1.number_input(
@@ -659,15 +665,35 @@ with tab_pls:
             "Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
             help="Upper bound of the salt region.",
         )
+        _none_idx = _BASELINE_OPTS.index("none")
+        salt_baseline = st.selectbox(
+            "Salt baseline correction", _BASELINE_OPTS,
+            index=_none_idx, format_func=_BASELINE_FMT, key="salt_baseline",
+            help="Baseline correction applied to salt spectra before PLS prediction.",
+        )
+        salt_smooth = st.selectbox(
+            "Salt smoothing",
+            ["none", "savgol", "gaussian", "fft_lowpass"],
+            index=0,
+            format_func=lambda x: {
+                "none": "None", "savgol": "Savitzky-Golay",
+                "gaussian": "Gaussian", "fft_lowpass": "FFT low-pass filter",
+            }[x],
+            key="salt_smooth",
+            help="Smoothing applied to salt spectra.",
+        )
         salt_normalize = st.selectbox(
-            "Salt normalization", _NORM_OPTS, index=0, format_func=_NORM_FMT,
+            "Salt normalization", _NORM_OPTS,
+            index=_NORM_OPTS.index("none"), format_func=_NORM_FMT,
             key="salt_normalize",
             help="Normalization applied only to salt standards and linescan salt preprocessing.",
         )
     else:
         salt_wn_min    = st.session_state.get("salt_wn_min",    940)
         salt_wn_max    = st.session_state.get("salt_wn_max",    1020)
-        salt_normalize = st.session_state.get("salt_normalize", "snv")
+        salt_baseline  = st.session_state.get("salt_baseline",  "none")
+        salt_smooth    = st.session_state.get("salt_smooth",    "none")
+        salt_normalize = st.session_state.get("salt_normalize", "none")
 
     build_btn = st.button(
         "▶ Build PLS Model",
@@ -799,6 +825,8 @@ settings = dict(
     normalize_pls=normalize_pls,
     normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
+    salt_baseline=salt_baseline,
+    salt_smooth=salt_smooth,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
@@ -808,6 +836,8 @@ pls_settings = dict(
     normalize_pls=normalize_pls,
     normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
+    salt_baseline=salt_baseline,
+    salt_smooth=salt_smooth,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
