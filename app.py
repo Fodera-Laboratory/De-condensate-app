@@ -389,29 +389,17 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
                            include_second_deriv: bool = False,
                            section_label: str = "Spectral cut-and-keep") -> dict:
     """Render full preprocessing widget panel in chronological application order:
-    spectral cut-and-keep → spike removal → baseline → smoothing → normalization → 2nd deriv.
+    range → spike removal → baseline → smoothing → gap exclusion → normalisation → 2nd deriv.
 
     All widget keys are prefixed with *pfx* so the same function can be called
     independently inside the PLS, MCR, and CLS tabs without key collisions.
     Returns a settings dict compatible with preprocess_matrix().
     """
-    # ── 1. Spectral range (applied first: masking before per-spectrum steps) ──
+    # ── 1. Spectral range (applied first: min/max masking) ────────────────────
     st.markdown(f"**{section_label}**")
     _w1, _w2 = st.columns(2)
     wn_min = _w1.number_input("Min (cm⁻¹)", value=700,  step=50, key=f"{pfx}_wn_min")
     wn_max = _w2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{pfx}_wn_max")
-    use_cut = st.toggle(
-        "Exclude gap region", value=True, key=f"{pfx}_use_cut",
-        help=(
-            "Removes a spectral gap from the kept region. Applied at step 1 (masking), "
-            "before spike removal, baseline, smoothing, or normalisation."
-        ),
-    )
-    wn_cut_min = wn_cut_max = None
-    if use_cut:
-        _g1, _g2 = st.columns(2)
-        wn_cut_min = _g1.number_input("Gap from", value=1850, step=50, key=f"{pfx}_wn_cut_min")
-        wn_cut_max = _g2.number_input("Gap to",   value=2750, step=50, key=f"{pfx}_wn_cut_max")
 
     # ── 2. Spike removal ──────────────────────────────────────────────────────
     _sr1, _sr2 = st.columns(2)
@@ -465,7 +453,21 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
                                key=f"{pfx}_fft_cut",
                                help="Fraction of Fourier components to keep (0.1 = lowest 10%).")
 
-    # ── 5. Normalization ──────────────────────────────────────────────────────
+    # ── 5. Gap exclusion (after baseline/smoothing, before normalisation) ─────
+    use_cut = st.toggle(
+        "Exclude gap region", value=True, key=f"{pfx}_use_cut",
+        help=(
+            "Removes the silent spectral region after baseline correction and smoothing, "
+            "but before normalisation — so the normalisation sees only meaningful signal."
+        ),
+    )
+    wn_cut_min = wn_cut_max = None
+    if use_cut:
+        _g1, _g2 = st.columns(2)
+        wn_cut_min = _g1.number_input("Gap from", value=1850, step=50, key=f"{pfx}_wn_cut_min")
+        wn_cut_max = _g2.number_input("Gap to",   value=2750, step=50, key=f"{pfx}_wn_cut_max")
+
+    # ── 6. Normalisation ──────────────────────────────────────────────────────
     normalize = st.selectbox(
         "Normalization", _NORM_OPTS, index=normalize_default,
         format_func=_NORM_FMT, key=f"{pfx}_normalize", help=_HELP_NORMALISATION,

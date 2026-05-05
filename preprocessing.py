@@ -195,32 +195,42 @@ def preprocess_matrix(
                 for i in range(matrix.shape[0])]
         return np.vstack(rows), wn, mask
 
-    # Non-salt path:
-    # Step 1 — apply spectral range (min/max) only; gap exclusion comes last
+    # Non-salt path — hybrid order:
+    # 1. Range mask (wn_min/wn_max)
+    # 2. Spike removal → baseline → smoothing  (on the full kept range)
+    # 3. Gap exclusion  (remove silent region before normalisation)
+    # 4. Normalisation → second derivative
+
     wn_min = settings.get("wn_min", 700)
     wn_max = settings.get("wn_max", 3900)
     range_mask = build_mask(wn_original, wn_min, wn_max)
-    wn = wn_original[range_mask]
+    wn_full = wn_original[range_mask]
 
-    # Step 2 — per-spectrum preprocessing on the full kept range
-    rows = [_preprocess_spectrum(matrix[i][range_mask].copy(), wn, settings)
+    # Steps 2: spike removal, baseline, smoothing — skip normalise and 2nd-deriv for now
+    pre_settings = dict(settings, normalize="none", second_deriv=False)
+    rows = [_preprocess_spectrum(matrix[i][range_mask].copy(), wn_full, pre_settings)
             for i in range(matrix.shape[0])]
     X_proc = np.vstack(rows)
 
-    # Step 3 — apply gap exclusion as the final step
+    # Step 3: gap exclusion
     use_cut = settings.get("use_cut", False)
     cut_min = settings.get("wn_cut_min") if use_cut else None
     cut_max = settings.get("wn_cut_max") if use_cut else None
     if cut_min is not None and cut_max is not None:
-        gap_keep = (wn < cut_min) | (wn > cut_max)
-        X_proc   = X_proc[:, gap_keep]
-        wn       = wn[gap_keep]
+        gap_keep   = (wn_full < cut_min) | (wn_full > cut_max)
+        X_proc     = X_proc[:, gap_keep]
+        wn         = wn_full[gap_keep]
         final_mask = range_mask.copy()
         final_mask[np.where(range_mask)[0][~gap_keep]] = False
     else:
+        wn         = wn_full
         final_mask = range_mask
 
-    return X_proc, wn, final_mask
+    # Step 4: normalisation and optional second derivative
+    post_settings = dict(settings, baseline="none", smooth="none", spike_remove=False)
+    rows = [_preprocess_spectrum(X_proc[i].copy(), wn, post_settings)
+            for i in range(X_proc.shape[0])]
+    return np.vstack(rows), wn, final_mask
 
 
 # ─────────────────────────────────────────────────────────────────────────────
