@@ -2580,7 +2580,7 @@ with tab_calib:
         ))
         _fig_mb.add_trace(go.Scatter(
             x=_dist, y=_prot_frac_mb * 100, name="Protein",
-            mode="lines", line=dict(color="blue", width=1.5),
+            mode="lines", line=dict(color=COLORS[0], width=1.5),
         ))
         if _has_p2 and _r.get("pls_protein2") is not None:
             _fig_mb.add_trace(go.Scatter(
@@ -2590,7 +2590,7 @@ with tab_calib:
         if np.any(_peg_frac_mb > 0):
             _fig_mb.add_trace(go.Scatter(
                 x=_dist, y=_peg_frac_mb * 100, name="Crowder",
-                mode="lines", line=dict(color="green", width=1.5),
+                mode="lines", line=dict(color=COLORS[2], width=1.5),
             ))
         _fig_mb.update_layout(
             xaxis_title=_dl,
@@ -3115,7 +3115,7 @@ with tab_cls:
                         ))
                         _fig_wc_mf.add_trace(go.Scatter(
                             x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
-                            mode="lines", line=dict(color="blue", width=1.5),
+                            mode="lines", line=dict(color=COLORS[0], width=1.5),
                         ))
                         if _Speg_ls_wc is not None and _R_peg_wc is not None:
                             _P_peg_ls = np.clip(
@@ -3123,7 +3123,7 @@ with tab_cls:
                             )
                             _fig_wc_mf.add_trace(go.Scatter(
                                 x=_dist_wc, y=_P_peg_ls * 100, name="Crowder",
-                                mode="lines", line=dict(color="green", width=1.5),
+                                mode="lines", line=dict(color=COLORS[2], width=1.5),
                             ))
                         _fig_wc_mf.update_layout(
                             xaxis_title=_dlbl_wc,
