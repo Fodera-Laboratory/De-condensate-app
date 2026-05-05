@@ -190,21 +190,37 @@ def preprocess_matrix(
             smooth    = settings.get("salt_smooth",     "none"),
             normalize = settings.get("salt_normalize",  "none"),
         )
-    else:
-        wn_min  = settings.get("wn_min", 700)
-        wn_max  = settings.get("wn_max", 3900)
-        cut_min = settings.get("wn_cut_min") if settings.get("use_cut") else None
-        cut_max = settings.get("wn_cut_max") if settings.get("use_cut") else None
-        mask    = build_mask(wn_original, wn_min, wn_max, cut_min, cut_max)
-        eff_settings = settings
+        wn = wn_original[mask]
+        rows = [_preprocess_spectrum(matrix[i][mask].copy(), wn, eff_settings)
+                for i in range(matrix.shape[0])]
+        return np.vstack(rows), wn, mask
 
-    wn   = wn_original[mask]
-    rows = []
-    for i in range(matrix.shape[0]):
-        I = matrix[i][mask].copy()
-        I = _preprocess_spectrum(I, wn, eff_settings)
-        rows.append(I)
-    return np.vstack(rows), wn, mask
+    # Non-salt path:
+    # Step 1 — apply spectral range (min/max) only; gap exclusion comes last
+    wn_min = settings.get("wn_min", 700)
+    wn_max = settings.get("wn_max", 3900)
+    range_mask = build_mask(wn_original, wn_min, wn_max)
+    wn = wn_original[range_mask]
+
+    # Step 2 — per-spectrum preprocessing on the full kept range
+    rows = [_preprocess_spectrum(matrix[i][range_mask].copy(), wn, settings)
+            for i in range(matrix.shape[0])]
+    X_proc = np.vstack(rows)
+
+    # Step 3 — apply gap exclusion as the final step
+    use_cut = settings.get("use_cut", False)
+    cut_min = settings.get("wn_cut_min") if use_cut else None
+    cut_max = settings.get("wn_cut_max") if use_cut else None
+    if cut_min is not None and cut_max is not None:
+        gap_keep = (wn < cut_min) | (wn > cut_max)
+        X_proc   = X_proc[:, gap_keep]
+        wn       = wn[gap_keep]
+        final_mask = range_mask.copy()
+        final_mask[np.where(range_mask)[0][~gap_keep]] = False
+    else:
+        final_mask = range_mask
+
+    return X_proc, wn, final_mask
 
 
 # ─────────────────────────────────────────────────────────────────────────────
