@@ -539,11 +539,23 @@ with tab_files:
         )
 
     with _fc2:
-        st.subheader("Spectral Range")
-        c1, c2 = st.columns(2)
-        wn_min = c1.number_input("Protein min (cm⁻¹)", value=700,  step=50, key="wn_min")
-        wn_max = c2.number_input("Protein max (cm⁻¹)", value=3900, step=50, key="wn_max")
+        st.subheader("Spectral range")
+        st.markdown("**PLS preprocessing**")
+        _r1c1, _r1c2 = st.columns(2)
+        pls_wn_min = _r1c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="pls_wn_min")
+        pls_wn_max = _r1c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="pls_wn_max")
 
+        st.markdown("**MCR preprocessing**")
+        _r2c1, _r2c2 = st.columns(2)
+        mcr_wn_min = _r2c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="mcr_wn_min")
+        mcr_wn_max = _r2c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="mcr_wn_max")
+
+        st.markdown("**CLS preprocessing**")
+        _r3c1, _r3c2 = st.columns(2)
+        cls_wn_min = _r3c1.number_input("Min (cm⁻¹)", value=700,  step=50, key="cls_wn_min")
+        cls_wn_max = _r3c2.number_input("Max (cm⁻¹)", value=3900, step=50, key="cls_wn_max")
+
+        st.markdown("**Shared gap exclusion** (applied to all methods)")
         use_cut = st.toggle("Exclude gap region", value=True, key="use_cut",
                             help="E.g. remove the 1850–2750 cm⁻¹ silent region.")
         wn_cut_min = wn_cut_max = None
@@ -558,12 +570,25 @@ with tab_files:
         salt_wn_max = c6.number_input("Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
                                        help="Upper bound of the salt region.")
 
-        st.subheader("Concentration unit")
+        st.subheader("Concentration units")
         unit = st.selectbox("Protein concentration unit", ["mg/mL", "mM"])
         protein_mw = 5808.0
         if unit == "mM":
             protein_mw = float(st.number_input("Protein MW (g/mol)", value=5808, min_value=100))
         conv = 1000.0 / protein_mw if unit == "mM" else 1.0
+
+        crowder_unit = st.selectbox(
+            "Molecular crowder unit",
+            ["wt%", "mg/mL", "mM"],
+            help="Unit of the concentration column in the crowder standards CSV.",
+        )
+        crowder_mw   = 1000.0
+        crowder_conv = 1.0
+        if crowder_unit == "mM":
+            crowder_mw   = float(st.number_input(
+                "Crowder MW (g/mol)", value=1000, min_value=10, key="crowder_mw_input",
+            ))
+            crowder_conv = 1000.0 / crowder_mw
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -596,7 +621,7 @@ with tab_pls:
         )
         peg_std_src = _std_picker(
             "Molecular crowder standard CSV",
-            "Col 0: concentration (wt%), remaining cols: spectra. "
+            f"Col 0: concentration ({crowder_unit}), remaining cols: spectra. "
             "When provided, a dual or triple PLS model is trained.",
             "peg", "PEG", optional=True,
         )
@@ -758,21 +783,25 @@ settings = dict(
     second_deriv=False,   # second derivative is PLS-only; not applied to MCR/CLS
     sd_window=11,
     sd_poly=2,
-    wn_min=wn_min,
-    wn_max=wn_max,
+    wn_min=mcr_wn_min,
+    wn_max=mcr_wn_max,
     use_cut=use_cut,
     wn_cut_min=wn_cut_min,
     wn_cut_max=wn_cut_max,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
-# PLS settings: use PLS normalization and honour the second-derivative toggle
+# PLS settings: per-method spectral range, PLS normalization, optional second derivative
 pls_settings = dict(settings, normalize=normalize_pls,
                     second_deriv=second_deriv,
                     sd_window=sd_window if second_deriv else 11,
-                    sd_poly=sd_poly   if second_deriv else 2)
-# CLS settings: use CLS normalization, no second derivative
-cls_settings = dict(settings, normalize=normalize_cls)
+                    sd_poly=sd_poly   if second_deriv else 2,
+                    wn_min=pls_wn_min,
+                    wn_max=pls_wn_max)
+# CLS settings: per-method spectral range, CLS normalization, no second derivative
+cls_settings = dict(settings, normalize=normalize_cls,
+                    wn_min=cls_wn_min,
+                    wn_max=cls_wn_max)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -801,7 +830,7 @@ if build_btn:
                 if peg_std_src:
                     with st.spinner("Loading & preprocessing molecular crowder standards…"):
                         df_peg = _read_csv_src(peg_std_src)
-                        y_peg = df_peg.iloc[:, 0].to_numpy(dtype=float)
+                        y_peg = df_peg.iloc[:, 0].to_numpy(dtype=float) * crowder_conv
                         X_peg_raw = df_peg.iloc[:, 1:].to_numpy()
                         X_peg_proc, _, _ = an.preprocess_matrix(X_peg_raw, wn_ref, pls_settings)
 
@@ -905,6 +934,8 @@ if build_btn:
             st.session_state["settings"]       = settings
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
+            st.session_state["crowder_unit"]   = crowder_unit
+            st.session_state["crowder_mw"]     = crowder_mw
             st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
             st.session_state["mcr_params"]    = dict(
                 max_iter=int(mcr_max_iter),
@@ -920,7 +951,7 @@ if build_btn:
                     msg_parts.append(
                         f"Dual protein+molecular crowder PLS: {pls_protein['n_components']} LVs, "
                         f"CV RMSE — Protein: {pls_protein['cv_rmse_protein']:.3f} {unit}, "
-                        f"Molecular crowder: {pls_protein['cv_rmse_peg']:.3f} wt%"
+                        f"Molecular crowder: {pls_protein['cv_rmse_peg']:.3f} {crowder_unit}"
                     )
                 else:
                     msg_parts.append(
@@ -1142,8 +1173,9 @@ with tab_calib:
     if "models" not in st.session_state:
         st.info("Build a PLS model first — upload standard CSVs above and click ▶ Build PLS Model.")
     else:
-        models = st.session_state["models"]
-        unit   = st.session_state.get("unit", "mg/mL")
+        models        = st.session_state["models"]
+        unit          = st.session_state.get("unit", "mg/mL")
+        _crowder_unit = st.session_state.get("crowder_unit", "wt%")
         pls_p  = models.get("pls_protein")
         pls_s  = models.get("pls_salt")
         dual   = pls_p.get("dual", False) if pls_p else False
@@ -1163,7 +1195,7 @@ with tab_calib:
             m2.metric("Protein 1 CV RMSE",  f"{pls_p['cv_rmse_p1']:.4f} {unit}")
             m3.metric("Protein 1 Train R²", f"{pls_p['r2_p1_train']:.4f}")
             m4.metric(f"{_p2name} CV RMSE", f"{pls_p['cv_rmse_p2']:.4f} {unit}")
-            m5.metric("Crowder CV RMSE",    f"{pls_p['cv_rmse_peg']:.4f} wt%")
+            m5.metric("Crowder CV RMSE",    f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             m6.metric("Crowder Train R²",   f"{pls_p['r2_peg_train']:.4f}")
 
             wn_p   = pls_p["wn"]
@@ -1179,7 +1211,7 @@ with tab_calib:
                     f"a)  Protein 1 (actual vs predicted, {unit})",
                     f"b)  {_p2name} (actual vs predicted, {unit})",
                     "c)  CV vs Training RMSE",
-                    "d)  Molecular crowder (actual vs predicted, wt%)",
+                    f"d)  Molecular crowder (actual vs predicted, {_crowder_unit})",
                 ],
             )
 
@@ -1218,11 +1250,11 @@ with tab_calib:
             fig_t.update_xaxes(title_text=f"Actual ({unit})",  row=1, col=2)
             fig_t.update_xaxes(title_text="N components",      row=2, col=1,
                                tick0=1, dtick=2, range=[0.5, n_cv + 0.5])
-            fig_t.update_xaxes(title_text="Actual (wt%)",      row=2, col=2)
+            fig_t.update_xaxes(title_text=f"Actual ({_crowder_unit})",      row=2, col=2)
             fig_t.update_yaxes(title_text=f"Predicted ({unit})", row=1, col=1)
             fig_t.update_yaxes(title_text=f"Predicted ({unit})", row=1, col=2)
             fig_t.update_yaxes(title_text="RMSE",              row=2, col=1)
-            fig_t.update_yaxes(title_text="Predicted (wt%)",   row=2, col=2)
+            fig_t.update_yaxes(title_text=f"Predicted ({_crowder_unit})",   row=2, col=2)
             fig_t.update_layout(height=580, legend=dict(orientation="h", y=-0.12))
             st.plotly_chart(fig_t, use_container_width=True)
             st.caption(
@@ -1230,7 +1262,7 @@ with tab_calib:
                 f"**a)** Protein 1: R² = {pls_p['r2_p1_train']:.4f}, CV RMSE = {pls_p['cv_rmse_p1']:.4f} {unit}. "
                 f"**b)** {_p2name}: R² = {pls_p['r2_p2_train']:.4f}, CV RMSE = {pls_p['cv_rmse_p2']:.4f} {unit}. "
                 f"**c)** CV and training RMSE vs latent variables. "
-                f"**d)** Molecular crowder: R² = {pls_p['r2_peg_train']:.4f}, CV RMSE = {pls_p['cv_rmse_peg']:.4f} wt%."
+                f"**d)** Molecular crowder: R² = {pls_p['r2_peg_train']:.4f}, CV RMSE = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}."
             )
 
             if wn_p is not None:
@@ -1298,14 +1330,14 @@ with tab_calib:
             m1.metric("Components", pls_p["n_components"])
             m2.metric(f"Protein CV RMSE", f"{pls_p['cv_rmse_protein']:.4f} {unit}")
             m3.metric("Protein Train R²", f"{pls_p['r2_protein_train']:.4f}")
-            m4.metric("Crowder CV RMSE",  f"{pls_p['cv_rmse_peg']:.4f} wt%")
+            m4.metric("Crowder CV RMSE",  f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             m5.metric("Crowder Train R²", f"{pls_p['r2_peg_train']:.4f}")
 
             fig_d = make_subplots(
                 rows=2, cols=2,
                 subplot_titles=[
                     f"a)  Protein calibration (actual vs predicted, {unit})",
-                    "b)  Molecular crowder calibration (actual vs predicted, wt%)",
+                    f"b)  Molecular crowder calibration (actual vs predicted, {_crowder_unit})",
                     "c)  CV vs Training RMSE",
                     "d)  PLS loadings (all PCs)",
                 ],
@@ -1375,12 +1407,12 @@ with tab_calib:
                     ), row=2, col=2)
 
             fig_d.update_xaxes(title_text=f"Actual ({unit})",   row=1, col=1)
-            fig_d.update_xaxes(title_text="Actual (wt%)",       row=1, col=2)
+            fig_d.update_xaxes(title_text=f"Actual ({_crowder_unit})",       row=1, col=2)
             fig_d.update_xaxes(title_text="N components",       row=2, col=1,
                                tick0=1, dtick=2, range=[0.5, n_cv + 0.5])
             fig_d.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=2, col=2)
             fig_d.update_yaxes(title_text=f"Predicted ({unit})", row=1, col=1)
-            fig_d.update_yaxes(title_text="Predicted (wt%)",    row=1, col=2)
+            fig_d.update_yaxes(title_text=f"Predicted ({_crowder_unit})",    row=1, col=2)
             fig_d.update_yaxes(title_text="RMSE",               row=2, col=1)
             fig_d.update_yaxes(title_text="Loading",            row=2, col=2)
             fig_d.update_layout(height=580, legend=dict(orientation="h", y=-0.12))
@@ -1389,10 +1421,10 @@ with tab_calib:
                 f"PLS2 calibration using {pls_p['n_components']} latent variables to simultaneously predict "
                 f"protein and molecular crowder concentration. "
                 f"**a)** Protein: predicted vs actual ({unit}), train R² = {pls_p['r2_protein_train']:.4f}. "
-                f"**b)** Molecular crowder: predicted vs actual (wt%), train R² = {pls_p['r2_peg_train']:.4f}. "
+                f"**b)** Molecular crowder: predicted vs actual ({_crowder_unit}), train R² = {pls_p['r2_peg_train']:.4f}. "
                 f"**c)** Leave-one-out CV RMSE (red) and training RMSE (blue) as a function of the number of latent variables; "
                 f"the dashed line marks the selected optimum (opt = {pls_p['n_components']}). "
-                f"Protein CV RMSE = {pls_p['cv_rmse_protein']:.4f} {unit}; Molecular crowder CV RMSE = {pls_p['cv_rmse_peg']:.4f} wt%. "
+                f"Protein CV RMSE = {pls_p['cv_rmse_protein']:.4f} {unit}; Molecular crowder CV RMSE = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}. "
                 f"**d)** X-loadings for each latent variable, highlighting the spectral features driving the model."
             )
 
@@ -1417,7 +1449,7 @@ with tab_calib:
                     )
                     st.plotly_chart(fig_coef, use_container_width=True)
                     st.caption(
-                        f"PLS2 regression coefficient vectors for protein ({unit}, blue) and molecular crowder (wt%, green) "
+                        f"PLS2 regression coefficient vectors for protein ({unit}, blue) and molecular crowder ({_crowder_unit}, green) "
                         f"over {wn_valid[0]:.0f}–{wn_valid[-1]:.0f} cm⁻¹. "
                         f"Positive coefficients indicate spectral features positively correlated with concentration; "
                         f"negative coefficients indicate anticorrelated features. "
@@ -1990,8 +2022,9 @@ with tab_calib:
     else:
         _r_all    = st.session_state["results"]
         _models   = st.session_state.get("models", {})
-        _unit     = st.session_state.get("unit", "mg/mL")
-        _sm       = st.session_state.get("scan_mode", "xy")
+        _unit          = st.session_state.get("unit", "mg/mL")
+        _crowder_unit  = st.session_state.get("crowder_unit", "wt%")
+        _sm            = st.session_state.get("scan_mode", "xy")
         _dl       = "Depth (µm)" if _sm == "z" else "Distance (µm)"
         _pls_p    = _models.get("pls_protein")
         _pls_s    = _models.get("pls_salt")
@@ -2013,11 +2046,11 @@ with tab_calib:
         if _has_pls:
             if _triple and _has_peg and _has_salt:
                 _specs     = [[{"secondary_y": True}, {"secondary_y": False}]]
-                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & crowder (wt%)", "b)  PLS salt (mM)"]
+                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & crowder ({_crowder_unit})", "b)  PLS salt (mM)"]
                 _n_bot     = 2
             elif _triple and _has_peg:
                 _specs     = [[{"secondary_y": True}]]
-                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & molecular crowder (wt%)"]
+                _subtitles = [f"a)  Protein 1 & {_p2name} ({_unit}) & molecular crowder ({_crowder_unit})"]
                 _n_bot     = 1
             elif _dual and _has_peg and _has_salt:
                 _specs     = [[{"secondary_y": True}, {"secondary_y": False}]]
@@ -2086,7 +2119,7 @@ with tab_calib:
                     line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
                 ), row=1, col=1, secondary_y=True)
                 _fig_bot.update_yaxes(
-                    title_text="Molecular crowder (wt%)",
+                    title_text=f"Molecular crowder ({_crowder_unit})",
                     title_font=dict(color=COLORS[2]), tickfont=dict(color=COLORS[2]),
                     row=1, col=1, secondary_y=True,
                 )
@@ -2121,7 +2154,7 @@ with tab_calib:
             if _triple and _has_p2:
                 _pls_parts.append(f"{_p2name} ± {_pls_p['cv_rmse_p2']:.4f} {_unit}")
             if _has_peg:
-                _pls_parts.append(f"molecular crowder ± {_pls_p['cv_rmse_peg']:.4f} wt%")
+                _pls_parts.append(f"molecular crowder ± {_pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             if _has_salt:
                 _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} mM")
             st.caption(
@@ -2149,7 +2182,7 @@ with tab_calib:
                         showlegend=False,
                     ), row=1, col=_sci + 1)
                     _fig_sc3.update_xaxes(title_text=f"{_plbl} ({_unit})", row=1, col=_sci + 1)
-                    _fig_sc3.update_yaxes(title_text="Molecular crowder (wt%)", row=1, col=_sci + 1)
+                    _fig_sc3.update_yaxes(title_text=f"Molecular crowder ({_crowder_unit})", row=1, col=_sci + 1)
                 _fig_sc3.update_layout(height=350)
                 st.plotly_chart(_fig_sc3, use_container_width=True)
                 st.caption(
@@ -2169,14 +2202,14 @@ with tab_calib:
                 ))
                 _fig_sc.update_layout(
                     title="Molecular crowder vs Protein (PLS)",
-                    xaxis_title=f"Protein ({_unit})", yaxis_title="Molecular crowder (wt%)",
+                    xaxis_title=f"Protein ({_unit})", yaxis_title=f"Molecular crowder ({_crowder_unit})",
                     height=350, width=420,
                 )
                 st.plotly_chart(_fig_sc)
                 st.caption(
                     f"Molecular crowder vs protein co-localisation scatter for *{_sel}*. "
                     f"Error bars: ±CV RMSE (protein: {_pls_p['cv_rmse_protein']:.4f} {_unit}; "
-                    f"molecular crowder: {_pls_p['cv_rmse_peg']:.4f} wt%)."
+                    f"molecular crowder: {_pls_p['cv_rmse_peg']:.4f} {_crowder_unit})."
                 )
             elif not _dual and _has_salt:
                 st.divider()
@@ -2229,10 +2262,10 @@ with tab_calib:
             if _has_peg:
                 _cols[_ci].markdown(
                     f"**Molecular crowder (PLS)**  \n"
-                    f"Min: {_r['pls_peg'].min():.3f} wt%  \n"
-                    f"Max: {_r['pls_peg'].max():.3f} wt%  \n"
-                    f"Mean: {_r['pls_peg'].mean():.3f} wt%  \n"
-                    f"±CV RMSE: {_pls_p['cv_rmse_peg']:.3f} wt%"
+                    f"Min: {_r['pls_peg'].min():.3f} {_crowder_unit}  \n"
+                    f"Max: {_r['pls_peg'].max():.3f} {_crowder_unit}  \n"
+                    f"Mean: {_r['pls_peg'].mean():.3f} {_crowder_unit}  \n"
+                    f"±CV RMSE: {_pls_p['cv_rmse_peg']:.3f} {_crowder_unit}"
                 )
                 _ci += 1
             if _has_salt:
@@ -2540,7 +2573,7 @@ with tab_calib:
                     f"Position {_pos_idx} ({_pos_dist:.1f} µm). "
                     f"Reconstruction RMSE = {_rmse_rec:.4f}. "
                     f"Protein: {float(_c_prot[_pos_idx]):.3f} {_unit}"
-                    + (f", crowder: {float(_c_crowd[_pos_idx]):.3f} wt%" if _c_crowd is not None else "")
+                    + (f", crowder: {float(_c_crowd[_pos_idx]):.3f} {_crowder_unit}" if _c_crowd is not None else "")
                     + (f", solvent factor: {float(_c_water[_pos_idx]):.4f}" if _c_water is not None else "")
                     + f", background max: {float(_rb_all[_pos_idx].max()):.4f}."
                 )
@@ -2548,22 +2581,39 @@ with tab_calib:
         # ── Estimated water content — mass balance ────────────────────────────
         st.divider()
         st.markdown("### Estimated water content — mass balance")
+        _mb_crowder_unit = st.session_state.get("crowder_unit", "wt%")
+        _mb_crowder_mw   = st.session_state.get("crowder_mw", 1000.0)
         st.caption(
             "Water mass fraction estimated from PLS predictions: "
             "P_water = 1 − P_protein − P_crowder. "
-            "Protein (mg/mL) is converted to mass fraction using solution density; "
-            "crowder (wt%) is divided by 100."
+            f"Protein ({_unit}) is converted to mass fraction using solution density; "
+            + (f"crowder (wt%) is divided by 100." if _mb_crowder_unit == "wt%"
+               else f"crowder ({_mb_crowder_unit}) is converted via solution density.")
         )
         _wc_mb_rho = st.number_input(
-            "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
+            "Solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
             key="pls_mb_density",
-            help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000).",
+            help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000). "
+                 "Also used for crowder if unit is mg/mL or mM.",
         )
         _prot_frac_mb = np.clip(np.array(_r["pls_protein"]), 0, None) / (_wc_mb_rho * 1000)
+        def _peg_to_frac(arr, unit, mw, rho):
+            if unit == "wt%":
+                return arr / 100
+            elif unit == "mg/mL":
+                return arr / (rho * 1000)
+            else:  # mM
+                return arr * mw / (rho * 1e6)
         if _has_peg:
-            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / 100
+            _peg_frac_mb = _peg_to_frac(
+                np.clip(np.array(_r["pls_peg"]), 0, None),
+                _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+            )
         elif _has_p2 and _r.get("pls_peg") is not None:
-            _peg_frac_mb = np.clip(np.array(_r["pls_peg"]), 0, None) / 100
+            _peg_frac_mb = _peg_to_frac(
+                np.clip(np.array(_r["pls_peg"]), 0, None),
+                _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+            )
         else:
             _peg_frac_mb = np.zeros_like(_prot_frac_mb)
         if _has_p2 and _r.get("pls_protein2") is not None:
@@ -2594,7 +2644,7 @@ with tab_calib:
             ))
         _fig_mb.update_layout(
             xaxis_title=_dl,
-            yaxis_title="Mass fraction (wt%)",
+            yaxis_title="Mass fraction (%)",
             height=300,
             legend=dict(orientation="h", y=-0.25),
             yaxis=dict(range=[0, 100]),
@@ -2602,11 +2652,11 @@ with tab_calib:
         )
         st.plotly_chart(_fig_mb, use_container_width=True)
         _mb_summary = (
-            f"Mean — Protein: {float(np.mean(_prot_frac_mb) * 100):.1f} wt%  |  "
-            f"Water: {float(np.mean(_water_frac_mb) * 100):.1f} wt%"
+            f"Mean — Protein: {float(np.mean(_prot_frac_mb) * 100):.1f}%  |  "
+            f"Water: {float(np.mean(_water_frac_mb) * 100):.1f}%"
         )
         if np.any(_peg_frac_mb > 0):
-            _mb_summary += f"  |  Crowder: {float(np.mean(_peg_frac_mb) * 100):.1f} wt%"
+            _mb_summary += f"  |  Crowder: {float(np.mean(_peg_frac_mb) * 100):.1f}%"
         st.caption(_mb_summary)
 
 
@@ -2867,7 +2917,8 @@ with tab_cls:
         )
 
         _pls_p_wc  = st.session_state.get("models", {}).get("pls_protein")
-        _unit_wc   = st.session_state.get("unit", "mg/mL")
+        _unit_wc          = st.session_state.get("unit", "mg/mL")
+        _crowder_unit_wc  = st.session_state.get("crowder_unit", "wt%")
 
         _wc_lbl_opts = ["— none —"] + list(_cls_labels)
         _wca, _wcb, _wcc, _wcd = st.columns(4)
@@ -2877,7 +2928,7 @@ with tab_cls:
         _wc_rho     = _wcd.number_input(
             "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
             help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000). "
-                 "Crowder is in wt% and is converted directly as φ = wt% / 100.",
+                 f"Crowder ({_crowder_unit_wc}): for wt% φ = wt%/100; for mg/mL φ = c/(ρ×1000); for mM φ = c×MW/(ρ×1e6).",
         )
 
         _wc_ready = (
@@ -2944,8 +2995,8 @@ with tab_cls:
                     "Protein standards CSV (mg/mL)", type="csv", key="wc_cal_prot_csv",
                 )
                 _cal_peg_src = _up_col_peg.file_uploader(
-                    "Crowder standards CSV (wt%)" if _peg_i_wc is not None
-                    else "Crowder standards CSV (optional, wt%)",
+                    f"Crowder standards CSV ({_crowder_unit_wc})" if _peg_i_wc is not None
+                    else f"Crowder standards CSV (optional, {_crowder_unit_wc})",
                     type="csv", key="wc_cal_peg_csv",
                 )
                 if _cal_prot_src is not None:
@@ -3127,7 +3178,7 @@ with tab_cls:
                             ))
                         _fig_wc_mf.update_layout(
                             xaxis_title=_dlbl_wc,
-                            yaxis_title="Mass fraction (wt%)",
+                            yaxis_title="Mass fraction (%)",
                             height=300,
                             legend=dict(orientation="h", y=-0.25),
                             yaxis=dict(range=[0, 100]),
@@ -3495,12 +3546,13 @@ with tab_further:
 
             return X, wn
 
-        results_all = st.session_state.get("results", {})
-        models      = st.session_state.get("models", {})
-        unit        = st.session_state.get("unit", "mg/mL")
-        sm          = st.session_state.get("scan_mode", "xy")
-        dist_label  = "Depth (µm)" if sm == "z" else "Distance (µm)"
-        pls_p_info  = models.get("pls_protein")
+        results_all   = st.session_state.get("results", {})
+        models        = st.session_state.get("models", {})
+        unit          = st.session_state.get("unit", "mg/mL")
+        crowder_unit  = st.session_state.get("crowder_unit", "wt%")
+        sm            = st.session_state.get("scan_mode", "xy")
+        dist_label    = "Depth (µm)" if sm == "z" else "Distance (µm)"
+        pls_p_info    = models.get("pls_protein")
         dual        = pls_p_info.get("dual", False) if pls_p_info else False
         comp_labels = models.get("comp_labels", [])
 
@@ -3654,7 +3706,7 @@ with tab_further:
         _label_opts["Spectrum index"] = np.arange(_X_all.shape[0], dtype=float)
         if _has_pls_results and _prot is not None:
             _label_opts[f"PLS Protein ({unit})"] = _prot
-        if _peg  is not None: _label_opts["PLS Molecular crowder (wt%)"] = _peg
+        if _peg  is not None: _label_opts[f"PLS Molecular crowder ({crowder_unit})"] = _peg
         if _salt is not None: _label_opts["PLS Salt"]       = _salt
         if _mcr_C is not None:
             for _k in range(_mcr_C.shape[1]):
@@ -4370,8 +4422,9 @@ with tab_image:
     if "results" not in st.session_state:
         st.info("Run the analysis first to generate scores for overlay.")
     else:
-        _ov_results = st.session_state["results"]
-        _ov_unit    = st.session_state.get("unit", "mg/mL")
+        _ov_results        = st.session_state["results"]
+        _ov_unit           = st.session_state.get("unit", "mg/mL")
+        _ov_crowder_unit   = st.session_state.get("crowder_unit", "wt%")
 
         # ── Magnification preset ───────────────────────────────────────────
         _MAG_PRESETS = {
@@ -4453,7 +4506,7 @@ with tab_image:
         if "pls_protein" in _ov_r0 and _ov_r0["pls_protein"] is not None:
             _ov_score_opts[f"PLS Protein ({_ov_unit})"] = "pls_protein"
         if "pls_peg" in _ov_r0 and _ov_r0["pls_peg"] is not None:
-            _ov_score_opts["PLS Molecular crowder (wt%)"] = "pls_peg"
+            _ov_score_opts[f"PLS Molecular crowder ({_ov_crowder_unit})"] = "pls_peg"
         if "pls_salt" in _ov_r0 and _ov_r0["pls_salt"] is not None:
             _ov_score_opts["PLS Salt (mM)"] = "pls_salt"
         if "C_mcr" in _ov_r0 and _ov_r0["C_mcr"] is not None:
@@ -4887,9 +4940,10 @@ with tab_download:
     if not _tab_dl_has_mcr_pls and not _tab_dl_has_cls:
         st.info("Run the analysis first.")
     else:
-        results_all = st.session_state.get("results") or {}
-        unit        = st.session_state.get("unit", "mg/mL")
-        sm          = st.session_state.get("scan_mode", "xy")
+        results_all   = st.session_state.get("results") or {}
+        unit          = st.session_state.get("unit", "mg/mL")
+        crowder_unit  = st.session_state.get("crowder_unit", "wt%")
+        sm            = st.session_state.get("scan_mode", "xy")
 
         # ── PLS / MCR linescan results ──────────────────────────────────────
         st.subheader("PLS / MCR linescan results")
@@ -5272,10 +5326,11 @@ with tab_download:
             _row_specs  = []
             _cap_parts  = []
             _row_tags   = []
-            _res_sv     = results_all
-            _sm_sv      = st.session_state.get("scan_mode", "xy")
-            _unit_sv    = st.session_state.get("unit", "mg/mL")
-            _clabels_sv = st.session_state.get("models", {}).get("comp_labels", [])
+            _res_sv          = results_all
+            _sm_sv           = st.session_state.get("scan_mode", "xy")
+            _unit_sv         = st.session_state.get("unit", "mg/mL")
+            _crowder_unit_sv = st.session_state.get("crowder_unit", "wt%")
+            _clabels_sv      = st.session_state.get("models", {}).get("comp_labels", [])
             _dlbl_sv    = "Depth (µm)" if _sm_sv == "z" else "Distance (µm)"
             _models_sv  = st.session_state.get("models", {})
             _pls_p_sv   = _models_sv.get("pls_protein")
@@ -5376,7 +5431,7 @@ with tab_download:
                             _axtw.fill_between(_dist, _peg - _cv_pg,
                                                _peg + _cv_pg,
                                                color=_MCOLS[2], alpha=0.15)
-                            _axtw.set_ylabel("Crowder (wt%)",
+                            _axtw.set_ylabel(f"Crowder ({_crowder_unit_sv})",
                                              color=_MCOLS[2], fontsize=_LS)
                             _axtw.tick_params(axis="y", colors=_MCOLS[2],
                                               labelsize=_TS, width=0.5, length=2)
@@ -5392,7 +5447,7 @@ with tab_download:
                                 )
                                 axs[1].set_xlabel(f"Protein ({unit})",
                                                   color=_MCOLS[0])
-                                axs[1].set_ylabel("Crowder (wt%)",
+                                axs[1].set_ylabel(f"Crowder ({_crowder_unit_sv})",
                                                   color=_MCOLS[2])
                                 axs[1].tick_params(axis="x", colors=_MCOLS[0],
                                                    labelsize=_TS)
@@ -5440,8 +5495,8 @@ with tab_download:
                     )
                     if _has_peg_sv:
                         _cap_pls += (
-                            f" Twin axis (green): crowder (wt%) "
-                            f"\u00b1 {_pls_p_sv['cv_rmse_peg']:.4f} wt% CV RMSE. "
+                            f" Twin axis (green): crowder ({_crowder_unit_sv}) "
+                            f"\u00b1 {_pls_p_sv['cv_rmse_peg']:.4f} {_crowder_unit_sv} CV RMSE. "
                             f"b) Crowder vs protein; error bars = \u00b1CV RMSE."
                         )
                     elif _has_salt_sv:
@@ -5608,8 +5663,8 @@ with tab_download:
                                        edgecolors="black", linewidths=0.3, zorder=3)
                         _mn2, _mx2 = _ygt.min(), _ygt.max()
                         axs[1].plot([_mn2, _mx2], [_mn2, _mx2], "k--", lw=0.6)
-                        axs[1].set_xlabel("Actual (wt%)")
-                        axs[1].set_ylabel("Predicted (wt%)")
+                        axs[1].set_xlabel(f"Actual ({_crowder_unit_sv})")
+                        axs[1].set_ylabel(f"Predicted ({_crowder_unit_sv})")
                         _style_ax(axs[1])
 
                     _row_specs.append((_ps("pls_cal_scatter", 2),
@@ -5619,7 +5674,7 @@ with tab_download:
                         f"PLS2 calibration, {_pls_p_sv['n_components']} LVs. "
                         f"a) Protein predicted vs actual ({_unit_sv}); "
                         f"R\u00b2 = {_pls_p_sv['r2_protein_train']:.4f}. "
-                        f"b) Crowder predicted vs actual (wt%); "
+                        f"b) Crowder predicted vs actual ({_crowder_unit_sv}); "
                         f"R\u00b2 = {_pls_p_sv['r2_peg_train']:.4f}."
                     )
 
@@ -5683,7 +5738,7 @@ with tab_download:
                             axs[0].plot(wn_v, coef[:, 1], color=_MCOLS[2], lw=_LW)
                             axs[0].axhline(0, color="black", lw=0.3, ls="--")
                             axs[0].set_xlabel("Wavenumber (cm\u207b\xb9)")
-                            axs[0].set_ylabel("Coeff. (wt%)")
+                            axs[0].set_ylabel(f"Coeff. ({_crowder_unit_sv})")
                             axs[0].set_xlim(wn_v[0], wn_v[-1])
                             _style_ax(axs[0])
 
@@ -5691,7 +5746,7 @@ with tab_download:
                                            _draw_coef_crowder, _fig_styles["pls_loadings"]))
                         _row_tags.append("pls_loadings")
                         _cap_parts.append(
-                            "PLS2 regression coefficients — molecular crowder (wt%)."
+                            f"PLS2 regression coefficients — molecular crowder ({_crowder_unit_sv})."
                         )
 
             # ── Salt PLS calibration ──────────────────────────────────────
