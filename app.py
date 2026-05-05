@@ -747,12 +747,15 @@ with tab_mcr:
     st.divider()
     st.markdown("### Results")
 
+# Labels used in the preview plot titles
+normalize_pls = pls_prep["normalize"]
+normalize_mcr = mcr_prep["normalize"]
+
 # Settings for MCR (uses mcr_prep from MCR tab)
 settings = dict(
     **mcr_prep,
-    normalize_pls=pls_prep["normalize"],
-    normalize_mcr=mcr_prep["normalize"],
-    normalize_cls=cls_prep["normalize"],
+    normalize_pls=normalize_pls,
+    normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
@@ -760,20 +763,13 @@ settings = dict(
 # Settings for PLS (uses pls_prep from PLS tab)
 pls_settings = dict(
     **pls_prep,
-    normalize_pls=pls_prep["normalize"],
-    normalize_mcr=mcr_prep["normalize"],
-    normalize_cls=cls_prep["normalize"],
+    normalize_pls=normalize_pls,
+    normalize_mcr=normalize_mcr,
     salt_normalize=salt_normalize,
     salt_wn_min=salt_wn_min,
     salt_wn_max=salt_wn_max,
 )
-# Settings for CLS (uses cls_prep from CLS tab)
-cls_settings = dict(
-    **cls_prep,
-    normalize_cls=cls_prep["normalize"],
-    normalize_pls=pls_prep["normalize"],
-    normalize_mcr=mcr_prep["normalize"],
-)
+# cls_settings is built inside tab_cls after cls_prep is defined
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2678,7 +2674,7 @@ with tab_cls:
         help="Upload linescan files and load a reference CSV first.",
     )
     if _cls_btn:
-        _s_cls = cls_settings
+        _s_cls = dict(**cls_prep)
         try:
             _df_r   = _read_csv_src(_cls_ref_src)
             _all_r  = _df_r.iloc[:, 0].tolist()
