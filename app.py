@@ -542,6 +542,8 @@ with tab_pls:
         "Upload standard CSV files and set cross-validation parameters, then click "
         "**▶ Build PLS Model**. Calibration results will appear below."
     )
+    # Read stored unit so the crowder help text below is correct before the widget renders
+    crowder_unit = st.session_state.get("pls_crowder_unit", "wt%")
     _pc1, _pc2 = st.columns([1, 1])
 
     with _pc1:
