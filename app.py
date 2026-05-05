@@ -513,6 +513,9 @@ tab_preview  = tab_files   # data preview appears at bottom of Files tab
 tab_calib    = tab_pls     # calibration results appear at bottom of PLS tab
 tab_results  = tab_mcr     # linescan results appear at bottom of MCR tab
 
+# Salt unit — read from session state so it is available in all tab blocks
+_salt_unit = st.session_state.get("salt_unit", "mM")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Files tab — linescan upload + global preprocessing + spectral range
 # ─────────────────────────────────────────────────────────────────────────────
@@ -553,17 +556,29 @@ with tab_pls:
         "Upload standard CSV files and set cross-validation parameters, then click "
         "**▶ Build PLS Model**. Calibration results will appear below."
     )
-    # Read stored unit so the crowder help text below is correct before the widget renders
+    # Read stored units so help text is correct before widgets render
     crowder_unit = st.session_state.get("pls_crowder_unit", "wt%")
+
     _pc1, _pc2 = st.columns([1, 1])
 
     with _pc1:
-        st.subheader("Standard spectra")
+        st.subheader("Standard spectra & units")
+
+        # ── Protein 1 ──────────────────────────────────────────────────────────
         protein_std_src = _std_picker(
             "Protein 1 standard CSV",
-            "Col 0: concentration (mg/mL), remaining cols: spectra.",
+            "Col 0: concentration, remaining cols: spectra.",
             "prot", "Protein",
         )
+        unit = st.selectbox("Protein unit", ["mg/mL", "mM"], key="pls_unit")
+        protein_mw = 5808.0
+        if unit == "mM":
+            protein_mw = float(st.number_input(
+                "Protein MW (g/mol)", value=5808, min_value=100, key="pls_protein_mw",
+            ))
+        conv = 1000.0 / protein_mw if unit == "mM" else 1.0
+
+        # ── Protein 2 (optional) ───────────────────────────────────────────────
         protein2_std_src = _std_picker(
             "Protein 2 standard CSV (optional)",
             "Col 0: concentration (same unit as Protein 1), remaining cols: spectra. "
@@ -574,17 +589,41 @@ with tab_pls:
             "Protein 2 name", value="Protein 2", key="p2_name",
             help="Label used in plots and Excel export for the second protein.",
         )
+
+        # ── Molecular crowder (optional) ───────────────────────────────────────
         peg_std_src = _std_picker(
             "Molecular crowder standard CSV",
             f"Col 0: concentration ({crowder_unit}), remaining cols: spectra. "
             "When provided, a dual or triple PLS model is trained.",
             "peg", "PEG", optional=True,
         )
+        crowder_unit = st.selectbox(
+            "Crowder unit", ["wt%", "mg/mL", "mM"],
+            key="pls_crowder_unit",
+            help="Unit of the concentration column in the crowder standards CSV.",
+        )
+        crowder_mw   = 1000.0
+        crowder_conv = 1.0
+        if crowder_unit == "mM":
+            crowder_mw   = float(st.number_input(
+                "Crowder MW (g/mol)", value=1000, min_value=10, key="crowder_mw_input",
+            ))
+            crowder_conv = 1000.0 / crowder_mw
+
+        # ── Salt (optional) ────────────────────────────────────────────────────
         salt_std_src = _std_picker(
             "Salt standard CSV",
             "Col 0: concentration, remaining cols: spectra.",
             "salt", "Salt", optional=True,
         )
+        if salt_std_src:
+            salt_unit = st.selectbox(
+                "Salt unit", ["mM", "mg/mL", "mmol/kg", "mM NaCl"],
+                key="salt_unit",
+                help="Unit of the concentration column in the salt standards CSV.",
+            )
+        else:
+            salt_unit = st.session_state.get("salt_unit", "mM")
 
     with _pc2:
         st.subheader("Cross-validation")
@@ -602,41 +641,33 @@ with tab_pls:
 
     st.divider()
     st.subheader("Preprocessing")
-    _pp1, _pp2 = st.columns([1, 1])
-    with _pp1:
-        pls_prep = _render_preprocessing("pls", normalize_default=0, include_second_deriv=True)
-    with _pp2:
-        st.markdown("**Salt calibration range**")
+    pls_prep = _render_preprocessing("pls", normalize_default=0, include_second_deriv=True)
+
+    # Salt calibration preprocessing — only shown when a salt standard is provided
+    if salt_std_src:
+        st.markdown("**Salt calibration preprocessing**")
+        st.caption(
+            "Applied to salt spectra only. Typically a narrow fingerprint region "
+            "covering the sulphate/phosphate/chloride band."
+        )
         _s1, _s2 = st.columns(2)
-        salt_wn_min = _s1.number_input("Salt min (cm⁻¹)", value=940,  step=10, key="salt_wn_min",
-                                       help="Lower bound of the wavenumber region for salt PLS.")
-        salt_wn_max = _s2.number_input("Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
-                                       help="Upper bound of the salt region.")
+        salt_wn_min = _s1.number_input(
+            "Salt min (cm⁻¹)", value=940, step=10, key="salt_wn_min",
+            help="Lower bound of the wavenumber region for salt PLS.",
+        )
+        salt_wn_max = _s2.number_input(
+            "Salt max (cm⁻¹)", value=1020, step=10, key="salt_wn_max",
+            help="Upper bound of the salt region.",
+        )
         salt_normalize = st.selectbox(
-            "Salt normalization",
-            _NORM_OPTS, index=0, format_func=_NORM_FMT,
+            "Salt normalization", _NORM_OPTS, index=0, format_func=_NORM_FMT,
             key="salt_normalize",
             help="Normalization applied only to salt standards and linescan salt preprocessing.",
         )
-        st.markdown("**Concentration units**")
-        unit = st.selectbox("Protein concentration unit", ["mg/mL", "mM"], key="pls_unit")
-        protein_mw = 5808.0
-        if unit == "mM":
-            protein_mw = float(st.number_input("Protein MW (g/mol)", value=5808, min_value=100,
-                                               key="pls_protein_mw"))
-        conv = 1000.0 / protein_mw if unit == "mM" else 1.0
-        crowder_unit = st.selectbox(
-            "Molecular crowder unit", ["wt%", "mg/mL", "mM"],
-            key="pls_crowder_unit",
-            help="Unit of the concentration column in the crowder standards CSV.",
-        )
-        crowder_mw   = 1000.0
-        crowder_conv = 1.0
-        if crowder_unit == "mM":
-            crowder_mw   = float(st.number_input(
-                "Crowder MW (g/mol)", value=1000, min_value=10, key="crowder_mw_input",
-            ))
-            crowder_conv = 1000.0 / crowder_mw
+    else:
+        salt_wn_min    = st.session_state.get("salt_wn_min",    940)
+        salt_wn_max    = st.session_state.get("salt_wn_max",    1020)
+        salt_normalize = st.session_state.get("salt_normalize", "snv")
 
     build_btn = st.button(
         "▶ Build PLS Model",
@@ -913,6 +944,7 @@ if build_btn:
             st.session_state["settings"]       = settings
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
+            st.session_state["salt_unit"]      = salt_unit
             st.session_state["crowder_unit"]   = crowder_unit
             st.session_state["crowder_mw"]     = crowder_mw
             st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
@@ -1723,12 +1755,12 @@ with tab_calib:
                     row=1, col=3,
                 )
             fig_s.update_xaxes(title_text="Wavenumber (cm⁻¹)", row=1, col=1)
-            fig_s.update_xaxes(title_text="Actual (mM)",        row=1, col=2)
+            fig_s.update_xaxes(title_text=f"Actual ({_salt_unit})",        row=1, col=2)
             fig_s.update_xaxes(title_text="Components",         row=1, col=3,
                                tick0=1, dtick=2, range=[0.5, n_cs + 0.5])
             fig_s.update_yaxes(title_text="Intensity (a.u.)",   row=1, col=1)
-            fig_s.update_yaxes(title_text="Predicted (mM)",     row=1, col=2)
-            fig_s.update_yaxes(title_text="RMSE (mM)",          row=1, col=3)
+            fig_s.update_yaxes(title_text=f"Predicted ({_salt_unit})",     row=1, col=2)
+            fig_s.update_yaxes(title_text=f"RMSE ({_salt_unit})",          row=1, col=3)
             fig_s.update_layout(height=320, legend=dict(orientation="h", y=-0.25))
             st.plotly_chart(fig_s, use_container_width=True)
             st.caption(
@@ -1736,9 +1768,9 @@ with tab_calib:
                 f"in the narrow sulfate Raman band ({wn_s[0]:.0f}–{wn_s[-1]:.0f} cm⁻¹) using "
                 f"{pls_s['n_components']} latent variable(s). "
                 f"**a)** Preprocessed standard spectra. "
-                f"**b)** Predicted vs actual salt concentration (mM); train R² = {pls_s['r2_train']:.4f}. "
+                f"**b)** Predicted vs actual salt concentration ({_salt_unit}); train R² = {pls_s['r2_train']:.4f}. "
                 f"**c)** Leave-one-out CV RMSE (red) and training RMSE (blue) as a function of latent variables; "
-                f"CV RMSE = {pls_s['cv_rmse']:.4f} mM at the selected optimum (opt = {pls_s['n_components']})."
+                f"CV RMSE = {pls_s['cv_rmse']:.4f} {_salt_unit} at the selected optimum (opt = {pls_s['n_components']})."
             )
 
             wn_s_valid = wn_s[pls_s["valid_features"]]
@@ -1767,7 +1799,7 @@ with tab_calib:
                     f"**a)** X-loadings for {pls_s['n_components']} latent variable(s) of the salt PLS model, "
                     f"showing the spectral features captured by each PC over "
                     f"{wn_s_valid[0]:.0f}–{wn_s_valid[-1]:.0f} cm⁻¹ (sulfate ν₁ band region). "
-                    f"**b)** Regression coefficient vector for salt (mM); "
+                    f"**b)** Regression coefficient vector for salt ({_salt_unit}); "
                     f"the dominant positive feature corresponds to the sulfate stretching mode near 981 cm⁻¹."
                 )
 
@@ -2124,7 +2156,7 @@ with tab_calib:
                     line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
                 ), row=1, col=_s_col, **_s_kw)
                 _fig_bot.update_yaxes(
-                    title_text="Salt (mM)",
+                    title_text=f"Salt ({_salt_unit})",
                     title_font=dict(color=COLORS[3]), tickfont=dict(color=COLORS[3]),
                     row=1, col=_s_col, **_s_kw,
                 )
@@ -2139,12 +2171,12 @@ with tab_calib:
             if _has_peg:
                 _pls_parts.append(f"molecular crowder ± {_pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             if _has_salt:
-                _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} mM")
+                _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} {_salt_unit}")
             st.caption(
                 f"**a)** PLS-predicted concentration profiles along the linescan for *{_sel}*. "
                 f"Shaded bands indicate ±CV RMSE: {'; '.join(_pls_parts)}. "
                 f"Left y-axis: protein(s); right y-axis: crowder where applicable."
-                + (f" **b)** Salt (mM) on a separate axis." if (_dual and _has_peg and _has_salt) else "")
+                + (f" **b)** Salt ({_salt_unit}) on a separate axis." if (_dual and _has_peg and _has_salt) else "")
             )
 
             if _triple and _has_p2 and _has_peg:
@@ -2207,14 +2239,14 @@ with tab_calib:
                 ))
                 _fig_sc.update_layout(
                     title="Salt vs Protein (PLS)",
-                    xaxis_title=f"Protein ({_unit})", yaxis_title="Salt (mM)",
+                    xaxis_title=f"Protein ({_unit})", yaxis_title=f"Salt ({_salt_unit})",
                     height=350, width=420,
                 )
                 st.plotly_chart(_fig_sc)
                 st.caption(
                     f"Salt vs protein co-localisation scatter for *{_sel}*. "
                     f"Error bars: ±CV RMSE (protein: {_pls_p['cv_rmse']:.4f} {_unit}; "
-                    f"salt: {_pls_s['cv_rmse']:.4f} mM)."
+                    f"salt: {_pls_s['cv_rmse']:.4f} {_salt_unit})."
                 )
 
         st.divider()
@@ -2254,10 +2286,10 @@ with tab_calib:
             if _has_salt:
                 _cols[_ci].markdown(
                     f"**Salt (PLS)**  \n"
-                    f"Min: {_r['pls_salt'].min():.3f} mM  \n"
-                    f"Max: {_r['pls_salt'].max():.3f} mM  \n"
-                    f"Mean: {_r['pls_salt'].mean():.3f} mM  \n"
-                    f"±CV RMSE: {_pls_s['cv_rmse']:.3f} mM"
+                    f"Min: {_r['pls_salt'].min():.3f} {_salt_unit}  \n"
+                    f"Max: {_r['pls_salt'].max():.3f} {_salt_unit}  \n"
+                    f"Mean: {_r['pls_salt'].mean():.3f} {_salt_unit}  \n"
+                    f"±CV RMSE: {_pls_s['cv_rmse']:.3f} {_salt_unit}"
                 )
 
         # ── Spectral reconstruction ────────────────────────────────────────────
@@ -4498,7 +4530,7 @@ with tab_image:
         if "pls_peg" in _ov_r0 and _ov_r0["pls_peg"] is not None:
             _ov_score_opts[f"PLS Molecular crowder ({_ov_crowder_unit})"] = "pls_peg"
         if "pls_salt" in _ov_r0 and _ov_r0["pls_salt"] is not None:
-            _ov_score_opts["PLS Salt (mM)"] = "pls_salt"
+            _ov_score_opts[f"PLS Salt ({_salt_unit})"] = "pls_salt"
         if "C_mcr" in _ov_r0 and _ov_r0["C_mcr"] is not None:
             _n_mcr = _ov_r0["C_mcr"].shape[1]
             for _ci in range(_n_mcr):
@@ -5453,7 +5485,7 @@ with tab_download:
                             _axtw2.fill_between(_dist, _salt - _cv_s,
                                                 _salt + _cv_s,
                                                 color=_MCOLS[3], alpha=0.15)
-                            _axtw2.set_ylabel("Salt (mM)",
+                            _axtw2.set_ylabel(f"Salt ({_salt_unit})",
                                               color=_MCOLS[3], fontsize=_LS)
                             _axtw2.tick_params(axis="y", colors=_MCOLS[3],
                                                labelsize=_TS, width=0.5, length=2)
@@ -5469,7 +5501,7 @@ with tab_download:
                                 )
                                 axs[1].set_xlabel(f"Protein ({unit})",
                                                   color=_MCOLS[0])
-                                axs[1].set_ylabel("Salt (mM)", color=_MCOLS[3])
+                                axs[1].set_ylabel(f"Salt ({_salt_unit})", color=_MCOLS[3])
                                 axs[1].tick_params(axis="x", colors=_MCOLS[0],
                                                    labelsize=_TS)
                                 axs[1].tick_params(axis="y", colors=_MCOLS[3],
@@ -5491,8 +5523,8 @@ with tab_download:
                         )
                     elif _has_salt_sv:
                         _cap_pls += (
-                            f" Twin axis (purple): salt (mM) "
-                            f"\u00b1 {_pls_s_sv['cv_rmse']:.4f} mM CV RMSE. "
+                            f" Twin axis (purple): salt ({_salt_unit}) "
+                            f"\u00b1 {_pls_s_sv['cv_rmse']:.4f} {_salt_unit} CV RMSE. "
                             f"b) Salt vs protein; error bars = \u00b1CV RMSE."
                         )
                     _cap_parts.append(_cap_pls)
@@ -5771,10 +5803,10 @@ with tab_download:
                                    edgecolors="black", linewidths=0.3, zorder=3)
                     _mn, _mx = _ys.min(), _ys.max()
                     axs[0].plot([_mn, _mx], [_mn, _mx], "k--", lw=0.6)
-                    axs[0].set_xlabel("Actual (mM)")
-                    axs[0].set_ylabel("Predicted (mM)")
+                    axs[0].set_xlabel(f"Actual ({_salt_unit})")
+                    axs[0].set_ylabel(f"Predicted ({_salt_unit})")
                     _style_ax(axs[0])
-                    _rmse_row(axs[1], ps, label="RMSE (mM)")
+                    _rmse_row(axs[1], ps, label=f"RMSE ({_salt_unit})")
 
                 _row_specs.append((_ps("salt_cal", 2), _draw_salt_reg_rmse, _fig_styles["salt_cal"]))
                 _row_tags.append("salt_cal")
