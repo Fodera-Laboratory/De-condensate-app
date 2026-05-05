@@ -387,12 +387,29 @@ _BASELINE_FMT = lambda x: {
 
 def _render_preprocessing(pfx: str, normalize_default: int = 0,
                            include_second_deriv: bool = False) -> dict:
-    """Render full preprocessing widget panel (spike → baseline → smooth → normalize → range).
+    """Render full preprocessing widget panel in chronological application order:
+    spectral cut-and-keep → spike removal → baseline → smoothing → normalization → 2nd deriv.
 
     All widget keys are prefixed with *pfx* so the same function can be called
     independently inside the PLS, MCR, and CLS tabs without key collisions.
     Returns a settings dict compatible with preprocess_matrix().
     """
+    # ── 1. Spectral cut-and-keep (applied first: masking before per-spectrum steps) ──
+    st.markdown("**Spectral cut-and-keep**")
+    _w1, _w2 = st.columns(2)
+    wn_min = _w1.number_input("Min (cm⁻¹)", value=700,  step=50, key=f"{pfx}_wn_min")
+    wn_max = _w2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{pfx}_wn_max")
+    use_cut = st.toggle(
+        "Exclude gap region", value=True, key=f"{pfx}_use_cut",
+        help="Remove silent region (e.g. 1850–2750 cm⁻¹).",
+    )
+    wn_cut_min = wn_cut_max = None
+    if use_cut:
+        _g1, _g2 = st.columns(2)
+        wn_cut_min = _g1.number_input("Gap from", value=1850, step=50, key=f"{pfx}_wn_cut_min")
+        wn_cut_max = _g2.number_input("Gap to",   value=2750, step=50, key=f"{pfx}_wn_cut_max")
+
+    # ── 2. Spike removal ──────────────────────────────────────────────────────
     _sr1, _sr2 = st.columns(2)
     spike_remove = _sr1.toggle("Spike removal", value=True, key=f"{pfx}_spike_remove")
     spike_threshold = _sr2.number_input(
@@ -401,6 +418,8 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
         help="Modified Z-score threshold (Whitaker-Hayes). Default 8; lower = more aggressive.",
         disabled=not spike_remove,
     )
+
+    # ── 3. Baseline correction ────────────────────────────────────────────────
     baseline = st.selectbox(
         "Baseline correction", _BASELINE_OPTS,
         format_func=_BASELINE_FMT, key=f"{pfx}_baseline", help=_HELP_BASELINE,
@@ -419,6 +438,8 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
                                  format="%.0e", key=f"{pfx}_rs_lam")
     elif baseline in ("imodpoly", "modpoly", "poly"):
         rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key=f"{pfx}_rs_poly")
+
+    # ── 4. Smoothing ──────────────────────────────────────────────────────────
     smooth = st.selectbox(
         "Smoothing", ["none", "savgol", "gaussian", "fft_lowpass"],
         format_func=lambda x: {
@@ -439,22 +460,12 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
         fft_cutoff = st.slider("Cutoff fraction", 0.01, 0.5, 0.1, step=0.01,
                                key=f"{pfx}_fft_cut",
                                help="Fraction of Fourier components to keep (0.1 = lowest 10%).")
+
+    # ── 5. Normalization ──────────────────────────────────────────────────────
     normalize = st.selectbox(
         "Normalization", _NORM_OPTS, index=normalize_default,
         format_func=_NORM_FMT, key=f"{pfx}_normalize", help=_HELP_NORMALISATION,
     )
-    _w1, _w2 = st.columns(2)
-    wn_min = _w1.number_input("Min (cm⁻¹)", value=700,  step=50, key=f"{pfx}_wn_min")
-    wn_max = _w2.number_input("Max (cm⁻¹)", value=3900, step=50, key=f"{pfx}_wn_max")
-    use_cut = st.toggle(
-        "Exclude gap region", value=True, key=f"{pfx}_use_cut",
-        help="Remove silent region (e.g. 1850–2750 cm⁻¹).",
-    )
-    wn_cut_min = wn_cut_max = None
-    if use_cut:
-        _g1, _g2 = st.columns(2)
-        wn_cut_min = _g1.number_input("Gap from", value=1850, step=50, key=f"{pfx}_wn_cut_min")
-        wn_cut_max = _g2.number_input("Gap to",   value=2750, step=50, key=f"{pfx}_wn_cut_max")
     out = dict(
         spike_remove=spike_remove, spike_threshold=spike_threshold,
         baseline=baseline, ball_radius=ball_radius,
@@ -2563,7 +2574,7 @@ with tab_calib:
                else f"crowder ({_mb_crowder_unit}) is converted via solution density.")
         )
         _wc_mb_rho = st.number_input(
-            "Solution density (g/mL)", 0.5, 2.0, 1.0, 0.01,
+            "Solution density (g/mL)", 0.5, 2.0, 1.3, 0.01,
             key="pls_mb_density",
             help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000). "
                  "Also used for crowder if unit is mg/mL or mM.",
@@ -2905,7 +2916,7 @@ with tab_cls:
         _wc_p_lbl   = _wcb.selectbox("Protein component", _wc_lbl_opts, key="wc_p_lbl")
         _wc_peg_lbl = _wcc.selectbox("Crowder component", _wc_lbl_opts, index=0, key="wc_peg_lbl")
         _wc_rho     = _wcd.number_input(
-            "Protein solution density (g/mL)", 0.5, 2.0, 1.0, 0.01, key="wc_rho",
+            "Protein solution density (g/mL)", 0.5, 2.0, 1.3, 0.01, key="wc_rho",
             help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000). "
                  f"Crowder ({_crowder_unit_wc}): for wt% φ = wt%/100; for mg/mL φ = c/(ρ×1000); for mM φ = c×MW/(ρ×1e6).",
         )
