@@ -2630,85 +2630,86 @@ with tab_calib:
                 )
 
         # ── Estimated water content — mass balance ────────────────────────────
-        st.divider()
-        st.markdown("### Estimated water content — mass balance")
-        _mb_crowder_unit = st.session_state.get("crowder_unit", "wt%")
-        _mb_crowder_mw   = st.session_state.get("crowder_mw", 1000.0)
-        st.caption(
-            "Water mass fraction estimated from PLS predictions: "
-            "P_water = 1 − P_protein − P_crowder. "
-            f"Protein ({_unit}) is converted to mass fraction using solution density; "
-            + (f"crowder (wt%) is divided by 100." if _mb_crowder_unit == "wt%"
-               else f"crowder ({_mb_crowder_unit}) is converted via solution density.")
-        )
-        _wc_mb_rho = st.number_input(
-            "Solution density (g/mL)", 0.5, 2.0, 1.3, 0.01,
-            key="pls_mb_density",
-            help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000). "
-                 "Also used for crowder if unit is mg/mL or mM.",
-        )
-        _prot_frac_mb = np.clip(np.array(_r["pls_protein"]), 0, None) / (_wc_mb_rho * 1000)
-        def _peg_to_frac(arr, unit, mw, rho):
-            if unit == "wt%":
-                return arr / 100
-            elif unit == "mg/mL":
-                return arr / (rho * 1000)
-            else:  # mM
-                return arr * mw / (rho * 1e6)
-        if _has_peg:
-            _peg_frac_mb = _peg_to_frac(
-                np.clip(np.array(_r["pls_peg"]), 0, None),
-                _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+        if _has_pls:
+            st.divider()
+            st.markdown("### Estimated water content — mass balance")
+            _mb_crowder_unit = st.session_state.get("crowder_unit", "wt%")
+            _mb_crowder_mw   = st.session_state.get("crowder_mw", 1000.0)
+            st.caption(
+                "Water mass fraction estimated from PLS predictions: "
+                "P_water = 1 − P_protein − P_crowder. "
+                f"Protein ({_unit}) is converted to mass fraction using solution density; "
+                + (f"crowder (wt%) is divided by 100." if _mb_crowder_unit == "wt%"
+                   else f"crowder ({_mb_crowder_unit}) is converted via solution density.")
             )
-        elif _has_p2 and _r.get("pls_peg") is not None:
-            _peg_frac_mb = _peg_to_frac(
-                np.clip(np.array(_r["pls_peg"]), 0, None),
-                _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+            _wc_mb_rho = st.number_input(
+                "Solution density (g/mL)", 0.5, 2.0, 1.3, 0.01,
+                key="pls_mb_density",
+                help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000). "
+                     "Also used for crowder if unit is mg/mL or mM.",
             )
-        else:
-            _peg_frac_mb = np.zeros_like(_prot_frac_mb)
-        if _has_p2 and _r.get("pls_protein2") is not None:
-            _prot2_frac_mb = np.clip(np.array(_r["pls_protein2"]), 0, None) / (_wc_mb_rho * 1000)
-        else:
-            _prot2_frac_mb = np.zeros_like(_prot_frac_mb)
-        _water_frac_mb = np.clip(
-            1.0 - _prot_frac_mb - _prot2_frac_mb - _peg_frac_mb, 0.0, 1.0
-        )
-        _fig_mb = go.Figure()
-        _fig_mb.add_trace(go.Scatter(
-            x=_dist, y=_water_frac_mb * 100, name="Water",
-            mode="lines", line=dict(color="black", width=1.5),
-        ))
-        _fig_mb.add_trace(go.Scatter(
-            x=_dist, y=_prot_frac_mb * 100, name="Protein",
-            mode="lines", line=dict(color=COLORS[0], width=1.5),
-        ))
-        if _has_p2 and _r.get("pls_protein2") is not None:
+            _prot_frac_mb = np.clip(np.array(_r["pls_protein"], dtype=float), 0, None) / (_wc_mb_rho * 1000)
+            def _peg_to_frac(arr, unit, mw, rho):
+                if unit == "wt%":
+                    return arr / 100
+                elif unit == "mg/mL":
+                    return arr / (rho * 1000)
+                else:  # mM
+                    return arr * mw / (rho * 1e6)
+            if _has_peg:
+                _peg_frac_mb = _peg_to_frac(
+                    np.clip(np.array(_r["pls_peg"], dtype=float), 0, None),
+                    _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+                )
+            elif _has_p2 and _r.get("pls_peg") is not None:
+                _peg_frac_mb = _peg_to_frac(
+                    np.clip(np.array(_r["pls_peg"], dtype=float), 0, None),
+                    _mb_crowder_unit, _mb_crowder_mw, _wc_mb_rho,
+                )
+            else:
+                _peg_frac_mb = np.zeros_like(_prot_frac_mb)
+            if _has_p2 and _r.get("pls_protein2") is not None:
+                _prot2_frac_mb = np.clip(np.array(_r["pls_protein2"], dtype=float), 0, None) / (_wc_mb_rho * 1000)
+            else:
+                _prot2_frac_mb = np.zeros_like(_prot_frac_mb)
+            _water_frac_mb = np.clip(
+                1.0 - _prot_frac_mb - _prot2_frac_mb - _peg_frac_mb, 0.0, 1.0
+            )
+            _fig_mb = go.Figure()
             _fig_mb.add_trace(go.Scatter(
-                x=_dist, y=_prot2_frac_mb * 100, name=_p2name,
-                mode="lines", line=dict(color=COLORS[3], width=1.5),
+                x=_dist, y=_water_frac_mb * 100, name="Water",
+                mode="lines", line=dict(color="black", width=1.5),
             ))
-        if np.any(_peg_frac_mb > 0):
             _fig_mb.add_trace(go.Scatter(
-                x=_dist, y=_peg_frac_mb * 100, name="Crowder",
-                mode="lines", line=dict(color=COLORS[2], width=1.5),
+                x=_dist, y=_prot_frac_mb * 100, name="Protein",
+                mode="lines", line=dict(color=COLORS[0], width=1.5),
             ))
-        _fig_mb.update_layout(
-            xaxis_title=_dl,
-            yaxis_title="Mass fraction (%)",
-            height=300,
-            legend=dict(orientation="h", y=-0.25),
-            yaxis=dict(range=[0, 100]),
-            margin=dict(t=20),
-        )
-        st.plotly_chart(_fig_mb, use_container_width=True)
-        _mb_summary = (
-            f"Mean — Protein: {float(np.mean(_prot_frac_mb) * 100):.1f}%  |  "
-            f"Water: {float(np.mean(_water_frac_mb) * 100):.1f}%"
-        )
-        if np.any(_peg_frac_mb > 0):
-            _mb_summary += f"  |  Crowder: {float(np.mean(_peg_frac_mb) * 100):.1f}%"
-        st.caption(_mb_summary)
+            if _has_p2 and _r.get("pls_protein2") is not None:
+                _fig_mb.add_trace(go.Scatter(
+                    x=_dist, y=_prot2_frac_mb * 100, name=_p2name,
+                    mode="lines", line=dict(color=COLORS[3], width=1.5),
+                ))
+            if np.any(_peg_frac_mb > 0):
+                _fig_mb.add_trace(go.Scatter(
+                    x=_dist, y=_peg_frac_mb * 100, name="Crowder",
+                    mode="lines", line=dict(color=COLORS[2], width=1.5),
+                ))
+            _fig_mb.update_layout(
+                xaxis_title=_dl,
+                yaxis_title="Mass fraction (%)",
+                height=300,
+                legend=dict(orientation="h", y=-0.25),
+                yaxis=dict(range=[0, 100]),
+                margin=dict(t=20),
+            )
+            st.plotly_chart(_fig_mb, use_container_width=True)
+            _mb_summary = (
+                f"Mean — Protein: {float(np.mean(_prot_frac_mb) * 100):.1f}%  |  "
+                f"Water: {float(np.mean(_water_frac_mb) * 100):.1f}%"
+            )
+            if np.any(_peg_frac_mb > 0):
+                _mb_summary += f"  |  Crowder: {float(np.mean(_peg_frac_mb) * 100):.1f}%"
+            st.caption(_mb_summary)
 
 
 # ── CLS tab ───────────────────────────────────────────────────────────────────
