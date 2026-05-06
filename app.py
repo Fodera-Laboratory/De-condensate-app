@@ -334,13 +334,15 @@ _HELP_SPIKE_REMOVAL = (
 _HELP_BASELINE = (
     "Removes fluorescence or other broad backgrounds. "
     "**Rubberband** — fast convex-hull baseline, robust for most Raman data. "
-    "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants (RamanSPy). "
-    "**IModPoly / ModPoly / Poly** — polynomial fits to the spectral envelope. "
     "**Rolling ball** — morphological opening with a tunable ball radius. "
     "**ALS** — classic asymmetric least squares (Eilers & Boelens). "
     "**Endpoint** — subtracts a straight line connecting the first and last point; "
     "ideal for anchoring the ends of a narrow region (e.g. amide I) to zero. "
-    "**Linear** — straight line fitted to the outermost 5 % of spectral points."
+    "**Linear** — straight line fitted to the outermost 5 % of spectral points. "
+    "**ARPLS / AIRPLS / IASLS / DRPLS** — penalised least-squares variants (RamanSPy); "
+    "tune λ (smoothness, default 1e5). "
+    "**IModPoly / ModPoly / Poly** — polynomial fits to the spectral envelope (RamanSPy); "
+    "tune polynomial order (default 2)."
 )
 _HELP_SMOOTHING = (
     "Optional smoothing applied after baseline correction. "
@@ -365,8 +367,10 @@ _NORM_FMT  = lambda x: {
     "minmax": "Min-max [0, 1]", "none": "None",
 }[x]
 _BASELINE_OPTS = [
-    "rubberband", "rolling_ball", "als", "arpls", "airpls", "iasls", "drpls",
-    "imodpoly", "modpoly", "poly", "endpoint", "linear", "none",
+    "rubberband", "rolling_ball", "als",
+    "arpls", "airpls", "iasls", "drpls",
+    "imodpoly", "modpoly", "poly",
+    "endpoint", "linear", "none",
 ]
 _BASELINE_FMT = lambda x: {
     "rubberband":  "Rubberband (convex hull)",
@@ -426,11 +430,10 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
         als_p   = _b2.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5,
                                    format="%.3f", key=f"{pfx}_als_p")
     elif baseline in ("arpls", "airpls", "iasls", "drpls"):
-        rs_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9,
-                                 format="%.0e", key=f"{pfx}_rs_lam")
+        rs_lam = st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8,
+                                  format="%.0e", key=f"{pfx}_rs_lam")
     elif baseline in ("imodpoly", "modpoly", "poly"):
-        rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key=f"{pfx}_rs_poly")
-
+        rs_poly_order = st.slider("Polynomial order", 1, 8, 2, key=f"{pfx}_rs_poly_order")
     # ── 4. Smoothing ──────────────────────────────────────────────────────────
     smooth = st.selectbox(
         "Smoothing", ["none", "savgol", "gaussian", "fft_lowpass"],
@@ -475,7 +478,8 @@ def _render_preprocessing(pfx: str, normalize_default: int = 0,
     out = dict(
         spike_remove=spike_remove, spike_threshold=spike_threshold,
         baseline=baseline, ball_radius=ball_radius,
-        als_lam=als_lam, als_p=als_p, rs_lam=rs_lam, rs_poly_order=rs_poly_order,
+        als_lam=als_lam, als_p=als_p,
+        rs_lam=rs_lam, rs_poly_order=rs_poly_order,
         smooth=smooth, sg_window=sg_window, sg_poly=sg_poly,
         gaussian_sigma=gaussian_sigma, fft_cutoff=fft_cutoff,
         normalize=normalize,
@@ -3288,17 +3292,21 @@ with tab_further:
         _PIPE_CATS = [
             ("Spectral cut",         ["spectral_cut"]),
             ("Spike removal",        ["spike_removal"]),
-            ("Baseline subtraction", ["rubberband","rolling_ball","als","arpls","airpls",
-                                       "iasls","drpls","imodpoly","modpoly","poly","endpoint","linear"]),
+            ("Baseline subtraction", ["rubberband","rolling_ball","als",
+                                   "arpls","airpls","iasls","drpls",
+                                   "imodpoly","modpoly","poly",
+                                   "endpoint","linear"]),
             ("Smoothing",            ["savgol","gaussian","fft_lowpass"]),
             ("Normalisation",        ["snv","area","vector","minmax"]),
         ]
         _PKLAB = {
             "spectral_cut":"Spectral cut", "spike_removal":"Spike removal",
             "rubberband":"Rubberband",     "rolling_ball":"Rolling ball",
-            "als":"ALS",      "arpls":"ARPLS",   "airpls":"AIRPLS",
-            "iasls":"IASLS",  "drpls":"DRPLS",   "imodpoly":"IModPoly",
-            "modpoly":"ModPoly","poly":"Poly",    "endpoint":"Endpoint",
+            "als":"ALS",
+            "arpls":"ARPLS", "airpls":"AIRPLS",
+            "iasls":"IASLS", "drpls":"DRPLS",
+            "imodpoly":"IModPoly", "modpoly":"ModPoly", "poly":"Poly",
+            "endpoint":"Endpoint",
             "linear":"Linear", "savgol":"Savitzky-Golay",
             "gaussian":"Gaussian","fft_lowpass":"FFT low-pass",
             "snv":"SNV","area":"Area","vector":"Vector","minmax":"Min-max",
@@ -3340,6 +3348,8 @@ with tab_further:
             "rubberband":    _HELP_BASELINE,
             "rolling_ball":  _HELP_BASELINE,
             "als":           _HELP_BASELINE,
+            "endpoint":      _HELP_BASELINE,
+            "linear":        _HELP_BASELINE,
             "arpls":         _HELP_BASELINE,
             "airpls":        _HELP_BASELINE,
             "iasls":         _HELP_BASELINE,
@@ -3347,8 +3357,6 @@ with tab_further:
             "imodpoly":      _HELP_BASELINE,
             "modpoly":       _HELP_BASELINE,
             "poly":          _HELP_BASELINE,
-            "endpoint":      _HELP_BASELINE,
-            "linear":        _HELP_BASELINE,
             "savgol":        _HELP_SMOOTHING,
             "gaussian":      _HELP_SMOOTHING,
             "fft_lowpass":   _HELP_SMOOTHING,
@@ -3381,10 +3389,10 @@ with tab_further:
                                   format="%.0e", key=_wk(pfx,item,"lam"))
                 _c2.number_input("p (asymmetry)",  value=0.01, min_value=0.001, max_value=0.5,
                                   format="%.3f",  key=_wk(pfx,item,"p"))
-            elif _sk in ("arpls","airpls","iasls","drpls"):
-                st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e9,
-                                format="%.0e", key=_wk(pfx,item,"lam"))
-            elif _sk in ("imodpoly","modpoly","poly"):
+            elif _sk in ("arpls", "airpls", "iasls", "drpls"):
+                st.number_input("λ (smoothness)", value=1e5, min_value=1e2, max_value=1e8,
+                                 format="%.0e", key=_wk(pfx,item,"lam"))
+            elif _sk in ("imodpoly", "modpoly", "poly"):
                 st.slider("Polynomial order", 1, 8, 2, key=_wk(pfx,item,"order"))
             elif _sk == "savgol":
                 _c1, _c2 = st.columns(2)
@@ -3539,24 +3547,6 @@ with tab_further:
                         X[_i] -= rms.als_baseline_correction(
                             X[_i], lam=_p(_item,"lam",1e5), p=_p(_item,"p",0.01))
 
-                elif _sk in ("arpls","airpls","iasls","drpls"):
-                    import ramanspy.preprocessing.baseline as _rsb
-                    _fn = {"arpls":_rsb._arpls,"airpls":_rsb._airpls,
-                           "iasls":_rsb._iasls,"drpls":_rsb._drpls}[_sk]
-                    _lam = _p(_item,"lam",1e5)
-                    for _i in range(X.shape[0]):
-                        _res, _ = _fn(X[_i:_i+1], wn, lam=_lam)
-                        X[_i] -= _res.squeeze()
-
-                elif _sk in ("imodpoly","modpoly","poly"):
-                    import ramanspy.preprocessing.baseline as _rsb
-                    _fn = {"imodpoly":_rsb._imodpoly,"modpoly":_rsb._modpoly,
-                           "poly":_rsb._poly}[_sk]
-                    _ord = int(_p(_item,"order",2))
-                    for _i in range(X.shape[0]):
-                        _res, _ = _fn(X[_i:_i+1], wn, poly_order=_ord)
-                        X[_i] -= _res.squeeze()
-
                 elif _sk == "endpoint":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.endpoint_baseline(X[_i])
@@ -3564,6 +3554,24 @@ with tab_further:
                 elif _sk == "linear":
                     for _i in range(X.shape[0]):
                         X[_i] -= rms.linear_baseline(X[_i])
+
+                elif _sk in ("arpls", "airpls", "iasls", "drpls"):
+                    import ramanspy.preprocessing.baseline as _rsb
+                    import ramanspy as _rs
+                    _lam = _p(_item, "lam", 1e5)
+                    _cls = {"arpls": _rsb.ARPLS, "airpls": _rsb.AIRPLS,
+                            "iasls": _rsb.IASLS, "drpls":  _rsb.DRPLS}[_sk]
+                    for _i in range(X.shape[0]):
+                        X[_i] = _cls(lam=_lam).apply(_rs.Spectrum(X[_i], wn)).spectral_data
+
+                elif _sk in ("imodpoly", "modpoly", "poly"):
+                    import ramanspy.preprocessing.baseline as _rsb
+                    import ramanspy as _rs
+                    _ord = int(_p(_item, "order", 2))
+                    _cls = {"imodpoly": _rsb.IModPoly, "modpoly": _rsb.ModPoly,
+                            "poly": _rsb.Poly}[_sk]
+                    for _i in range(X.shape[0]):
+                        X[_i] = _cls(poly_order=_ord).apply(_rs.Spectrum(X[_i], wn)).spectral_data
 
                 elif _sk == "savgol":
                     _win  = int(_p(_item,"window",11))
@@ -6260,8 +6268,7 @@ with tab_tutorial:
             "(3) Smoothing → (4) Gap exclusion → (5) Normalisation → (6) Second derivative. "
             "Each step can be switched or disabled independently:\n"
             "- **Spike removal** — detects and replaces cosmic-ray spikes (Whitaker-Hayes Z-score).\n"
-            "- **Baseline correction** — *Rubberband*, *Rolling ball*, *ALS*, *ARPLS/AIRPLS/IASLS/DRPLS*, "
-            "*IModPoly/ModPoly/Poly*, *Endpoint*, *Linear*, or *None*.\n"
+            "- **Baseline correction** — *Rubberband*, *Rolling ball*, *ALS*, *ARPLS*, *AIRPLS*, *IASLS*, *DRPLS*, *IModPoly*, *ModPoly*, *Poly*, *Endpoint*, *Linear*, or *None*.\n"
             "- **Smoothing** — *Savitzky-Golay*, *Gaussian*, *FFT low-pass*, or *None*.\n"
             "- **Exclude gap region** *(toggle)* — removes a silent spectral region "
             "(e.g. 1800–2800 cm⁻¹) *after* baseline/smoothing but *before* normalisation, "

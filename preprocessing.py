@@ -51,18 +51,6 @@ def load_linescan_bytes(file_bytes: bytes, filename: str = "scan.txt"):
 # Per-spectrum preprocessing
 # ─────────────────────────────────────────────────────────────────────────────
 
-_RS_BASELINE_MAP = {
-    "arpls":    ("ramanspy.preprocessing.baseline", "ARPLS"),
-    "airpls":   ("ramanspy.preprocessing.baseline", "AIRPLS"),
-    "iasls":    ("ramanspy.preprocessing.baseline", "IASLS"),
-    "drpls":    ("ramanspy.preprocessing.baseline", "DRPLS"),
-    "imodpoly": ("ramanspy.preprocessing.baseline", "IModPoly"),
-    "modpoly":  ("ramanspy.preprocessing.baseline", "ModPoly"),
-    "poly":     ("ramanspy.preprocessing.baseline", "Poly"),
-}
-
-
-
 def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.ndarray:
     """Apply spike removal → baseline → smoothing → normalisation to one spectrum."""
     baseline     = settings.get("baseline",     "rubberband")
@@ -88,23 +76,23 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
         I = I - endpoint_baseline(I)
     elif baseline == "linear":
         I = I - linear_baseline(I)
-    elif baseline in _RS_BASELINE_MAP:
+    elif baseline in ("arpls", "airpls", "iasls", "drpls",
+                      "imodpoly", "modpoly", "poly"):
         import ramanspy.preprocessing.baseline as _rsb
-        _fn_map = {
-            "arpls":    _rsb._arpls,
-            "airpls":   _rsb._airpls,
-            "iasls":    _rsb._iasls,
-            "drpls":    _rsb._drpls,
-            "imodpoly": _rsb._imodpoly,
-            "modpoly":  _rsb._modpoly,
-            "poly":     _rsb._poly,
+        import ramanspy as _rs
+        _lam_kw  = {"lam": settings.get("rs_lam", 1e5)}
+        _poly_kw = {"poly_order": settings.get("rs_poly_order", 2)}
+        _cls_map = {
+            "arpls":    (_rsb.ARPLS,    _lam_kw),
+            "airpls":   (_rsb.AIRPLS,   _lam_kw),
+            "iasls":    (_rsb.IASLS,    _lam_kw),
+            "drpls":    (_rsb.DRPLS,    _lam_kw),
+            "imodpoly": (_rsb.IModPoly, _poly_kw),
+            "modpoly":  (_rsb.ModPoly,  _poly_kw),
+            "poly":     (_rsb.Poly,     _poly_kw),
         }
-        _fn = _fn_map[baseline]
-        if baseline in ("arpls", "airpls", "iasls", "drpls"):
-            result, _ = _fn(I.reshape(1, -1), wn, lam=settings.get("rs_lam", 1e5))
-        elif baseline in ("imodpoly", "modpoly", "poly"):
-            result, _ = _fn(I.reshape(1, -1), wn, poly_order=settings.get("rs_poly_order", 2))
-        I = result.squeeze()
+        _cls, _kw = _cls_map[baseline]
+        I = _cls(**_kw).apply(_rs.Spectrum(I, wn)).spectral_data
     # baseline == "none": skip
 
     # ── Smoothing (optional) ──────────────────────────────────────────────
