@@ -2677,7 +2677,7 @@ with tab_calib:
         _fig_mb = go.Figure()
         _fig_mb.add_trace(go.Scatter(
             x=_dist, y=_water_frac_mb * 100, name="Water",
-            mode="lines", line=dict(color="cyan", width=1.5),
+            mode="lines", line=dict(color="black", width=1.5),
         ))
         _fig_mb.add_trace(go.Scatter(
             x=_dist, y=_prot_frac_mb * 100, name="Protein",
