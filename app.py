@@ -5661,7 +5661,7 @@ with tab_download:
                             peg=_mb_peg_sv, has_peg=_has_peg_sv,
                             dlbl=_dlbl_sv,
                         ):
-                            axs[0].plot(dist, water * 100, color="steelblue", lw=_LW, label="Water")
+                            axs[0].plot(dist, water * 100, color="black", lw=_LW, label="Water")
                             axs[0].plot(dist, prot  * 100, color=_MCOLS[0],   lw=_LW, label="Protein")
                             if has_peg and np.any(peg > 0):
                                 axs[0].plot(dist, peg * 100, color=_MCOLS[2], lw=_LW, label="Crowder")
