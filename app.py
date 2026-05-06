@@ -5350,6 +5350,7 @@ with tab_download:
                 ("cls_profiles",     "CLS concentration profiles",      7.0, 3.5),
                 ("rfc_profiles",     "RFC mass fraction profiles",      7.0, 3.5),
                 ("pls_profiles",     "PLS concentration profiles",      7.0, 3.5),
+                ("mb_profiles",      "Estimated water content (mass balance, PLS)",  7.0, 3.5),
                 ("pls_tr_spectra",   "PLS training spectra",            5.0, 2.8),
                 ("pls_cal_scatter",  "PLS calibration scatter & RMSE",  7.0, 3.5),
                 ("pls_loadings",     "PLS loadings & coefficients",     5.0, 2.8),
@@ -5631,6 +5632,54 @@ with tab_download:
                             f"b) Salt vs protein; error bars = \u00b1CV RMSE."
                         )
                     _cap_parts.append(_cap_pls)
+
+                    # Row D: estimated water content — mass balance
+                    if _fig_sel.get("mb_profiles", True):
+                        _mb_rho_sv    = float(st.session_state.get("pls_mb_density", 1.3))
+                        _mb_cu_sv     = st.session_state.get("crowder_unit", "wt%")
+                        _mb_cmw_sv    = float(st.session_state.get("crowder_mw", 1000.0))
+
+                        def _peg_frac_sv(arr, unit=_mb_cu_sv, mw=_mb_cmw_sv, rho=_mb_rho_sv):
+                            if unit == "wt%":
+                                return arr / 100.0
+                            elif unit == "mg/mL":
+                                return arr / (rho * 1000.0)
+                            else:
+                                return arr * mw / (rho * 1e6)
+
+                        _mb_prot_sv = np.clip(np.array(_sv_r["pls_protein"]), 0, None) / (_mb_rho_sv * 1000.0)
+                        _mb_peg_sv  = (
+                            _peg_frac_sv(np.clip(np.array(_sv_r["pls_peg"]), 0, None))
+                            if _has_peg_sv and _sv_r.get("pls_peg") is not None
+                            else np.zeros_like(_mb_prot_sv)
+                        )
+                        _mb_water_sv = np.clip(1.0 - _mb_prot_sv - _mb_peg_sv, 0.0, 1.0)
+
+                        def _draw_mb_row(
+                            axs, dist=_sv_r["distance"],
+                            water=_mb_water_sv, prot=_mb_prot_sv,
+                            peg=_mb_peg_sv, has_peg=_has_peg_sv,
+                            dlbl=_dlbl_sv,
+                        ):
+                            axs[0].plot(dist, water * 100, color="steelblue", lw=_LW, label="Water")
+                            axs[0].plot(dist, prot  * 100, color=_MCOLS[0],   lw=_LW, label="Protein")
+                            if has_peg and np.any(peg > 0):
+                                axs[0].plot(dist, peg * 100, color=_MCOLS[2], lw=_LW, label="Crowder")
+                            axs[0].set_xlabel(dlbl)
+                            axs[0].set_ylabel("Mass fraction (%)")
+                            axs[0].set_ylim(0, 100)
+                            axs[0].legend(fontsize=_LG, frameon=False, loc="upper right")
+                            _style_ax(axs[0])
+
+                        _row_specs.append((_ps("mb_profiles"), _draw_mb_row,
+                                           _fig_styles["mb_profiles"]))
+                        _row_tags.append("mb_profiles")
+                        _cap_parts.append(
+                            f"Estimated water content (mass balance) — {_safe_fn}. "
+                            f"P_water = 1 − P_protein − P_crowder. "
+                            f"Density = {_mb_rho_sv:.2f} g/mL. "
+                            f"Method: PLS predictions converted to mass fractions."
+                        )
 
             # ── CLS concentration profiles ─────────────────────────────────
             _cls_rs_sv  = st.session_state.get("cls_results", {})
