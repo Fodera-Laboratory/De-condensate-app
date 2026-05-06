@@ -2991,6 +2991,7 @@ with tab_cls:
         )
         if not _wc_ready:
             st.info("Select water and protein CLS components above to calibrate response factors.")
+            st.session_state.pop("rfc_results", None)
         else:
             _wi_wc   = _cls_labels.index(_wc_w_lbl)
             _pi_wc   = _cls_labels.index(_wc_p_lbl)
@@ -3139,6 +3140,7 @@ with tab_cls:
                         "calibration sample(s). Check that the CSV is formatted correctly "
                         "(concentration in column 1, intensities in remaining columns)."
                     )
+                    st.session_state.pop("rfc_results", None)
                 else:
                     # ── Calibration plot ─────────────────────────────────────
                     _wc_cal_col, _wc_met_col = st.columns([3, 1])
@@ -3194,6 +3196,7 @@ with tab_cls:
 
                     # ── Mass fraction profiles ─────────────────────────────
                     st.markdown("#### Mass fraction profiles")
+                    _rfc_per_file = {}
                     for _fi_wc, (_fn_wc, _cr_wc) in enumerate(_cls_results.items()):
                         st.markdown(f"**{_fn_wc}**")
                         _Sw_ls   = _cr_wc["C"][:, _wi_wc]
@@ -3212,6 +3215,11 @@ with tab_cls:
 
                         _P_water_ls = np.clip(_Sw_ls / _denom_wc, 0, 1)
                         _P_prot_ls  = np.clip(_Sp_ls * _R_protein_wc / _denom_wc, 0, 1)
+                        _P_peg_ls_wc = (
+                            np.clip(_Speg_ls_wc * _R_peg_wc / _denom_wc, 0, 1)
+                            if _Speg_ls_wc is not None and _R_peg_wc is not None
+                            else None
+                        )
 
                         _fig_wc_mf = go.Figure()
                         _fig_wc_mf.add_trace(go.Scatter(
@@ -3222,12 +3230,9 @@ with tab_cls:
                             x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
                             mode="lines", line=dict(color=COLORS[0], width=1.5),
                         ))
-                        if _Speg_ls_wc is not None and _R_peg_wc is not None:
-                            _P_peg_ls = np.clip(
-                                _Speg_ls_wc * _R_peg_wc / _denom_wc, 0, 1
-                            )
+                        if _P_peg_ls_wc is not None:
                             _fig_wc_mf.add_trace(go.Scatter(
-                                x=_dist_wc, y=_P_peg_ls * 100, name="Crowder",
+                                x=_dist_wc, y=_P_peg_ls_wc * 100, name="Crowder",
                                 mode="lines", line=dict(color=COLORS[2], width=1.5),
                             ))
                         _fig_wc_mf.update_layout(
@@ -3239,6 +3244,18 @@ with tab_cls:
                             margin=dict(t=10),
                         )
                         st.plotly_chart(_fig_wc_mf, use_container_width=True)
+                        _rfc_per_file[_fn_wc] = {
+                            "distance":  _dist_wc,
+                            "scan_mode": _sm_wc,
+                            "P_water":   _P_water_ls,
+                            "P_protein": _P_prot_ls,
+                            "P_peg":     _P_peg_ls_wc,
+                        }
+                    st.session_state["rfc_results"] = {
+                        "R_protein": _R_protein_wc,
+                        "R_peg":     _R_peg_wc,
+                        "per_file":  _rfc_per_file,
+                    }
 
 
 # ── Further analysis ──────────────────────────────────────────────────────────
@@ -5077,6 +5094,51 @@ with tab_download:
                         key=f"dl_cls_{_cls_fn}",
                     )
 
+        # ── RFC mass fraction results ────────────────────────────────────────
+        _rfc_dl = st.session_state.get("rfc_results")
+        if _rfc_dl and _rfc_dl.get("per_file"):
+            st.divider()
+            st.subheader("RFC mass fraction profiles")
+            import openpyxl as _opxl_rfc
+
+            def _rfc_to_xlsx(rfc_data):
+                _wb = _opxl_rfc.Workbook()
+                _first = True
+                for _fn_r, _fr in rfc_data["per_file"].items():
+                    _ws = _wb.active if _first else _wb.create_sheet()
+                    _ws.title = os.path.splitext(_fn_r)[0][:31]
+                    _first = False
+                    _dlbl = "Depth (µm)" if _fr["scan_mode"] == "z" else "Distance (µm)"
+                    _hdr  = [_dlbl, "P_water", "P_protein"]
+                    if _fr["P_peg"] is not None:
+                        _hdr.append("P_crowder")
+                    _ws.append(_hdr)
+                    for _si in range(len(_fr["distance"])):
+                        _rw = [float(_fr["distance"][_si]),
+                               float(_fr["P_water"][_si]),
+                               float(_fr["P_protein"][_si])]
+                        if _fr["P_peg"] is not None:
+                            _rw.append(float(_fr["P_peg"][_si]))
+                        _ws.append(_rw)
+                _buf = io.BytesIO()
+                _wb.save(_buf)
+                return _buf.getvalue()
+
+            st.download_button(
+                "⬇  Download RFC mass fraction profiles (.xlsx)",
+                data=_rfc_to_xlsx(_rfc_dl),
+                file_name="pearl_rfc_mass_fractions.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="dl_rfc",
+            )
+            st.caption(
+                f"R_protein = {_rfc_dl['R_protein']:.4f}"
+                + (f", R_crowder = {_rfc_dl['R_peg']:.4f}"
+                   if _rfc_dl.get("R_peg") is not None else "")
+                + ". One sheet per linescan file. Mass fractions in range 0–1."
+            )
+
         # ── Further analysis results ────────────────────────────────────────
         st.divider()
         st.subheader("Further analysis results")
@@ -5278,6 +5340,7 @@ with tab_download:
                 ("linescan_spectra", "Preprocessed linescan spectra",  5.0, 2.8),
                 ("mcr_scores",       "MCR concentration scores",        7.0, 3.5),
                 ("cls_profiles",     "CLS concentration profiles",      7.0, 3.5),
+                ("rfc_profiles",     "RFC mass fraction profiles",      7.0, 3.5),
                 ("pls_profiles",     "PLS concentration profiles",      7.0, 3.5),
                 ("pls_tr_spectra",   "PLS training spectra",            5.0, 2.8),
                 ("pls_cal_scatter",  "PLS calibration scatter & RMSE",  7.0, 3.5),
@@ -5591,6 +5654,42 @@ with tab_download:
                     f"CLS concentration profiles — {_cls_rs_safe}. "
                     f"{_nc_cls} component(s) vs {_dlbl_cls.lower()}."
                 )
+
+            # ── RFC mass fraction profiles ────────────────────────────────
+            _rfc_sv = st.session_state.get("rfc_results", {})
+            if (_rfc_sv and _rfc_sv.get("per_file")
+                    and _fig_sel.get("rfc_profiles", False)):
+                for _rfc_fn, _rfc_fr in _rfc_sv["per_file"].items():
+                    _rfc_safe = os.path.splitext(_rfc_fn)[0]
+                    _dlbl_rfc = ("Depth (µm)" if _rfc_fr["scan_mode"] == "z"
+                                 else "Distance (µm)")
+                    _MCOLS = _fig_styles["rfc_profiles"]["cols"]
+
+                    def _draw_rfc(axs, fr=_rfc_fr, dlbl=_dlbl_rfc):
+                        axs[0].plot(fr["distance"], fr["P_water"] * 100,
+                                    color="steelblue", lw=_LW, label="Water")
+                        axs[0].plot(fr["distance"], fr["P_protein"] * 100,
+                                    color=_MCOLS[0], lw=_LW, label="Protein")
+                        if fr["P_peg"] is not None:
+                            axs[0].plot(fr["distance"], fr["P_peg"] * 100,
+                                        color=_MCOLS[2], lw=_LW, label="Crowder")
+                        axs[0].set_xlabel(dlbl)
+                        axs[0].set_ylabel("Mass fraction (%)")
+                        axs[0].set_ylim(0, 100)
+                        axs[0].legend(fontsize=_LG, frameon=False, loc="upper right")
+                        _style_ax(axs[0])
+
+                    _row_specs.append((_ps("rfc_profiles"), _draw_rfc,
+                                       _fig_styles["rfc_profiles"]))
+                    _row_tags.append("rfc_profiles")
+                    _R_p_sv  = _rfc_sv["R_protein"]
+                    _R_g_sv  = _rfc_sv.get("R_peg")
+                    _cap_parts.append(
+                        f"RFC mass fraction profiles — {_rfc_safe}. "
+                        f"R_protein = {_R_p_sv:.4f}"
+                        + (f", R_crowder = {_R_g_sv:.4f}" if _R_g_sv is not None else "")
+                        + ". Method: Zhang et al., Anal. Chem. 2019."
+                    )
 
             # ── PLS calibration rows (once, model-level) ─────────────────
             def _rmse_row(ax, pp_or_ps, label="RMSE"):
@@ -6126,6 +6225,7 @@ with tab_tutorial:
             "| **PLS regression** | Linescans + protein standard CSV | Quantitative protein (and optionally molecular crowder/salt) concentration profiles |\n"
             "| **MCR-ALS** | Linescans + reference CSV *or* PCA init | Spatial component profiles, recovered pure spectra |\n"
             "| **CLS** | Linescans + pure-component reference CSV | Non-negative concentration profiles, spectral reconstruction, R², RMSE, residuals |\n"
+            "| **RFC water content** | CLS results + protein and/or crowder standard CSV | Absolute mass fraction profiles of water, protein, and crowder |\n"
             "| **Further analysis** | Linescans only | PCA score plots, amide I deconvolution, peak ratio profiles |\n\n"
             "**Nothing is mandatory except the linescan file(s).** "
             "Every method runs independently. If both PLS and MCR have been run, a "
@@ -6136,92 +6236,94 @@ with tab_tutorial:
     # ── Step-by-step guide ───────────────────────────────────────────────────
     with st.expander("Step-by-step guide", expanded=True):
         st.markdown(
-            "#### 1 · Upload linescans  `📂 Files & preprocessing tab`\n"
+            "#### 1 · Upload linescans  `📂 Files tab`\n"
             "- **Linescans** *(required)* — one or more `.txt` files exported from WITec software. "
             "The scan mode (lateral XY or depth Z) is **auto-detected** from the stage position "
-            "data in each file — no manual selection needed.\n\n"
+            "data in each file — no manual selection needed.\n"
+            "- **File renaming** — edit the name of each uploaded file in the text boxes that appear. "
+            "The new names are used throughout all results, plots, and Excel exports.\n\n"
 
-            "#### 2 · Set spectral range  `📂 Files & preprocessing tab → Spectral range`\n"
-            "- **Protein range** — wavenumber window used for PLS, MCR, and CLS (default 700–3900 cm⁻¹). "
-            "This setting does **not** affect Further analysis, which always uses the full raw range.\n"
-            "- **Exclude gap region** *(toggle)* — remove a spectral gap from the model, e.g. the "
-            "silent region 1850–2750 cm⁻¹.\n"
-            "- **Salt range** — separate narrow window for the salt fingerprint band "
-            "(default 940–1020 cm⁻¹).\n"
-            "- **Concentration unit** and **protein MW** (for mM ↔ mg/mL conversion).\n\n"
-
-            "#### 3 · Set preprocessing  `📂 Files & preprocessing tab → Preprocessing`\n"
-            "Each step can be switched or disabled independently:\n"
-            "- **Spike removal** *(toggle, top)* — detects and replaces cosmic-ray spikes using "
-            "the Whitaker-Hayes modified Z-score algorithm. Applied first, before baseline correction.\n"
-            "- **Baseline correction** — *Rubberband* (default), *Rolling ball*, *ALS*, "
-            "*ARPLS/AIRPLS/IASLS/DRPLS*, *IModPoly/ModPoly/Poly*, *Endpoint*, *Linear*, or *None*.\n"
-            "- **Smoothing** — *Savitzky-Golay*, *Gaussian*, *FFT low-pass*, or *None*.\n"
-            "- **PLS regression normalisation** — *SNV* (default), *Area*, *Vector*, *Min-max*, or *None*. "
-            "Applied only to PLS standards and linescan spectra before PLS modelling.\n"
-            "- **Second-derivative preprocessing** *(PLS only)* — applies a Savitzky-Golay second "
-            "derivative after normalisation. Sharpens overlapping bands; not applied to MCR or CLS.\n"
-            "- **MCR-ALS normalisation** — *Area* (default), *SNV*, *Vector*, *Min-max*, or *None*. "
-            "Applied to spectra before MCR-ALS decomposition.\n"
-            "- **CLS normalisation** — *Area* (default), *SNV*, *Vector*, *Min-max*, or *None*. "
-            "Applied to both linescan spectra and reference spectra before CLS unmixing. "
-            "Must match the normalisation used to prepare the reference CSV.\n"
-            "- **Salt PLS regression normalisation** — *None* (default), *SNV*, *Area*, *Vector*, "
-            "or *Min-max*. Applied only to salt standards and salt linescan preprocessing.\n\n"
-
-            "#### 4 · Build PLS model  `📊 PLS regression unmixing tab → ▶ Build PLS Model`  *(optional)*\n"
-            "Upload standard CSV files, set cross-validation parameters, then click **▶ Build PLS Model**. "
-            "Standard CSVs can be chosen from the built-in training library or uploaded directly.\n"
-            "- **Protein standard CSV** — enables protein quantification.\n"
-            "- **Protein 2 / Molecular crowder CSV** *(optional)* — when provided together with a protein "
-            "standard, a dual or triple multi-output PLS2 model is trained.\n"
-            "- **Salt standard CSV** *(optional)* — trains a separate model on the salt fingerprint window.\n"
+            "#### 2 · Configure PLS  `📊 PLS regression unmixing tab`  *(optional)*\n"
+            "Upload standard CSV files, set concentration units and cross-validation parameters, "
+            "then click **▶ Build PLS Model**. "
+            "Standard CSVs can be chosen from the built-in training library or uploaded directly. "
+            "**Concentration units are set next to each standard file picker.**\n"
+            "- **Protein 1 standard CSV** + unit (mg/mL or mM) — enables protein quantification.\n"
+            "- **Protein 2 / Molecular crowder CSV** *(optional)* + crowder unit (wt%, mg/mL, mM) — "
+            "when provided together with a protein standard, a dual or triple PLS2 model is trained.\n"
+            "- **Salt standard CSV** *(optional)* + salt unit — trains a separate model on the salt "
+            "fingerprint window. The salt calibration preprocessing section only appears when a salt "
+            "standard is uploaded.\n"
             "- **Cross-validation** — number of folds (default 5) and max latent variables (default 20).\n\n"
-            "Once built, PLS predictions run automatically on all linescan files — results appear "
-            "immediately below in the same tab. "
-            "Skip this step if you only want MCR, CLS, or further spectral analysis.\n\n"
+            "**PLS calibration preprocessing** (shown below the standard pickers):\n"
+            "Steps are applied in this order — (1) Spike removal → (2) Baseline correction → "
+            "(3) Smoothing → (4) Gap exclusion → (5) Normalisation → (6) Second derivative. "
+            "Each step can be switched or disabled independently:\n"
+            "- **Spike removal** — detects and replaces cosmic-ray spikes (Whitaker-Hayes Z-score).\n"
+            "- **Baseline correction** — *Rubberband*, *Rolling ball*, *ALS*, *ARPLS/AIRPLS/IASLS/DRPLS*, "
+            "*IModPoly/ModPoly/Poly*, *Endpoint*, *Linear*, or *None*.\n"
+            "- **Smoothing** — *Savitzky-Golay*, *Gaussian*, *FFT low-pass*, or *None*.\n"
+            "- **Exclude gap region** *(toggle)* — removes a silent spectral region "
+            "(e.g. 1800–2800 cm⁻¹) *after* baseline/smoothing but *before* normalisation, "
+            "so normalisation is computed only on meaningful signal.\n"
+            "- **Normalisation** — *SNV* (default), *Area*, *Vector*, *Min-max*, or *None*.\n"
+            "- **Second derivative** *(PLS only)* — Savitzky-Golay 2nd derivative applied after "
+            "normalisation; sharpens overlapping bands.\n\n"
+            "**PLS salt calibration preprocessing** (appears only when a salt standard is uploaded):\n"
+            "- **Salt range** — narrow wavenumber window for the salt fingerprint (default 940–1020 cm⁻¹).\n"
+            "- **Salt baseline**, **Salt smoothing**, **Salt normalisation** — all default to *None*; "
+            "enable if the salt spectra require additional preprocessing.\n\n"
+            "Once built, PLS predictions run automatically on all linescan files.\n\n"
 
-            "#### 5 · Run MCR-ALS  `🔬 MCR-ALS unmixing tab → ▶ Run MCR Analysis`  *(optional)*\n"
+            "#### 3 · Configure and run MCR-ALS  `🔬 MCR-ALS unmixing tab → ▶ Run MCR Analysis`  *(optional)*\n"
             "Configure MCR-ALS initialisation and parameters, then click **▶ Run MCR Analysis**.\n"
             "- **Initialisation** — choose *Reference CSV* (upload or select pure-component reference "
             "spectra) or *PCA from linescans* (no reference file needed; components auto-labelled).\n"
             "- **MCR components** — number of components to resolve (1–10).\n"
             "- **MCR-ALS parameters** *(advanced)* — max iterations, convergence tolerance, "
-            "regression method for **C** and **Sᵀ** (OLS or NNLS).\n\n"
+            "regression method for **C** and **Sᵀ** (OLS or NNLS).\n"
+            "- **MCR preprocessing** — separate normalisation setting for MCR (*Area* default); "
+            "spike removal, baseline, and smoothing settings are shared with PLS.\n\n"
             "Results — concentration profiles **C** and recovered spectra **Sᵀ** — appear in the "
             "same tab. If a PLS model was also built, a co-localisation scatter plot is shown automatically.\n\n"
 
-            "#### 6 · Run CLS  `📐 CLS unmixing tab → ▶ Run CLS`  *(optional)*\n"
+            "#### 4 · Run CLS  `📐 CLS unmixing tab → ▶ Run CLS`  *(optional)*\n"
             "Unmixes each spectrum into contributions from known pure-component reference spectra "
             "using non-negative least squares (NNLS). Unlike MCR-ALS, CLS has no iterative fitting — "
-            "concentrations are derived directly and uniquely from the references. "
-            "The linescan files are loaded and preprocessed independently; MCR does not need to "
-            "have been run first.\n\n"
+            "concentrations are derived directly and uniquely from the references.\n\n"
             "**To run CLS:**\n"
-            "- Upload a CLS reference CSV in the **📐 CLS unmixing** tab (same format as MCR: "
-            "first column = component label, remaining columns = reference spectrum intensities).\n"
-            "- Select which components to include via the multiselect.\n"
+            "- Upload a CLS reference CSV (first column = component label, remaining = intensities).\n"
+            "- Select components to include via the multiselect.\n"
+            "- Set **CLS preprocessing** (spike removal, baseline, smoothing, gap exclusion, "
+            "normalisation — *Area* default).\n"
             "- Click **▶ Run CLS**.\n\n"
             "**Results per linescan file:**\n"
-            "- **Slider** at the top selects the linescan position shown in all panels simultaneously.\n"
+            "- **Slider** — selects the linescan position shown in all panels simultaneously.\n"
             "- **Spectral reconstruction** — measured spectrum overlaid with the CLS reconstruction "
             "and individual component contributions.\n"
-            "- **Concentration profiles** — all component concentrations along the linescan, with a "
-            "vertical line tracking the slider position.\n"
-            "- **Residual spectrum** — measured minus reconstructed at the selected position; "
-            "non-zero residual indicates spectral variance not captured by the reference set.\n"
-            "- **Fit quality** — R² and RMSE along the linescan, with a vertical line tracking the "
-            "slider position.\n"
-            "- **Mean residual ± 1 SD** *(expander)* — average residual over all spectra.\n"
-            "- **Reference spectra used** *(expander)* — preprocessed reference spectra as passed to NNLS.\n\n"
+            "- **Concentration profiles** — all component NNLS coefficients along the linescan.\n"
+            "- **Residual spectrum** — measured minus reconstructed; non-zero residual indicates "
+            "spectral variance not captured by the reference set.\n"
+            "- **Fit quality** — R² and RMSE along the linescan.\n"
+            "- **Reference spectra used** *(expander)* — preprocessed reference spectra passed to NNLS.\n\n"
+            "**Water content — response factor method** (below the CLS results):\n"
+            "Converts the CLS NNLS coefficients into absolute mass fractions of water, protein, "
+            "and crowder using the response factor method of Zhang et al. (*Anal. Chem.* 2019):\n"
+            "1. Assign which CLS components correspond to water, protein, and (optionally) crowder.\n"
+            "2. Upload pure protein + water calibration spectra and pure crowder + water calibration "
+            "spectra (or use stored PLS training data if available).\n"
+            "3. Response factors R_protein and R_crowder are calibrated from the ratio of water "
+            "signal to solute signal vs the known mass ratio in the calibration standards.\n"
+            "4. Mass fraction profiles for all linescan files are computed and plotted automatically.\n"
+            "The calibration plot shows S_water/S_solute vs m_water/m_solute for each standard, "
+            "with a linear fit through the origin (the physically required form).\n\n"
 
-            "#### 7 · Further analysis  `🔍 Further analysis tab`  *(independent)*\n"
+            "#### 5 · Further analysis  `🔍 Further analysis tab`  *(independent)*\n"
             "Available as soon as linescans have been processed (PLS/MCR not required). "
             "Each sub-tool reads the raw linescan data and applies its own independent "
-            "preprocessing pipeline — the settings in the Files tab have no effect here. "
+            "preprocessing pipeline. "
             "A **dataset selector** lets you include/exclude individual linescans. "
-            "Concentration and MCR score range sliders filter spectra by phase when available. "
-            "**Distance (µm)** and **Spectrum index** are always available as plot/colour options.\n\n"
+            "Concentration and MCR score range sliders filter spectra by phase when available.\n\n"
             "Each tool has a **drag-and-drop preprocessing pipeline** with a palette of steps: "
             "Spectral cut, Spike removal, Baseline subtraction, Smoothing, and Normalisation. "
             "Steps can be added multiple times, reordered by dragging, and configured individually. "
@@ -6257,7 +6359,7 @@ with tab_tutorial:
             "- **c. Peak ratio** — integrates two band windows and plots their ratio spatially "
             "and against any available score.\n\n"
 
-            "#### 8 · Image overlay  `🗺️ Image overlay tab`\n"
+            "#### 6 · Image overlay  `🗺️ Image overlay tab`\n"
             "Upload a microscopy image and map any score onto its spatial coordinates.\n"
             "- Select an objective magnification preset (100× / 20× / 5×) or enter custom dimensions.\n"
             "- **XY scan** — dots are placed at their true stage XY positions relative to the image "
@@ -6265,35 +6367,45 @@ with tab_tutorial:
             "- **Z-scan** — image shows the acquisition position; a score-vs-depth plot appears alongside.\n"
             "- **Crop controls** — trim µm from any edge (left / right / top / bottom).\n\n"
 
-            "#### 9 · Download  `⬇ Download tab`\n"
+            "#### 7 · Download  `⬇ Download tab`\n"
             "- **PLS / MCR results** — per-linescan Excel files or a bundled ZIP.\n"
+            "- **CLS results** — per-linescan Excel files (NNLS concentrations, R², RMSE) or a ZIP.\n"
+            "- **RFC mass fraction profiles** — Excel workbook with one sheet per linescan file "
+            "(water, protein, and crowder mass fractions 0–1 per spectrum position). "
+            "Appears in the download tab once the water content calibration has been run.\n"
             "- **Further analysis** — PCA scores/loadings/variance, amide fit parameters, "
             "and peak ratio profiles as separate downloads.\n"
-            "- **Image overlay** — interactive HTML (zoomable in any browser) and static PDF "
-            "(vector, publication-ready)."
+            "- **Image overlay** — interactive HTML (zoomable in any browser) and static SVG "
+            "(vector, publication-ready).\n"
+            "- **Publication figures** — selected plots exported as a combined SVG with a "
+            "matching caption text file. Includes RFC mass fraction profiles when available."
         )
 
     # ── How the analysis works ───────────────────────────────────────────────
     with st.expander("How the analysis works — methods"):
         st.markdown(
             "##### Preprocessing pipeline\n"
-            "The **Files & preprocessing** tab applies a fixed pipeline to all linescans and "
-            "standard spectra before PLS/MCR/CLS modelling:\n\n"
-            "1. **Spike removal** — " + _HELP_SPIKE_REMOVAL + "\n"
-            "2. **Baseline correction** — " + _HELP_BASELINE + "\n"
-            "3. **Smoothing** *(optional)* — " + _HELP_SMOOTHING + "\n"
-            "4. **Normalisation** — " + _HELP_NORMALISATION + "\n\n"
-            "A **spectral range** (default 700–3900 cm⁻¹) and optional **gap cut** "
-            "(e.g. 1850–2750 cm⁻¹ silent region) are applied before baseline correction. "
-            "Salt spectra use a separate narrow window (default 940–1020 cm⁻¹).\n\n"
-            "Each method uses its own normalisation setting: "
-            "PLS uses the **PLS regression normalisation** (default SNV); "
-            "MCR-ALS uses the **MCR-ALS normalisation** (default Area); "
-            "CLS uses the **CLS normalisation** (default Area). "
-            "Salt PLS has its own normalisation setting (default None). "
-            "The **second-derivative** option is applied only to PLS — it is not passed to MCR or CLS.\n\n"
+            "Preprocessing is configured **per method** in each respective tab. "
+            "All methods share the same baseline, smoothing, spike removal, and gap exclusion "
+            "settings; each method has its own normalisation. "
+            "Steps are applied in this fixed order:\n\n"
+            "1. **Spectral range** — a wavenumber window (default 700–3900 cm⁻¹) is applied first.\n"
+            "2. **Spike removal** — " + _HELP_SPIKE_REMOVAL + "\n"
+            "3. **Baseline correction** — " + _HELP_BASELINE + "\n"
+            "4. **Smoothing** *(optional)* — " + _HELP_SMOOTHING + "\n"
+            "5. **Gap exclusion** *(optional)* — removes the silent spectral region "
+            "(e.g. 1800–2800 cm⁻¹) *after* baseline/smoothing but *before* normalisation. "
+            "This ensures normalisation is computed only on Raman-active spectral regions, "
+            "preventing the silent region's background from affecting the normalisation factor.\n"
+            "6. **Normalisation** — " + _HELP_NORMALISATION + " "
+            "Each method uses its own setting: PLS (*SNV* default), MCR-ALS (*Area* default), "
+            "CLS (*Area* default). Salt PLS defaults to *None*.\n"
+            "7. **Second derivative** *(PLS only)* — Savitzky-Golay 2nd derivative applied after "
+            "normalisation; not passed to MCR or CLS.\n\n"
+            "Salt PLS uses a separate narrow wavenumber window (default 940–1020 cm⁻¹) and its "
+            "own baseline, smoothing, and normalisation settings (all default *None*).\n\n"
             "**Further analysis** uses a fully independent drag-and-drop pipeline per tool — "
-            "the Files tab settings do not affect it."
+            "settings in the PLS/MCR/CLS tabs have no effect there."
         )
 
         st.markdown(
@@ -6359,6 +6471,30 @@ with tab_tutorial:
             "concentrations) and are not constrained to sum to 1. Coefficients greater than 1 are "
             "normal when the reference spectra are not a perfect linear basis for the sample. "
             "Use R², RMSE, and the residual as diagnostics for reference set completeness."
+        )
+
+        st.markdown(
+            "##### Water content — response factor calibration (RFC)\n"
+            "The RFC method ([Zhang et al., *Anal. Chem.* 2019](https://doi.org/10.1021/acs.analchem.8b04597)) "
+            "converts CLS NNLS coefficients (arbitrary units) into absolute mass fractions "
+            "by exploiting the linear relationship between Raman signal and mass:\n\n"
+            "&nbsp;&nbsp;&nbsp;&nbsp;S_i = k_i · m_i\n\n"
+            "where S_i is the CLS coefficient for component *i* and k_i is its Raman response "
+            "per unit mass. Defining R_i = k_water / k_i, the mass fraction of any component is:\n\n"
+            "&nbsp;&nbsp;&nbsp;&nbsp;φ_i = S_i · R_i / (S_water + S_protein · R_protein + S_crowder · R_crowder + …)\n\n"
+            "**Calibration** — R_i is measured from pure binary standards (component + water only) "
+            "at known concentrations. For each standard spectrum, the CLS is run against the same "
+            "reference set, giving S_water and S_i. Plotting S_water/S_i vs m_water/m_i yields a "
+            "straight line through the origin with slope R_i. The linear fit is constrained to "
+            "pass through the origin (as physically required: no solute → no solute signal).\n\n"
+            "**Important caveats:**\n"
+            "- The method assumes Raman signal is strictly proportional to mass (linearity). "
+            "This holds well for dilute solutions but can break down at high concentrations.\n"
+            "- R_i is calibrated for a specific set of reference spectra and preprocessing. "
+            "Changing the CLS references or preprocessing requires re-running the calibration.\n"
+            "- All Raman-active species in the sample must be represented in the reference set. "
+            "Unaccounted components contribute spectral signal that NNLS distributes among the "
+            "existing references, biasing mass fractions."
         )
 
     # ── Further analysis ─────────────────────────────────────────────────────
