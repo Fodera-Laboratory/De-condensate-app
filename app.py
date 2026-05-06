@@ -3075,7 +3075,6 @@ with tab_cls:
                 st.warning("CLS settings not found — re-run CLS unmixing first.")
             else:
                 from scipy.optimize import nnls as _nnls_fn
-                from scipy.stats import linregress as _linreg_fn
 
                 # Preprocess protein calibration spectra with CLS settings
                 _X_p_proc, _wn_p_cal, _ = an.preprocess_matrix(_cal_X_prot_raw, _wn_ref_wc, _cls_s_wc)
@@ -3095,18 +3094,19 @@ with tab_cls:
                 _mask_cal = (_Sp_cal > 1e-10) & (_Sw_cal > 1e-10) & (_prot_frac_cal > 1e-8)
 
                 _R_protein_wc = None
-                _lr_p_wc      = None
+                _r2_p_wc      = None
                 _mwmp_cal     = None
                 _swsp_cal     = None
                 if _mask_cal.sum() >= 2:
-                    _mwmp_cal = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
-                    _swsp_cal = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
-                    _lr_p_wc  = _linreg_fn(_mwmp_cal, _swsp_cal)
-                    _R_protein_wc = _lr_p_wc.slope
+                    _mwmp_cal     = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
+                    _swsp_cal     = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
+                    _R_protein_wc = np.dot(_mwmp_cal, _swsp_cal) / np.dot(_mwmp_cal, _mwmp_cal)
+                    _ss_res_p     = np.sum((_swsp_cal - _R_protein_wc * _mwmp_cal) ** 2)
+                    _r2_p_wc      = 1.0 - _ss_res_p / np.sum(_swsp_cal ** 2)
 
                 # PEG calibration (optional)
                 _R_peg_wc   = None
-                _lr_peg_wc  = None
+                _r2_peg_wc  = None
                 _swspeg_cal = None
                 _mwmpeg_cal = None
                 _mask_peg   = None
@@ -3130,8 +3130,9 @@ with tab_cls:
                     if _mask_peg.sum() >= 2:
                         _mwmpeg_cal = _water_frac_peg_cal[_mask_peg] / _peg_frac_cal[_mask_peg]
                         _swspeg_cal = _Sw_peg_cal[_mask_peg] / _Speg_cal[_mask_peg]
-                        _lr_peg_wc  = _linreg_fn(_mwmpeg_cal, _swspeg_cal)
-                        _R_peg_wc   = _lr_peg_wc.slope
+                        _R_peg_wc   = np.dot(_mwmpeg_cal, _swspeg_cal) / np.dot(_mwmpeg_cal, _mwmpeg_cal)
+                        _ss_res_peg = np.sum((_swspeg_cal - _R_peg_wc * _mwmpeg_cal) ** 2)
+                        _r2_peg_wc  = 1.0 - _ss_res_peg / np.sum(_swspeg_cal ** 2)
 
                 if _R_protein_wc is None:
                     st.warning(
@@ -3152,10 +3153,10 @@ with tab_cls:
                         ))
                         _fig_wc_cal.add_trace(go.Scatter(
                             x=_x_fit_p,
-                            y=_lr_p_wc.slope * _x_fit_p + _lr_p_wc.intercept,
+                            y=_R_protein_wc * _x_fit_p,
                             mode="lines",
                             line=dict(color=COLORS[0], dash="dash", width=1),
-                            name=f"Fit R²={_lr_p_wc.rvalue**2:.3f}",
+                            name=f"Fit (origin) R²={_r2_p_wc:.3f}",
                         ))
                         if _R_peg_wc is not None:
                             _x_fit_peg = np.linspace(0, _mwmpeg_cal.max() * 1.05, 60)
@@ -3166,10 +3167,10 @@ with tab_cls:
                             ))
                             _fig_wc_cal.add_trace(go.Scatter(
                                 x=_x_fit_peg,
-                                y=_lr_peg_wc.slope * _x_fit_peg + _lr_peg_wc.intercept,
+                                y=_R_peg_wc * _x_fit_peg,
                                 mode="lines",
                                 line=dict(color=COLORS[2], dash="dash", width=1),
-                                name=f"Crowder fit R²={_lr_peg_wc.rvalue**2:.3f}",
+                                name=f"Crowder fit (origin) R²={_r2_peg_wc:.3f}",
                             ))
                         _fig_wc_cal.update_layout(
                             xaxis_title="m_water / m_solute",
