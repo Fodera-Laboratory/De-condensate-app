@@ -12,7 +12,7 @@ from pymcr.mcr import McrAR
 from pymcr.constraints import ConstraintNonneg, ConstraintNorm, Constraint
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import RepeatedKFold, train_test_split
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ def _find_optimal_components(
     rmse_cv     : list[float]  mean CV RMSE per component count
     rmse_train  : list[float]  training RMSE per component count
     """
-    kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    kfold = RepeatedKFold(n_splits=min(cv_folds, X.shape[0]), n_repeats=3, random_state=42)
     rmse_cv, rmse_train = [], []
     fold_errors_all = []
     max_comp = min(max_components, X.shape[0] - 1, X.shape[1])
@@ -88,41 +88,67 @@ def build_pls_model(
     y_train: np.ndarray,
     max_components: int = 20,
     cv_folds: int = 5,
+    test_size: float = 0.2,
 ) -> dict:
     """
     Train a single-output PLS model with automatic component selection.
 
-    Returns a dict with the fitted model, feature mask, metrics, and training
+    The data are split 80/20 (train/test).  Repeated k-fold CV on the 80 %
+    training set selects the optimal number of components; the final model is
+    trained on the 80 % and evaluated on the held-out 20 % (RMSEP / R²_test).
+
+    Returns a dict with the fitted model, feature mask, metrics, and
     predictions — ready to be augmented with wn/X_train_proc by the caller.
     """
+    if len(y_train) >= 5:
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X_train, y_train, test_size=test_size, random_state=42
+        )
+    else:
+        X_tr, y_tr = X_train, y_train
+        X_te, y_te = X_train[:0], y_train[:0]
+
     n_opt, rmse_cv, rmse_train = _find_optimal_components(
-        X_train, y_train,
+        X_tr, y_tr,
         max_components=max_components,
         cv_folds=cv_folds,
     )
 
-    feat_std       = np.std(X_train, axis=0)
+    feat_std       = np.std(X_tr, axis=0)
     valid_features = feat_std > 1e-10
 
-    X_fit  = X_train[:, valid_features]
+    X_fit  = X_tr[:, valid_features]
     x_mean = X_fit.mean(axis=0)
-    y_mean = np.atleast_1d(np.mean(y_train, axis=0))
+    y_mean = np.atleast_1d(np.mean(y_tr, axis=0))
 
     model  = PLSRegression(n_components=n_opt, scale=False)
-    model.fit(X_fit, y_train)
-    y_pred = model.predict(X_fit).flatten()
+    model.fit(X_fit, y_tr)
+    y_pred_train = model.predict(X_fit).flatten()
+
+    if len(y_te) >= 2:
+        y_pred_test = model.predict(X_te[:, valid_features]).flatten()
+        rmse_test   = float(np.sqrt(mean_squared_error(y_te, y_pred_test)))
+        r2_test     = float(r2_score(y_te, y_pred_test))
+    else:
+        y_pred_test = np.array([])
+        rmse_test   = float("nan")
+        r2_test     = float("nan")
 
     return {
         "model":          model,
         "valid_features": valid_features,
         "n_components":   n_opt,
-        "rmse_train":     float(np.sqrt(mean_squared_error(y_train, y_pred))),
-        "r2_train":       float(r2_score(y_train, y_pred)),
+        "rmse_train":     float(np.sqrt(mean_squared_error(y_tr, y_pred_train))),
+        "r2_train":       float(r2_score(y_tr, y_pred_train)),
         "cv_rmse":        float(rmse_cv[n_opt - 1]),
+        "rmse_test":      rmse_test,
+        "r2_test":        r2_test,
         "rmse_cv_all":    rmse_cv,
         "rmse_train_all": rmse_train,
-        "y_train":        y_train,
-        "y_pred_train":   y_pred,
+        "y_train":        y_tr,
+        "y_pred_train":   y_pred_train,
+        "y_test":         y_te,
+        "y_pred_test":    y_pred_test,
         "x_mean":         x_mean,
         "y_mean":         y_mean,
         "x_loadings":     model.x_loadings_.copy(),
@@ -135,18 +161,28 @@ def build_dual_pls_model(
     X_peg:     np.ndarray, y_peg:     np.ndarray,
     max_components: int = 20,
     cv_folds: int = 5,
+    test_size: float = 0.2,
 ) -> dict:
     """
     Train a multi-output PLS2 model predicting protein and molecular crowder simultaneously.
 
-    The training matrix stacks protein standards (crowder = 0) with molecular crowder standards
-    (protein = 0), following the approach in the original batch script.
+    Each component's standards are split 80/20 independently.  Repeated k-fold CV
+    on the combined 80 % training set selects the optimal number of components;
+    per-output RMSEP is computed on the held-out 20 % of each component's standards.
 
     Returns a dict with 'dual': True so process_linescan dispatches correctly.
     """
-    X_train         = np.vstack([X_protein, X_peg])
-    y_train_protein = np.concatenate([y_protein,              np.zeros(len(y_peg))])
-    y_train_peg     = np.concatenate([np.zeros(len(y_protein)), y_peg])
+    def _split(X, y):
+        if len(y) >= 5:
+            return train_test_split(X, y, test_size=test_size, random_state=42)
+        return X, X[:0], y, y[:0]
+
+    X_prot_tr, X_prot_te, y_prot_tr, y_prot_te = _split(X_protein, y_protein)
+    X_peg_tr,  X_peg_te,  y_peg_tr,  y_peg_te  = _split(X_peg,     y_peg)
+
+    X_train         = np.vstack([X_prot_tr, X_peg_tr])
+    y_train_protein = np.concatenate([y_prot_tr,              np.zeros(len(y_peg_tr))])
+    y_train_peg     = np.concatenate([np.zeros(len(y_prot_tr)), y_peg_tr])
     Y_train         = np.column_stack([y_train_protein, y_train_peg])
 
     n_opt, rmse_cv, rmse_train = _find_optimal_components(
@@ -171,22 +207,17 @@ def build_dual_pls_model(
     rmse_peg     = float(np.sqrt(mean_squared_error(y_train_peg,     Y_pred[:, 1])))
     r2_peg       = float(r2_score(y_train_peg,     Y_pred[:, 1]))
 
-    # Per-output CV RMSE for error bands in results plots
-    kfold             = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    prot_cv_errors, peg_cv_errors = [], []
-    X_f = X_train[:, valid_features]
-    for train_idx, val_idx in kfold.split(X_f):
-        X_tr_f       = X_f[train_idx]
-        valid_inner  = np.std(X_tr_f, axis=0) > 1e-10
-        pls_tmp      = PLSRegression(n_components=n_opt, scale=False)
-        pls_tmp.fit(X_tr_f[:, valid_inner], Y_train[train_idx])
-        Y_val_pred   = pls_tmp.predict(X_f[val_idx][:, valid_inner])
-        prot_cv_errors.append(float(np.sqrt(mean_squared_error(
-            Y_train[val_idx, 0], Y_val_pred[:, 0]
-        ))))
-        peg_cv_errors.append(float(np.sqrt(mean_squared_error(
-            Y_train[val_idx, 1], Y_val_pred[:, 1]
-        ))))
+    # Per-output RMSEP on the held-out test sets
+    def _rmsep(X_te, y_te, col):
+        if len(y_te) < 1:
+            return float("nan"), float("nan"), np.array([]), np.array([])
+        yp = model.predict(X_te[:, valid_features])[:, col]
+        rmsep = float(np.sqrt(mean_squared_error(y_te, yp)))
+        r2    = float(r2_score(y_te, yp)) if len(y_te) >= 2 else float("nan")
+        return rmsep, r2, y_te, yp
+
+    rmsep_protein, r2_test_protein, y_test_protein, y_pred_test_protein = _rmsep(X_prot_te, y_prot_te, 0)
+    rmsep_peg,     r2_test_peg,     y_test_peg,     y_pred_test_peg     = _rmsep(X_peg_te,  y_peg_te,  1)
 
     return {
         "dual":                  True,
@@ -198,14 +229,18 @@ def build_dual_pls_model(
         "rmse_peg_train":        rmse_peg,
         "r2_peg_train":          r2_peg,
         "cv_rmse":               float(rmse_cv[n_opt - 1]),
-        "cv_rmse_protein":       float(np.mean(prot_cv_errors)),
-        "cv_rmse_peg":           float(np.mean(peg_cv_errors)),
+        "cv_rmse_protein":       rmsep_protein,   # test RMSEP for protein
+        "cv_rmse_peg":           rmsep_peg,        # test RMSEP for crowder
         "rmse_cv_all":           rmse_cv,
         "rmse_train_all":        rmse_train,
         "y_protein_train":       y_train_protein,
         "y_peg_train":           y_train_peg,
         "y_pred_protein_train":  Y_pred[:, 0],
         "y_pred_peg_train":      Y_pred[:, 1],
+        "y_test_protein":        y_test_protein,
+        "y_pred_test_protein":   y_pred_test_protein,
+        "y_test_peg":            y_test_peg,
+        "y_pred_test_peg":       y_pred_test_peg,
         "X_train_proc":          X_train,
         "wn":                    None,   # filled by app.py after training
         "x_mean":                x_mean,
@@ -221,20 +256,31 @@ def build_triple_pls_model(
     X_peg: np.ndarray, y_peg: np.ndarray,
     max_components: int = 20,
     cv_folds: int = 5,
+    test_size: float = 0.2,
 ) -> dict:
     """
     Train a multi-output PLS2 model predicting two proteins and a molecular crowder
-    simultaneously.  Training stacks all three standard sets with the other outputs
-    zeroed out, identical to the dual approach.
+    simultaneously.  Each component's standards are split 80/20 independently.
+    Repeated k-fold CV on the combined 80 % training set selects the optimal number
+    of components; per-output RMSEP is computed on the held-out 20 %.
 
     Returns a dict with 'triple': True and 'dual': True so downstream code that
     only checks 'dual' still dispatches correctly.
     """
-    n1, n2, np_ = len(y_p1), len(y_p2), len(y_peg)
-    X_train  = np.vstack([X_p1, X_p2, X_peg])
-    y_t_p1   = np.concatenate([y_p1,           np.zeros(n2),  np.zeros(np_)])
-    y_t_p2   = np.concatenate([np.zeros(n1),   y_p2,          np.zeros(np_)])
-    y_t_peg  = np.concatenate([np.zeros(n1),   np.zeros(n2),  y_peg        ])
+    def _split(X, y):
+        if len(y) >= 5:
+            return train_test_split(X, y, test_size=test_size, random_state=42)
+        return X, X[:0], y, y[:0]
+
+    X_p1_tr, X_p1_te, y_p1_tr, y_p1_te = _split(X_p1,  y_p1)
+    X_p2_tr, X_p2_te, y_p2_tr, y_p2_te = _split(X_p2,  y_p2)
+    X_peg_tr, X_peg_te, y_peg_tr, y_peg_te = _split(X_peg, y_peg)
+
+    n1, n2, np_ = len(y_p1_tr), len(y_p2_tr), len(y_peg_tr)
+    X_train  = np.vstack([X_p1_tr, X_p2_tr, X_peg_tr])
+    y_t_p1   = np.concatenate([y_p1_tr,          np.zeros(n2),   np.zeros(np_)])
+    y_t_p2   = np.concatenate([np.zeros(n1),      y_p2_tr,        np.zeros(np_)])
+    y_t_peg  = np.concatenate([np.zeros(n1),      np.zeros(n2),   y_peg_tr     ])
     Y_train  = np.column_stack([y_t_p1, y_t_p2, y_t_peg])
 
     n_opt, rmse_cv, rmse_train = _find_optimal_components(
@@ -261,19 +307,18 @@ def build_triple_pls_model(
     rmse_peg = float(np.sqrt(mean_squared_error(y_t_peg, Y_pred[:, 2])))
     r2_peg   = float(r2_score(y_t_peg, Y_pred[:, 2]))
 
-    # Per-output CV RMSE for error bands in results plots
-    kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
-    p1_cv_errors, p2_cv_errors, peg_cv_errors = [], [], []
-    X_f = X_train[:, valid_features]
-    for train_idx, val_idx in kfold.split(X_f):
-        X_tr_f      = X_f[train_idx]
-        valid_inner = np.std(X_tr_f, axis=0) > 1e-10
-        pls_tmp     = PLSRegression(n_components=n_opt, scale=False)
-        pls_tmp.fit(X_tr_f[:, valid_inner], Y_train[train_idx])
-        Y_vp = pls_tmp.predict(X_f[val_idx][:, valid_inner])
-        p1_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 0], Y_vp[:, 0]))))
-        p2_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 1], Y_vp[:, 1]))))
-        peg_cv_errors.append(float(np.sqrt(mean_squared_error(Y_train[val_idx, 2], Y_vp[:, 2]))))
+    # Per-output RMSEP on the held-out test sets
+    def _rmsep(X_te, y_te, col):
+        if len(y_te) < 1:
+            return float("nan"), float("nan"), np.array([]), np.array([])
+        yp = model.predict(X_te[:, valid_features])[:, col]
+        rmsep = float(np.sqrt(mean_squared_error(y_te, yp)))
+        r2    = float(r2_score(y_te, yp)) if len(y_te) >= 2 else float("nan")
+        return rmsep, r2, y_te, yp
+
+    rmsep_p1,  r2_test_p1,  y_test_p1,  y_pred_test_p1  = _rmsep(X_p1_te,  y_p1_te,  0)
+    rmsep_p2,  r2_test_p2,  y_test_p2,  y_pred_test_p2  = _rmsep(X_p2_te,  y_p2_te,  1)
+    rmsep_peg, r2_test_peg, y_test_peg, y_pred_test_peg  = _rmsep(X_peg_te, y_peg_te, 2)
 
     return {
         "triple":               True,
@@ -288,11 +333,11 @@ def build_triple_pls_model(
         "rmse_peg_train":       rmse_peg,
         "r2_peg_train":         r2_peg,
         "cv_rmse":              float(rmse_cv[n_opt - 1]),
-        "cv_rmse_p1":           float(np.mean(p1_cv_errors)),
-        "cv_rmse_p2":           float(np.mean(p2_cv_errors)),
-        "cv_rmse_peg":          float(np.mean(peg_cv_errors)),
+        "cv_rmse_p1":           rmsep_p1,    # test RMSEP for protein 1
+        "cv_rmse_p2":           rmsep_p2,    # test RMSEP for protein 2
+        "cv_rmse_peg":          rmsep_peg,   # test RMSEP for crowder
         # backward-compat aliases so dual code paths don't KeyError on triple
-        "cv_rmse_protein":      float(np.mean(p1_cv_errors)),
+        "cv_rmse_protein":      rmsep_p1,
         "r2_protein_train":     r2_p1,
         "rmse_protein_train":   rmse_p1,
         "rmse_cv_all":          rmse_cv,
@@ -303,6 +348,12 @@ def build_triple_pls_model(
         "y_pred_p1_train":      Y_pred[:, 0],
         "y_pred_p2_train":      Y_pred[:, 1],
         "y_pred_peg_train":     Y_pred[:, 2],
+        "y_test_p1":            y_test_p1,
+        "y_pred_test_p1":       y_pred_test_p1,
+        "y_test_p2":            y_test_p2,
+        "y_pred_test_p2":       y_pred_test_p2,
+        "y_test_peg":           y_test_peg,
+        "y_pred_test_peg":      y_pred_test_peg,
         "X_train_proc":         X_train,
         "wn":                   None,
         "x_mean":               x_mean,

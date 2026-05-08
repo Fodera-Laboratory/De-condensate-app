@@ -997,18 +997,18 @@ if build_btn:
                 if dual:
                     msg_parts.append(
                         f"Dual protein+molecular crowder PLS: {pls_protein['n_components']} LVs, "
-                        f"CV RMSE — Protein: {pls_protein['cv_rmse_protein']:.3f} {unit}, "
+                        f"RMSEP — Protein: {pls_protein['cv_rmse_protein']:.3f} {unit}, "
                         f"Molecular crowder: {pls_protein['cv_rmse_peg']:.3f} {crowder_unit}"
                     )
                 else:
                     msg_parts.append(
                         f"Protein PLS: {pls_protein['n_components']} LVs, "
-                        f"CV RMSE = {pls_protein['cv_rmse']:.3f} {unit}"
+                        f"RMSEP = {pls_protein.get('rmse_test', pls_protein['cv_rmse']):.3f} {unit}"
                     )
             if pls_salt is not None:
                 msg_parts.append(
                     f"Salt PLS: {pls_salt['n_components']} LVs, "
-                    f"CV RMSE = {pls_salt['cv_rmse']:.3f}"
+                    f"RMSEP = {pls_salt.get('rmse_test', pls_salt['cv_rmse']):.3f}"
                 )
             if ST_init is not None:
                 msg_parts.append(f"MCR refs: {ST_init.shape[0]} component(s) preprocessed")
@@ -1242,11 +1242,11 @@ with tab_calib:
             _p2name = st.session_state.get("protein2_name", "Protein 2")
             st.subheader(f"Triple PLS2: Protein 1 + {_p2name} + Molecular Crowder")
             m1, m2, m3, m4, m5, m6 = st.columns(6)
-            m1.metric("Components",         pls_p["n_components"])
-            m2.metric("Protein 1 CV RMSE",  f"{pls_p['cv_rmse_p1']:.4f} {unit}")
+            m1.metric("Components",          pls_p["n_components"])
+            m2.metric("Protein 1 RMSEP",    f"{pls_p['cv_rmse_p1']:.4f} {unit}")
             m3.metric("Protein 1 Train R²", f"{pls_p['r2_p1_train']:.4f}")
-            m4.metric(f"{_p2name} CV RMSE", f"{pls_p['cv_rmse_p2']:.4f} {unit}")
-            m5.metric("Crowder CV RMSE",    f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
+            m4.metric(f"{_p2name} RMSEP",   f"{pls_p['cv_rmse_p2']:.4f} {unit}")
+            m5.metric("Crowder RMSEP",      f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             m6.metric("Crowder Train R²",   f"{pls_p['r2_peg_train']:.4f}")
 
             wn_p   = pls_p["wn"]
@@ -1267,9 +1267,9 @@ with tab_calib:
             )
 
             for _y_tr, _y_pr, _col, _nm, _row, _c in [
-                (y_p1tr, y_p1pr, COLORS[0], "Protein 1",   1, 1),
-                (y_p2tr, y_p2pr, COLORS[1], _p2name,        1, 2),
-                (y_pgtr, y_pgpr, COLORS[2], "Crowder",      2, 2),
+                (y_p1tr, y_p1pr, COLORS[0], "Protein 1 (train)",   1, 1),
+                (y_p2tr, y_p2pr, COLORS[1], f"{_p2name} (train)",  1, 2),
+                (y_pgtr, y_pgpr, COLORS[2], "Crowder (train)",     2, 2),
             ]:
                 fig_t.add_trace(go.Scatter(
                     x=_y_tr, y=_y_pr, mode="markers",
@@ -1281,6 +1281,18 @@ with tab_calib:
                     mode="lines", line=dict(dash="dash", color="black", width=1),
                     showlegend=False,
                 ), row=_row, col=_c)
+            for _y_te, _y_pte, _col, _nm, _row, _c in [
+                (pls_p.get("y_test_p1",  np.array([])), pls_p.get("y_pred_test_p1",  np.array([])), COLORS[0], "Protein 1 (test)",  1, 1),
+                (pls_p.get("y_test_p2",  np.array([])), pls_p.get("y_pred_test_p2",  np.array([])), COLORS[1], f"{_p2name} (test)", 1, 2),
+                (pls_p.get("y_test_peg", np.array([])), pls_p.get("y_pred_test_peg", np.array([])), COLORS[2], "Crowder (test)",    2, 2),
+            ]:
+                if len(_y_te) > 0:
+                    fig_t.add_trace(go.Scatter(
+                        x=_y_te, y=_y_pte, mode="markers",
+                        marker=dict(color="white", size=7,
+                                    line=dict(color=_col, width=1.5), symbol="circle-open"),
+                        name=_nm, showlegend=True,
+                    ), row=_row, col=_c)
 
             fig_t.add_trace(go.Scatter(x=comps, y=pls_p["rmse_cv_all"],
                 mode="lines+markers", name="CV RMSE", line=dict(color="red")), row=2, col=1)
@@ -1310,10 +1322,12 @@ with tab_calib:
             st.plotly_chart(fig_t, use_container_width=True)
             st.caption(
                 f"Triple PLS2 calibration using {pls_p['n_components']} latent variables. "
-                f"**a)** Protein 1: R² = {pls_p['r2_p1_train']:.4f}, CV RMSE = {pls_p['cv_rmse_p1']:.4f} {unit}. "
-                f"**b)** {_p2name}: R² = {pls_p['r2_p2_train']:.4f}, CV RMSE = {pls_p['cv_rmse_p2']:.4f} {unit}. "
-                f"**c)** CV and training RMSE vs latent variables. "
-                f"**d)** Molecular crowder: R² = {pls_p['r2_peg_train']:.4f}, CV RMSE = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}."
+                f"Filled markers = train (80 %), open markers = test (20 %). "
+                f"**a)** Protein 1: train R² = {pls_p['r2_p1_train']:.4f}, RMSEP = {pls_p['cv_rmse_p1']:.4f} {unit}. "
+                f"**b)** {_p2name}: train R² = {pls_p['r2_p2_train']:.4f}, RMSEP = {pls_p['cv_rmse_p2']:.4f} {unit}. "
+                f"**c)** Repeated CV RMSE (red) and training RMSE (blue) vs latent variables; "
+                f"component selection used 3 × {min(5, len(pls_p['rmse_cv_all']))} repeated k-fold CV on the 80 % training set. "
+                f"**d)** Molecular crowder: train R² = {pls_p['r2_peg_train']:.4f}, RMSEP = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}."
             )
 
             if wn_p is not None:
@@ -1378,10 +1392,10 @@ with tab_calib:
             # ── Dual protein + molecular crowder calibration ────────────────
             st.subheader("Dual Protein + Molecular Crowder PLS regression")
             m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Components", pls_p["n_components"])
-            m2.metric(f"Protein CV RMSE", f"{pls_p['cv_rmse_protein']:.4f} {unit}")
+            m1.metric("Components",       pls_p["n_components"])
+            m2.metric("Protein RMSEP",    f"{pls_p['cv_rmse_protein']:.4f} {unit}")
             m3.metric("Protein Train R²", f"{pls_p['r2_protein_train']:.4f}")
-            m4.metric("Crowder CV RMSE",  f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
+            m4.metric("Crowder RMSEP",    f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             m5.metric("Crowder Train R²", f"{pls_p['r2_peg_train']:.4f}")
 
             fig_d = make_subplots(
@@ -1403,25 +1417,43 @@ with tab_calib:
             fig_d.add_trace(go.Scatter(
                 x=y_prot_tr, y=y_prot_pr, mode="markers",
                 marker=dict(color=COLORS[0], size=7, line=dict(color="black", width=0.5)),
-                name="Protein", showlegend=True,
+                name="Protein (train)", showlegend=True,
             ), row=1, col=1)
             fig_d.add_trace(go.Scatter(
                 x=[y_prot_tr.min(), y_prot_tr.max()],
                 y=[y_prot_tr.min(), y_prot_tr.max()],
                 mode="lines", line=dict(dash="dash", color="black", width=1), showlegend=False,
             ), row=1, col=1)
+            _yte_p = pls_p.get("y_test_protein", np.array([]))
+            _ypte_p = pls_p.get("y_pred_test_protein", np.array([]))
+            if len(_yte_p) > 0:
+                fig_d.add_trace(go.Scatter(
+                    x=_yte_p, y=_ypte_p, mode="markers",
+                    marker=dict(color="white", size=7,
+                                line=dict(color=COLORS[0], width=1.5), symbol="circle-open"),
+                    name="Protein (test)", showlegend=True,
+                ), row=1, col=1)
 
             # Molecular crowder scatter
             fig_d.add_trace(go.Scatter(
                 x=y_peg_tr, y=y_peg_pr, mode="markers",
                 marker=dict(color=COLORS[2], size=7, line=dict(color="black", width=0.5)),
-                name="Molecular crowder", showlegend=True,
+                name="Molecular crowder (train)", showlegend=True,
             ), row=1, col=2)
             fig_d.add_trace(go.Scatter(
                 x=[y_peg_tr.min(), y_peg_tr.max()],
                 y=[y_peg_tr.min(), y_peg_tr.max()],
                 mode="lines", line=dict(dash="dash", color="black", width=1), showlegend=False,
             ), row=1, col=2)
+            _yte_c = pls_p.get("y_test_peg", np.array([]))
+            _ypte_c = pls_p.get("y_pred_test_peg", np.array([]))
+            if len(_yte_c) > 0:
+                fig_d.add_trace(go.Scatter(
+                    x=_yte_c, y=_ypte_c, mode="markers",
+                    marker=dict(color="white", size=7,
+                                line=dict(color=COLORS[2], width=1.5), symbol="circle-open"),
+                    name="Crowder (test)", showlegend=True,
+                ), row=1, col=2)
 
             # CV / Train RMSE
             n_cv = len(pls_p["rmse_cv_all"])
@@ -1471,11 +1503,13 @@ with tab_calib:
             st.caption(
                 f"PLS2 calibration using {pls_p['n_components']} latent variables to simultaneously predict "
                 f"protein and molecular crowder concentration. "
-                f"**a)** Protein: predicted vs actual ({unit}), train R² = {pls_p['r2_protein_train']:.4f}. "
-                f"**b)** Molecular crowder: predicted vs actual ({_crowder_unit}), train R² = {pls_p['r2_peg_train']:.4f}. "
-                f"**c)** Leave-one-out CV RMSE (red) and training RMSE (blue) as a function of the number of latent variables; "
+                f"Filled markers = train (80 %), open markers = test (20 %). "
+                f"**a)** Protein: predicted vs actual ({unit}), train R² = {pls_p['r2_protein_train']:.4f}, "
+                f"RMSEP = {pls_p['cv_rmse_protein']:.4f} {unit}. "
+                f"**b)** Molecular crowder: predicted vs actual ({_crowder_unit}), "
+                f"train R² = {pls_p['r2_peg_train']:.4f}, RMSEP = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}. "
+                f"**c)** Repeated CV RMSE (red) and training RMSE (blue) vs latent variables; "
                 f"the dashed line marks the selected optimum (opt = {pls_p['n_components']}). "
-                f"Protein CV RMSE = {pls_p['cv_rmse_protein']:.4f} {unit}; Molecular crowder CV RMSE = {pls_p['cv_rmse_peg']:.4f} {_crowder_unit}. "
                 f"**d)** X-loadings for each latent variable, highlighting the spectral features driving the model."
             )
 
@@ -1598,7 +1632,7 @@ with tab_calib:
             st.subheader("Protein PLS regression")
             m1, m2, m3 = st.columns(3)
             m1.metric("Optimal components", pls_p["n_components"])
-            m2.metric("CV RMSE",  f"{pls_p['cv_rmse']:.4f} {unit}")
+            m2.metric("RMSEP",     f"{pls_p.get('rmse_test', pls_p['cv_rmse']):.4f} {unit}")
             m3.metric("Train R²", f"{pls_p['r2_train']:.4f}")
 
             fig_p = make_subplots(
@@ -1610,10 +1644,11 @@ with tab_calib:
                     "d)  PLS loadings (all PCs)",
                 ],
             )
-            wn_p   = pls_p["wn"]
-            X_tr   = pls_p["X_train_proc"]
-            y_tr   = pls_p["y_raw"]
-            y_pred = pls_p["y_pred_train"]
+            wn_p    = pls_p["wn"]
+            X_tr    = pls_p["X_train_proc"]
+            y_tr    = pls_p["y_train"]
+            y_pred  = pls_p["y_pred_train"]
+            y_raw   = pls_p.get("y_raw", y_tr)   # full concentration range for diagonal
 
             for i in range(X_tr.shape[0]):
                 fig_p.add_trace(go.Scatter(
@@ -1624,10 +1659,19 @@ with tab_calib:
             fig_p.add_trace(go.Scatter(
                 x=y_tr, y=y_pred, mode="markers",
                 marker=dict(color=COLORS[0], size=7, line=dict(color="black", width=0.5)),
-                showlegend=False,
+                name="Train", showlegend=True,
             ), row=1, col=2)
+            _y_te_p  = pls_p.get("y_test",      np.array([]))
+            _yp_te_p = pls_p.get("y_pred_test", np.array([]))
+            if len(_y_te_p) > 0:
+                fig_p.add_trace(go.Scatter(
+                    x=_y_te_p, y=_yp_te_p, mode="markers",
+                    marker=dict(color="white", size=7,
+                                line=dict(color=COLORS[0], width=1.5), symbol="circle-open"),
+                    name="Test", showlegend=True,
+                ), row=1, col=2)
             fig_p.add_trace(go.Scatter(
-                x=[y_tr.min(), y_tr.max()], y=[y_tr.min(), y_tr.max()],
+                x=[y_raw.min(), y_raw.max()], y=[y_raw.min(), y_raw.max()],
                 mode="lines", line=dict(dash="dash", color="black", width=1), showlegend=False,
             ), row=1, col=2)
 
@@ -1676,11 +1720,10 @@ with tab_calib:
             st.caption(
                 f"PLS1 calibration for protein concentration prediction using {pls_p['n_components']} latent variables. "
                 f"**a)** Overlay of {X_tr.shape[0]} preprocessed standard spectra ({wn_p[0]:.0f}–{wn_p[-1]:.0f} cm⁻¹). "
-                f"**b)** Predicted vs actual concentration ({unit}); perfect prediction falls on the dashed diagonal. "
-                f"Train R² = {pls_p['r2_train']:.4f}. "
-                f"**c)** Leave-one-out CV RMSE (red) and training RMSE (blue) vs number of latent variables; "
-                f"dashed line at the selected optimum (opt = {pls_p['n_components']}), "
-                f"CV RMSE = {pls_p['cv_rmse']:.4f} {unit}. "
+                f"**b)** Predicted vs actual concentration ({unit}); filled = train (80 %), open = test (20 %). "
+                f"Train R² = {pls_p['r2_train']:.4f}; RMSEP = {pls_p.get('rmse_test', pls_p['cv_rmse']):.4f} {unit}. "
+                f"**c)** Repeated CV RMSE (red) and training RMSE (blue) vs number of latent variables; "
+                f"dashed line at the selected optimum (opt = {pls_p['n_components']}). "
                 f"**d)** X-loadings for each latent variable — prominent features reflect the spectral bands driving concentration prediction."
             )
 
@@ -1742,16 +1785,17 @@ with tab_calib:
             st.subheader("Salt PLS regression")
             s1, s2, s3 = st.columns(3)
             s1.metric("Optimal components", pls_s["n_components"])
-            s2.metric("CV RMSE",  f"{pls_s['cv_rmse']:.4f}")
+            s2.metric("RMSEP",     f"{pls_s.get('rmse_test', pls_s['cv_rmse']):.4f}")
             s3.metric("Train R²", f"{pls_s['r2_train']:.4f}")
 
             fig_s = make_subplots(rows=1, cols=3, subplot_titles=[
                 "a)  Preprocessed standards", "b)  Calibration (actual vs predicted)", "c)  CV vs Training RMSE"
             ])
-            wn_s   = pls_s["wn"]
-            X_s    = pls_s["X_train_proc"]
-            y_s    = pls_s["y_raw"]
-            yp_s   = pls_s["y_pred_train"]
+            wn_s    = pls_s["wn"]
+            X_s     = pls_s["X_train_proc"]
+            y_s     = pls_s["y_train"]
+            yp_s    = pls_s["y_pred_train"]
+            y_s_raw = pls_s.get("y_raw", y_s)   # full range for diagonal
 
             for i in range(X_s.shape[0]):
                 fig_s.add_trace(go.Scatter(
@@ -1762,10 +1806,19 @@ with tab_calib:
             fig_s.add_trace(go.Scatter(
                 x=y_s, y=yp_s, mode="markers",
                 marker=dict(color=COLORS[3], size=7, line=dict(color="black", width=0.5)),
-                showlegend=False,
+                name="Train", showlegend=True,
             ), row=1, col=2)
+            _y_te_s  = pls_s.get("y_test",      np.array([]))
+            _yp_te_s = pls_s.get("y_pred_test", np.array([]))
+            if len(_y_te_s) > 0:
+                fig_s.add_trace(go.Scatter(
+                    x=_y_te_s, y=_yp_te_s, mode="markers",
+                    marker=dict(color="white", size=7,
+                                line=dict(color=COLORS[3], width=1.5), symbol="circle-open"),
+                    name="Test", showlegend=True,
+                ), row=1, col=2)
             fig_s.add_trace(go.Scatter(
-                x=[y_s.min(), y_s.max()], y=[y_s.min(), y_s.max()],
+                x=[y_s_raw.min(), y_s_raw.max()], y=[y_s_raw.min(), y_s_raw.max()],
                 mode="lines", line=dict(dash="dash", color="black", width=1), showlegend=False,
             ), row=1, col=2)
 
@@ -1804,9 +1857,10 @@ with tab_calib:
                 f"in the narrow sulfate Raman band ({wn_s[0]:.0f}–{wn_s[-1]:.0f} cm⁻¹) using "
                 f"{pls_s['n_components']} latent variable(s). "
                 f"**a)** Preprocessed standard spectra. "
-                f"**b)** Predicted vs actual salt concentration ({_salt_unit}); train R² = {pls_s['r2_train']:.4f}. "
-                f"**c)** Leave-one-out CV RMSE (red) and training RMSE (blue) as a function of latent variables; "
-                f"CV RMSE = {pls_s['cv_rmse']:.4f} {_salt_unit} at the selected optimum (opt = {pls_s['n_components']})."
+                f"**b)** Predicted vs actual salt concentration ({_salt_unit}); filled = train (80 %), open = test (20 %); "
+                f"train R² = {pls_s['r2_train']:.4f}; RMSEP = {pls_s.get('rmse_test', pls_s['cv_rmse']):.4f} {_salt_unit}. "
+                f"**c)** Repeated CV RMSE (red) and training RMSE (blue) vs latent variables; "
+                f"dashed line at the selected optimum (opt = {pls_s['n_components']})."
             )
 
             wn_s_valid = wn_s[pls_s["valid_features"]]
@@ -2123,7 +2177,7 @@ with tab_calib:
             _c1sy    = _specs[0][0].get("secondary_y", False)
             _fig_bot = make_subplots(rows=1, cols=_n_bot, specs=_specs, subplot_titles=_subtitles)
             _dist    = _r["distance"]
-            _cv_p    = _pls_p["cv_rmse_p1"] if _triple else (_pls_p["cv_rmse_protein"] if _dual else _pls_p["cv_rmse"])
+            _cv_p    = _pls_p["cv_rmse_p1"] if _triple else (_pls_p["cv_rmse_protein"] if _dual else _pls_p.get("rmse_test", _pls_p["cv_rmse"]))
             _prot    = _r["pls_protein"]
 
             _fig_bot.add_trace(go.Scatter(
@@ -2178,7 +2232,7 @@ with tab_calib:
             if _has_salt:
                 _s_col = 2 if (_dual and _has_peg) else 1
                 _s_sy  = True if _s_col == 1 else None
-                _cv_s  = _pls_s["cv_rmse"]
+                _cv_s  = _pls_s.get("rmse_test", _pls_s["cv_rmse"])
                 _salt  = _r["pls_salt"]
                 _s_kw  = {"secondary_y": _s_sy} if _s_sy is not None else {}
                 _fig_bot.add_trace(go.Scatter(
@@ -2207,10 +2261,10 @@ with tab_calib:
             if _has_peg:
                 _pls_parts.append(f"molecular crowder ± {_pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
             if _has_salt:
-                _pls_parts.append(f"salt ± {_pls_s['cv_rmse']:.4f} {_salt_unit}")
+                _pls_parts.append(f"salt ± {_cv_s:.4f} {_salt_unit}")
             st.caption(
                 f"**a)** PLS-predicted concentration profiles along the linescan for *{_sel}*. "
-                f"Shaded bands indicate ±CV RMSE: {'; '.join(_pls_parts)}. "
+                f"Shaded bands indicate ±RMSEP (20 % held-out test set): {'; '.join(_pls_parts)}. "
                 f"Left y-axis: protein(s); right y-axis: crowder where applicable."
                 + (f" **b)** Salt ({_salt_unit}) on a separate axis." if (_dual and _has_peg and _has_salt) else "")
             )
@@ -2238,7 +2292,7 @@ with tab_calib:
                 st.plotly_chart(_fig_sc3, use_container_width=True)
                 st.caption(
                     f"Crowder vs protein co-localisation for *{_sel}*. "
-                    f"Error bars: ±CV RMSE."
+                    f"Error bars: ±RMSEP."
                 )
             elif _dual and _has_peg:
                 st.divider()
