@@ -992,7 +992,6 @@ if build_btn:
             st.session_state["settings"]       = settings
             st.session_state["n_components"]   = n_components
             st.session_state["unit"]           = unit
-            st.session_state["salt_unit"]      = salt_unit
             st.session_state["crowder_unit"]   = crowder_unit
             st.session_state["crowder_mw"]     = crowder_mw
             st.session_state["protein2_name"]  = protein2_name if protein2_std_src else None
