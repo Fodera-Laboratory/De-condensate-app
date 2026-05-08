@@ -1302,7 +1302,7 @@ with tab_calib:
                     fig_t.add_trace(go.Scatter(
                         x=_y_te, y=_y_pte, mode="markers",
                         marker=dict(color="white", size=7,
-                                    line=dict(color=_col, width=1.5), symbol="circle-open"),
+                                    line=dict(color="black", width=1.5), symbol="circle-open"),
                         name=_nm, showlegend=True,
                     ), row=_row, col=_c)
 
@@ -1442,7 +1442,7 @@ with tab_calib:
                 fig_d.add_trace(go.Scatter(
                     x=_yte_p, y=_ypte_p, mode="markers",
                     marker=dict(color="white", size=7,
-                                line=dict(color=COLORS[0], width=1.5), symbol="circle-open"),
+                                line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Protein (test)", showlegend=True,
                 ), row=1, col=1)
 
@@ -1463,7 +1463,7 @@ with tab_calib:
                 fig_d.add_trace(go.Scatter(
                     x=_yte_c, y=_ypte_c, mode="markers",
                     marker=dict(color="white", size=7,
-                                line=dict(color=COLORS[2], width=1.5), symbol="circle-open"),
+                                line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Crowder (test)", showlegend=True,
                 ), row=1, col=2)
 
@@ -1679,7 +1679,7 @@ with tab_calib:
                 fig_p.add_trace(go.Scatter(
                     x=_y_te_p, y=_yp_te_p, mode="markers",
                     marker=dict(color="white", size=7,
-                                line=dict(color=COLORS[0], width=1.5), symbol="circle-open"),
+                                line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Test", showlegend=True,
                 ), row=1, col=2)
             fig_p.add_trace(go.Scatter(
@@ -1826,7 +1826,7 @@ with tab_calib:
                 fig_s.add_trace(go.Scatter(
                     x=_y_te_s, y=_yp_te_s, mode="markers",
                     marker=dict(color="white", size=7,
-                                line=dict(color=COLORS[3], width=1.5), symbol="circle-open"),
+                                line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Test", showlegend=True,
                 ), row=1, col=2)
             fig_s.add_trace(go.Scatter(
