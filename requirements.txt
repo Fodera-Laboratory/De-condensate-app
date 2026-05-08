@@ -11,3 +11,4 @@ openpyxl
 Pillow
 streamlit-sortables
 psutil
+chemotools

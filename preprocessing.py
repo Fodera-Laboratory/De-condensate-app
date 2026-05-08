@@ -13,18 +13,19 @@ import sys
 import tempfile
 
 import numpy as np
+from chemotools.baseline import AsLs
+from chemotools.scatter import StandardNormalVariate
+from chemotools.scale import MinMaxScaler, NormScaler
+from chemotools.smooth import SavitzkyGolayFilter
+from chemotools.derivative import SavitzkyGolay as SavitzkyGolayDeriv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from raman_preprocessing import (
-    snv_normalization,
     rubberband_correction,
-    als_baseline_correction,
     rolling_ball_baseline,
     endpoint_baseline,
     linear_baseline,
-    Min_max_normalisation,
     area_normalization,
-    vector_normalization,
     spike_removal_scp,
 )
 from raman_io import load_line_scan_from_txt
@@ -67,11 +68,8 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
     elif baseline == "rolling_ball":
         I = I - rolling_ball_baseline(I, ball_radius=settings.get("ball_radius", 50))
     elif baseline == "als":
-        I = I - als_baseline_correction(
-            I,
-            lam=settings.get("als_lam", 1e5),
-            p=settings.get("als_p", 0.01),
-        )
+        I = AsLs(lam=settings.get("als_lam", 1e5),
+                 penalty=settings.get("als_p", 0.01)).fit_transform(I.reshape(1, -1))[0]
     elif baseline == "endpoint":
         I = I - endpoint_baseline(I)
     elif baseline == "linear":
@@ -97,10 +95,8 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
 
     # ── Smoothing (optional) ──────────────────────────────────────────────
     if smooth == "savgol":
-        from raman_preprocessing import Savgol_filter
-        I = Savgol_filter(I,
-                          window_length=settings.get("sg_window", 11),
-                          polyorder=settings.get("sg_poly", 3))
+        I = SavitzkyGolayFilter(window_length=settings.get("sg_window", 11),
+                                polyorder=settings.get("sg_poly", 3)).fit_transform(I.reshape(1, -1))[0]
     elif smooth == "gaussian":
         from scipy.ndimage import gaussian_filter
         I = gaussian_filter(I.astype(float), sigma=settings.get("gaussian_sigma", 1))
@@ -115,21 +111,21 @@ def _preprocess_spectrum(I: np.ndarray, wn: np.ndarray, settings: dict) -> np.nd
 
     # ── Normalisation ─────────────────────────────────────────────────────
     if normalize == "minmax":
-        I = Min_max_normalisation(I)
+        I = MinMaxScaler().fit_transform(I.reshape(1, -1))[0]
     elif normalize == "snv":
-        I = snv_normalization(I)
+        I = StandardNormalVariate().fit_transform(I.reshape(1, -1))[0]
     elif normalize == "area":
         I = area_normalization(I, wn)
     elif normalize == "vector":
-        I = vector_normalization(I)
+        I = NormScaler(l_norm=2).fit_transform(I.reshape(1, -1))[0]
     # normalize == "none": skip
 
     # ── Second derivative (optional, applied last) ────────────────────────
     if settings.get("second_deriv", False):
-        from scipy.signal import savgol_filter as _sgf
         sd_win  = int(settings.get("sd_window", 11))
         sd_poly = int(settings.get("sd_poly",    2))
-        I = _sgf(I, window_length=sd_win, polyorder=sd_poly, deriv=2)
+        I = SavitzkyGolayDeriv(window_length=sd_win, polyorder=sd_poly,
+                               deriv=2).fit_transform(I.reshape(1, -1))[0]
 
     return I
 
