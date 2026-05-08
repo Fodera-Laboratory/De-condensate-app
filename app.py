@@ -648,6 +648,14 @@ with tab_pls:
             help="Maximum number of latent variables evaluated during CV. "
                  "The optimum is selected automatically by minimising CV RMSE.",
         )
+        _train_pct = st.slider(
+            "Training set size (%)", min_value=0, max_value=100, value=80, step=5,
+            help="Percentage of standards used for model training. "
+                 "The remainder is held out as an independent test set for RMSEP estimation. "
+                 "Set to 100 % to train on all data (no held-out test set, RMSEP not computed).",
+        )
+        st.caption(f"Train: {_train_pct} % · Test: {100 - _train_pct} %")
+        _test_size = (100 - _train_pct) / 100.0
 
     st.divider()
     pls_prep = _render_preprocessing(
@@ -894,6 +902,7 @@ if build_btn:
                                     X_p2_proc,   y_p2,
                                     X_peg_proc,  y_peg,
                                     max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                                    test_size=_test_size,
                                 )
                             except Exception as _triple_err:
                                 import traceback as _tb
@@ -914,6 +923,7 @@ if build_btn:
                             pls_protein = an.build_dual_pls_model(
                                 X_prot_proc, y_prot, X_peg_proc, y_peg,
                                 max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                                test_size=_test_size,
                             )
                             pls_protein["wn"]          = wn_prot
                             pls_protein["X_prot_proc"] = X_prot_proc
@@ -927,6 +937,7 @@ if build_btn:
                         pls_protein = an.build_pls_model(
                             X_prot_proc, y_prot,
                             max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                            test_size=_test_size,
                         )
                         pls_protein["wn"]          = wn_prot
                         pls_protein["X_train_proc"] = X_prot_proc
@@ -947,6 +958,7 @@ if build_btn:
                     pls_salt = an.build_pls_model(
                         X_salt_proc, y_salt,
                         max_components=int(max_pls_components), cv_folds=int(cv_folds),
+                        test_size=_test_size,
                     )
                     pls_salt["wn"] = wn_salt
                     pls_salt["X_train_proc"] = X_salt_proc

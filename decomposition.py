@@ -100,7 +100,7 @@ def build_pls_model(
     Returns a dict with the fitted model, feature mask, metrics, and
     predictions — ready to be augmented with wn/X_train_proc by the caller.
     """
-    if len(y_train) >= 5:
+    if test_size > 0 and len(y_train) >= max(5, int(1 / test_size) + 1):
         X_tr, X_te, y_tr, y_te = train_test_split(
             X_train, y_train, test_size=test_size, random_state=42
         )
@@ -173,7 +173,7 @@ def build_dual_pls_model(
     Returns a dict with 'dual': True so process_linescan dispatches correctly.
     """
     def _split(X, y):
-        if len(y) >= 5:
+        if test_size > 0 and len(y) >= max(5, int(1 / test_size) + 1):
             return train_test_split(X, y, test_size=test_size, random_state=42)
         return X, X[:0], y, y[:0]
 
@@ -268,7 +268,7 @@ def build_triple_pls_model(
     only checks 'dual' still dispatches correctly.
     """
     def _split(X, y):
-        if len(y) >= 5:
+        if test_size > 0 and len(y) >= max(5, int(1 / test_size) + 1):
             return train_test_split(X, y, test_size=test_size, random_state=42)
         return X, X[:0], y, y[:0]
 
