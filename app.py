@@ -1301,7 +1301,7 @@ with tab_calib:
                 if len(_y_te) > 0:
                     fig_t.add_trace(go.Scatter(
                         x=_y_te, y=_y_pte, mode="markers",
-                        marker=dict(color="white", size=7,
+                        marker=dict(color="black", size=7,
                                     line=dict(color="black", width=1.5), symbol="circle-open"),
                         name=_nm, showlegend=True,
                     ), row=_row, col=_c)
