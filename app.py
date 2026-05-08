@@ -3165,22 +3165,20 @@ with tab_cls:
                 _Sp_cal   = _C_prot_cal[:, _pi_wc]
                 _mask_cal = (_Sp_cal > 1e-10) & (_Sw_cal > 1e-10) & (_prot_frac_cal > 1e-8)
 
-                _R_protein_wc = None
-                _lr_p_wc      = None
-                _mwmp_cal     = None
-                _swsp_cal     = None
-                if _mask_cal.sum() >= 2:
-                    _mwmp_cal = _water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
-                    _swsp_cal = _Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
-                    _lr_p_wc  = _linreg_fn(_mwmp_cal, _swsp_cal)
-                    _R_protein_wc = _lr_p_wc.slope
+                # Compute ratios for all numerically valid protein points
+                _mwmp_all_p   = (_water_frac_cal[_mask_cal] / _prot_frac_cal[_mask_cal]
+                                 if _mask_cal.any() else np.array([]))
+                _swsp_all_p   = (_Sw_cal[_mask_cal] / _Sp_cal[_mask_cal]
+                                 if _mask_cal.any() else np.array([]))
+                _conc_valid_p = _cal_y_prot[_mask_cal] if _mask_cal.any() else np.array([])
 
-                # PEG calibration (optional)
-                _R_peg_wc   = None
-                _lr_peg_wc  = None
-                _swspeg_cal = None
-                _mwmpeg_cal = None
-                _mask_peg   = None
+                # PEG calibration (optional) — preprocess and compute data first
+                _R_peg_wc       = None
+                _lr_peg_wc      = None
+                _mwmpeg_all     = None
+                _swspeg_all     = None
+                _conc_valid_peg = None
+                _mask_peg       = None
                 if _peg_i_wc is not None and _cal_X_peg_raw is not None and _cal_y_peg is not None:
                     _X_peg_proc_c, _wn_peg_cal, _ = an.preprocess_matrix(
                         _cal_X_peg_raw, _wn_ref_wc, _cls_s_wc
@@ -3198,17 +3196,69 @@ with tab_cls:
                     _Sw_peg_cal = _C_peg_cal[:, _wi_wc]
                     _Speg_cal   = _C_peg_cal[:, _peg_i_wc]
                     _mask_peg   = (_Speg_cal > 1e-10) & (_Sw_peg_cal > 1e-10) & (_peg_frac_cal > 1e-8)
-                    if _mask_peg.sum() >= 2:
-                        _mwmpeg_cal = _water_frac_peg_cal[_mask_peg] / _peg_frac_cal[_mask_peg]
-                        _swspeg_cal = _Sw_peg_cal[_mask_peg] / _Speg_cal[_mask_peg]
-                        _lr_peg_wc  = _linreg_fn(_mwmpeg_cal, _swspeg_cal)
-                        _R_peg_wc   = _lr_peg_wc.slope
+                    if _mask_peg.any():
+                        _mwmpeg_all     = _water_frac_peg_cal[_mask_peg] / _peg_frac_cal[_mask_peg]
+                        _swspeg_all     = _Sw_peg_cal[_mask_peg] / _Speg_cal[_mask_peg]
+                        _conc_valid_peg = _cal_y_peg[_mask_peg]
+
+                # ── Point selection widgets ──────────────────────────────────
+                _prot_pt_labels = [
+                    f"#{i+1} — {c:.4g} {_unit_wc}"
+                    for i, c in enumerate(_conc_valid_p)
+                ] if len(_conc_valid_p) else []
+                _sel_prot_labels = st.multiselect(
+                    "Protein points used for fit",
+                    options=_prot_pt_labels,
+                    default=_prot_pt_labels,
+                    key="rfc_prot_sel",
+                    help="Deselect points to exclude them from the linear regression "
+                         "(e.g. outliers or the non-linear range at very high concentrations).",
+                )
+                _sel_p_mask = (
+                    np.array([l in set(_sel_prot_labels) for l in _prot_pt_labels])
+                    if _prot_pt_labels else np.array([], dtype=bool)
+                )
+
+                _peg_pt_labels = []
+                _sel_peg_mask  = np.array([], dtype=bool)
+                if _mwmpeg_all is not None and _conc_valid_peg is not None and len(_conc_valid_peg):
+                    _peg_pt_labels = [
+                        f"#{i+1} — {c:.4g} {_crowder_unit_wc}"
+                        for i, c in enumerate(_conc_valid_peg)
+                    ]
+                    _sel_peg_labels = st.multiselect(
+                        "Crowder points used for fit",
+                        options=_peg_pt_labels,
+                        default=_peg_pt_labels,
+                        key="rfc_peg_sel",
+                        help="Deselect points to exclude them from the linear regression.",
+                    )
+                    _sel_peg_mask = np.array([l in set(_sel_peg_labels) for l in _peg_pt_labels])
+
+                # ── Fit on selected points only ──────────────────────────────
+                _R_protein_wc = None
+                _lr_p_wc      = None
+                _mwmp_cal     = None
+                _swsp_cal     = None
+                if _sel_p_mask.sum() >= 2:
+                    _mwmp_cal     = _mwmp_all_p[_sel_p_mask]
+                    _swsp_cal     = _swsp_all_p[_sel_p_mask]
+                    _lr_p_wc      = _linreg_fn(_mwmp_cal, _swsp_cal)
+                    _R_protein_wc = _lr_p_wc.slope
+
+                _mwmpeg_cal = None
+                _swspeg_cal = None
+                if _mwmpeg_all is not None and _sel_peg_mask.sum() >= 2:
+                    _mwmpeg_cal = _mwmpeg_all[_sel_peg_mask]
+                    _swspeg_cal = _swspeg_all[_sel_peg_mask]
+                    _lr_peg_wc  = _linreg_fn(_mwmpeg_cal, _swspeg_cal)
+                    _R_peg_wc   = _lr_peg_wc.slope
 
                 if _R_protein_wc is None:
                     st.warning(
-                        f"Could not calibrate R_protein — only {_mask_cal.sum()} usable "
-                        "calibration sample(s). Check that the CSV is formatted correctly "
-                        "(concentration in column 1, intensities in remaining columns)."
+                        f"Could not calibrate R_protein — only {_sel_p_mask.sum()} point(s) selected "
+                        f"(need ≥ 2). Select more points above or check that the CSV is formatted "
+                        "correctly (concentration in column 1, intensities in remaining columns)."
                     )
                     st.session_state.pop("rfc_results", None)
                 else:
@@ -3216,11 +3266,22 @@ with tab_cls:
                     _wc_cal_col, _wc_met_col = st.columns([3, 1])
                     with _wc_cal_col:
                         _fig_wc_cal = go.Figure()
-                        _x_fit_p = np.linspace(0, _mwmp_cal.max() * 1.05, 60)
+                        # Deselected protein points (grey)
+                        _desel_p = ~_sel_p_mask
+                        if _desel_p.any():
+                            _fig_wc_cal.add_trace(go.Scatter(
+                                x=_mwmp_all_p[_desel_p], y=_swsp_all_p[_desel_p],
+                                mode="markers",
+                                marker=dict(color="lightgrey", size=7,
+                                            line=dict(color="grey", width=0.5)),
+                                name="Protein (excluded)",
+                            ))
+                        # Selected protein points
+                        _x_fit_p = np.linspace(0, _mwmp_all_p.max() * 1.05, 60)
                         _fig_wc_cal.add_trace(go.Scatter(
                             x=_mwmp_cal, y=_swsp_cal, mode="markers",
                             marker=dict(color=COLORS[0], size=7),
-                            name=f"Protein (n={int(_mask_cal.sum())})",
+                            name=f"Protein (n={int(_sel_p_mask.sum())})",
                         ))
                         _fig_wc_cal.add_trace(go.Scatter(
                             x=_x_fit_p,
@@ -3230,11 +3291,22 @@ with tab_cls:
                             name=f"Fit R²={_lr_p_wc.rvalue**2:.3f}",
                         ))
                         if _R_peg_wc is not None:
-                            _x_fit_peg = np.linspace(0, _mwmpeg_cal.max() * 1.05, 60)
+                            # Deselected crowder points (grey)
+                            _desel_peg = ~_sel_peg_mask
+                            if _desel_peg.any():
+                                _fig_wc_cal.add_trace(go.Scatter(
+                                    x=_mwmpeg_all[_desel_peg], y=_swspeg_all[_desel_peg],
+                                    mode="markers",
+                                    marker=dict(color="lightgrey", size=7,
+                                                symbol="diamond",
+                                                line=dict(color="grey", width=0.5)),
+                                    name="Crowder (excluded)",
+                                ))
+                            _x_fit_peg = np.linspace(0, _mwmpeg_all.max() * 1.05, 60)
                             _fig_wc_cal.add_trace(go.Scatter(
                                 x=_mwmpeg_cal, y=_swspeg_cal, mode="markers",
                                 marker=dict(color=COLORS[2], size=7, symbol="diamond"),
-                                name=f"Crowder (n={int(_mask_peg.sum())})",
+                                name=f"Crowder (n={int(_sel_peg_mask.sum())})",
                             ))
                             _fig_wc_cal.add_trace(go.Scatter(
                                 x=_x_fit_peg,
