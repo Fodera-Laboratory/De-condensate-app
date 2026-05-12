@@ -1083,7 +1083,7 @@ if run_btn:
         st.toast("Upload linescan files first.", icon="❌")
     else:
         models        = st.session_state.get("models", {})
-        s             = st.session_state.get("settings", settings)
+        s             = settings
         n_comp        = n_components
         mcr_params    = dict(
             max_iter=int(mcr_max_iter),
@@ -1092,8 +1092,7 @@ if run_btn:
             st_regr=mcr_st_regr,
             norm_c=mcr_norm_c,
         )
-        # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
-        _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)
+        _mcr_init_mode = mcr_init_mode
         results       = {}
         _rn           = st.session_state.get("file_renames", {})
 
