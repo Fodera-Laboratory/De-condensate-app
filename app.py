@@ -811,6 +811,17 @@ with tab_mcr:
             help="Regression method for updating the spectra matrix ST. "
                  "NNLS enforces non-negative spectral values.",
         )
+        mcr_norm_c = st.selectbox(
+            "Concentration normalisation (ConstraintNorm on C)",
+            ["sum to 1 (default)", "off"],
+            help=(
+                "Controls whether MCR-ALS normalises the concentration profiles at each iteration. "
+                "**Sum to 1** — each spectrum's component scores sum to 1 (closure constraint, default). "
+                "**Off** — no normalisation; concentrations are on an absolute scale. "
+                "Disabling can help when the water component bleeds into other components, "
+                "because the closure constraint forces redistribution of the total signal across components."
+            ),
+        )
 
     st.divider()
     st.subheader("Preprocessing")
@@ -1000,6 +1011,7 @@ if build_btn:
                 tol_increase=float(mcr_tol),
                 c_regr=mcr_c_regr,
                 st_regr=mcr_st_regr,
+                norm_c=mcr_norm_c,
             )
 
             msg_parts = []
@@ -1078,6 +1090,7 @@ if run_btn:
             tol_increase=float(mcr_tol),
             c_regr=mcr_c_regr,
             st_regr=mcr_st_regr,
+            norm_c=mcr_norm_c,
         ))
         # Use current sidebar value if not stored in session_state (i.e. Build not clicked)
         _mcr_init_mode = st.session_state.get("mcr_init_mode", mcr_init_mode)

@@ -467,6 +467,7 @@ def run_mcr(
     st_regr:       str        = "NNLS",
     fixed_st_idx:  list       = None,
     fixed_st_vals: np.ndarray = None,
+    norm_c:        str        = "sum to 1 (default)",
 ) -> tuple:
     """
     Run MCR-ALS on X_data initialised from ST_init.
@@ -509,11 +510,16 @@ def run_mcr(
         _tol_n_increase  = None
         _tol_n_above_min = None
 
+    if norm_c == "off":
+        _c_constraints = [ConstraintNonneg()]
+    else:  # "sum to 1 (default)"
+        _c_constraints = [ConstraintNonneg(), ConstraintNorm()]
+
     mcr = McrAR(
         max_iter=max_iter,
         st_regr=st_regr,
         c_regr=c_regr,
-        c_constraints=[ConstraintNonneg(), ConstraintNorm()],
+        c_constraints=_c_constraints,
         st_constraints=st_constraints,
         tol_increase=tol_increase,
         tol_n_increase=_tol_n_increase,
