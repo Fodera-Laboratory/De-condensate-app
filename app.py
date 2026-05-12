@@ -1440,7 +1440,7 @@ with tab_calib:
             if len(_yte_p) > 0:
                 fig_d.add_trace(go.Scatter(
                     x=_yte_p, y=_ypte_p, mode="markers",
-                    marker=dict(color="white", size=7,
+                    marker=dict(color="black", size=7,
                                 line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Protein (test)", showlegend=True,
                 ), row=1, col=1)
@@ -1461,7 +1461,7 @@ with tab_calib:
             if len(_yte_c) > 0:
                 fig_d.add_trace(go.Scatter(
                     x=_yte_c, y=_ypte_c, mode="markers",
-                    marker=dict(color="white", size=7,
+                    marker=dict(color="black", size=7,
                                 line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Crowder (test)", showlegend=True,
                 ), row=1, col=2)
@@ -1677,7 +1677,7 @@ with tab_calib:
             if len(_y_te_p) > 0:
                 fig_p.add_trace(go.Scatter(
                     x=_y_te_p, y=_yp_te_p, mode="markers",
-                    marker=dict(color="white", size=7,
+                    marker=dict(color="black", size=7,
                                 line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Test", showlegend=True,
                 ), row=1, col=2)
@@ -1824,7 +1824,7 @@ with tab_calib:
             if len(_y_te_s) > 0:
                 fig_s.add_trace(go.Scatter(
                     x=_y_te_s, y=_yp_te_s, mode="markers",
-                    marker=dict(color="white", size=7,
+                    marker=dict(color="black", size=7,
                                 line=dict(color="black", width=1.5), symbol="circle-open"),
                     name="Test", showlegend=True,
                 ), row=1, col=2)
