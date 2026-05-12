@@ -2031,6 +2031,7 @@ with tab_results:
                 )
                 fig_top.add_trace(go.Scatter(
                     x=r["distance"], y=r["C_mcr"][:, k], name=label,
+                    mode="lines+markers", marker=dict(size=4),
                     line=dict(color=COLORS[k % len(COLORS)], width=1.5),
                     legendgroup=label,
                 ), row=1, col=2)
@@ -2204,8 +2205,8 @@ with tab_calib:
             _prot    = _r["pls_protein"]
 
             _fig_bot.add_trace(go.Scatter(
-                x=_dist, y=_prot, mode="lines",
-                line=dict(color=COLORS[0], width=1.5), showlegend=False,
+                x=_dist, y=_prot, mode="lines+markers",
+                marker=dict(size=4), line=dict(color=COLORS[0], width=1.5), showlegend=False,
             ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
             _fig_bot.add_trace(go.Scatter(
                 x=np.concatenate([_dist, _dist[::-1]]),
@@ -2223,8 +2224,8 @@ with tab_calib:
                 _cv_p2 = _pls_p["cv_rmse_p2"]
                 _prot2 = _r["pls_protein2"]
                 _fig_bot.add_trace(go.Scatter(
-                    x=_dist, y=_prot2, mode="lines",
-                    line=dict(color=COLORS[1], width=1.5), showlegend=False,
+                    x=_dist, y=_prot2, mode="lines+markers",
+                    marker=dict(size=4), line=dict(color=COLORS[1], width=1.5), showlegend=False,
                 ), row=1, col=1, **({} if not _c1sy else {"secondary_y": False}))
                 _fig_bot.add_trace(go.Scatter(
                     x=np.concatenate([_dist, _dist[::-1]]),
@@ -2237,8 +2238,8 @@ with tab_calib:
                 _cv_peg = _pls_p["cv_rmse_peg"]
                 _peg    = _r["pls_peg"]
                 _fig_bot.add_trace(go.Scatter(
-                    x=_dist, y=_peg, mode="lines",
-                    line=dict(color=COLORS[2], width=1.5), showlegend=False,
+                    x=_dist, y=_peg, mode="lines+markers",
+                    marker=dict(size=4), line=dict(color=COLORS[2], width=1.5), showlegend=False,
                 ), row=1, col=1, secondary_y=True)
                 _fig_bot.add_trace(go.Scatter(
                     x=np.concatenate([_dist, _dist[::-1]]),
@@ -2259,8 +2260,8 @@ with tab_calib:
                 _salt  = _r["pls_salt"]
                 _s_kw  = {"secondary_y": _s_sy} if _s_sy is not None else {}
                 _fig_bot.add_trace(go.Scatter(
-                    x=_dist, y=_salt, mode="lines",
-                    line=dict(color=COLORS[3], width=1.5), showlegend=False,
+                    x=_dist, y=_salt, mode="lines+markers",
+                    marker=dict(size=4), line=dict(color=COLORS[3], width=1.5), showlegend=False,
                 ), row=1, col=_s_col, **_s_kw)
                 _fig_bot.add_trace(go.Scatter(
                     x=np.concatenate([_dist, _dist[::-1]]),
@@ -2612,12 +2613,14 @@ with tab_calib:
                 _fig_profiles = go.Figure()
                 if _c_water is not None:
                     _fig_profiles.add_trace(go.Scatter(
-                        x=_dist_rec, y=_c_water, mode="lines",
+                        x=_dist_rec, y=_c_water, mode="lines+markers",
+                        marker=dict(size=4),
                         line=dict(color=COLORS[3] if len(COLORS) > 3 else "cyan", width=1.5),
                         name="Solvent",
                     ))
                 _fig_profiles.add_trace(go.Scatter(
-                    x=_dist_rec, y=_rb_all.max(axis=1), mode="lines",
+                    x=_dist_rec, y=_rb_all.max(axis=1), mode="lines+markers",
+                    marker=dict(size=4),
                     line=dict(color=COLORS[4] if len(COLORS) > 4 else "grey", width=1.5),
                     name="Background (max)",
                 ))
@@ -2755,21 +2758,21 @@ with tab_calib:
             _fig_mb = go.Figure()
             _fig_mb.add_trace(go.Scatter(
                 x=_dist, y=_water_frac_mb * 100, name="Water",
-                mode="lines", line=dict(color="black", width=1.5),
+                mode="lines+markers", marker=dict(size=4), line=dict(color="black", width=1.5),
             ))
             _fig_mb.add_trace(go.Scatter(
                 x=_dist, y=_prot_frac_mb * 100, name="Protein",
-                mode="lines", line=dict(color=COLORS[0], width=1.5),
+                mode="lines+markers", marker=dict(size=4), line=dict(color=COLORS[0], width=1.5),
             ))
             if _has_p2 and _r.get("pls_protein2") is not None:
                 _fig_mb.add_trace(go.Scatter(
                     x=_dist, y=_prot2_frac_mb * 100, name=_p2name,
-                    mode="lines", line=dict(color=COLORS[3], width=1.5),
+                    mode="lines+markers", marker=dict(size=4), line=dict(color=COLORS[3], width=1.5),
                 ))
             if np.any(_peg_frac_mb > 0):
                 _fig_mb.add_trace(go.Scatter(
                     x=_dist, y=_peg_frac_mb * 100, name="Crowder",
-                    mode="lines", line=dict(color=COLORS[2], width=1.5),
+                    mode="lines+markers", marker=dict(size=4), line=dict(color=COLORS[2], width=1.5),
                 ))
             _fig_mb.update_layout(
                 xaxis_title=_dl,
@@ -2930,7 +2933,7 @@ with tab_cls:
                     for _k, _lbl in enumerate(_cls_labels):
                         _fig_prof.add_trace(go.Scatter(
                             x=_dist_cls, y=_cr["C"][:, _k], name=_lbl,
-                            mode="lines",
+                            mode="lines+markers", marker=dict(size=4),
                             line=dict(color=COLORS[_k % len(COLORS)], width=1.5),
                         ))
                     _fig_prof.add_vline(
@@ -2974,12 +2977,12 @@ with tab_cls:
                     _fig_fit = _make_sp(specs=[[{"secondary_y": True}]])
                     _fig_fit.add_trace(go.Scatter(
                         x=_dist_cls, y=_cr["R2"], name="R²",
-                        mode="lines",
+                        mode="lines+markers", marker=dict(size=4),
                         line=dict(color="#1b85b8", width=1.5),
                     ), secondary_y=False)
                     _fig_fit.add_trace(go.Scatter(
                         x=_dist_cls, y=_cr["RMSE"], name="RMSE",
-                        mode="lines",
+                        mode="lines+markers", marker=dict(size=4),
                         line=dict(color="#ae5a41", width=1.5, dash="dot"),
                     ), secondary_y=True)
                     _fig_fit.add_vline(
@@ -3378,16 +3381,16 @@ with tab_cls:
                         _fig_wc_mf = go.Figure()
                         _fig_wc_mf.add_trace(go.Scatter(
                             x=_dist_wc, y=_P_water_ls * 100, name="Water",
-                            mode="lines", line=dict(color="cyan", width=1.5),
+                            mode="lines+markers", marker=dict(size=4), line=dict(color="cyan", width=1.5),
                         ))
                         _fig_wc_mf.add_trace(go.Scatter(
                             x=_dist_wc, y=_P_prot_ls * 100, name="Protein",
-                            mode="lines", line=dict(color=COLORS[0], width=1.5),
+                            mode="lines+markers", marker=dict(size=4), line=dict(color=COLORS[0], width=1.5),
                         ))
                         if _P_peg_ls_wc is not None:
                             _fig_wc_mf.add_trace(go.Scatter(
                                 x=_dist_wc, y=_P_peg_ls_wc * 100, name="Crowder",
-                                mode="lines", line=dict(color=COLORS[2], width=1.5),
+                                mode="lines+markers", marker=dict(size=4), line=dict(color=COLORS[2], width=1.5),
                             ))
                         _fig_wc_mf.update_layout(
                             xaxis_title=_dlbl_wc,
