@@ -34,17 +34,22 @@ def _find_optimal_components(
     Returns
     -------
     optimal_n   : int
-    rmse_cv     : list[float]  mean CV RMSE per component count
-    rmse_train  : list[float]  training RMSE per component count
+    rmse_cv     : list[float]       mean RMSECV per component count
+    rmse_train  : list[float]       training RMSE per component count
+    q2_cv_all   : list[float|list]  Q² from CV per component count;
+                                    scalar for single-output, list-per-column
+                                    for multi-output (non-zero rows only)
     """
     kfold = RepeatedKFold(n_splits=min(cv_folds, X.shape[0]), n_repeats=3, random_state=random_state)
-    rmse_cv, rmse_train = [], []
+    rmse_cv, rmse_train, q2_cv_all = [], [], []
     fold_errors_all = []
     max_comp = min(max_components, X.shape[0] - 1, X.shape[1])
+    multiout = np.ndim(y) == 2 and y.shape[1] > 1
 
     for n_comp in range(1, max_comp + 1):
         pls    = PLSRegression(n_components=n_comp, scale=False)
         errors = []
+        y_val_parts, y_pred_parts = [], []
         for train_idx, val_idx in kfold.split(X):
             X_tr, X_val = X[train_idx], X[val_idx]
             feat_std    = np.std(X_tr, axis=0)
@@ -52,13 +57,36 @@ def _find_optimal_components(
             if np.sum(valid) < n_comp:
                 continue
             pls.fit(X_tr[:, valid], y[train_idx])
-            errors.append(
-                float(np.sqrt(mean_squared_error(
-                    y[val_idx], pls.predict(X_val[:, valid])
-                )))
-            )
+            y_pred = pls.predict(X_val[:, valid])
+            errors.append(float(np.sqrt(mean_squared_error(y[val_idx], y_pred))))
+            y_val_parts.append(y[val_idx])
+            y_pred_parts.append(y_pred)
         fold_errors_all.append(errors)
         rmse_cv.append(float(np.mean(errors)) if errors else float("inf"))
+
+        # Q² = 1 − PRESS / SS_tot computed across all CV folds
+        if y_val_parts:
+            Y_v = np.concatenate(y_val_parts, axis=0)
+            Y_p = np.vstack(y_pred_parts)
+            if not multiout:
+                Y_v = Y_v.flatten(); Y_p = Y_p.flatten()
+                ss_res = float(np.sum((Y_v - Y_p) ** 2))
+                ss_tot = float(np.sum((Y_v - Y_v.mean()) ** 2))
+                q2_cv_all.append(float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0)
+            else:
+                q2_cols = []
+                for col in range(Y_v.shape[1]):
+                    mask = Y_v[:, col] != 0   # exclude zero-padded rows
+                    if mask.sum() < 2:
+                        q2_cols.append(float("nan"))
+                        continue
+                    yv = Y_v[mask, col]; yp = Y_p[mask, col]
+                    ss_res = float(np.sum((yv - yp) ** 2))
+                    ss_tot = float(np.sum((yv - yv.mean()) ** 2))
+                    q2_cols.append(float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0)
+                q2_cv_all.append(q2_cols)
+        else:
+            q2_cv_all.append(float("nan"))
 
         feat_std = np.std(X, axis=0)
         valid    = feat_std > 1e-10
@@ -77,7 +105,7 @@ def _find_optimal_components(
         (i + 1 for i, v in enumerate(rmse_cv) if v <= threshold),
         best_idx + 1,
     )
-    return optimal_n, rmse_cv, rmse_train
+    return optimal_n, rmse_cv, rmse_train, q2_cv_all
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,7 +138,7 @@ def build_pls_model(
         X_tr, y_tr = X_train, y_train
         X_te, y_te = X_train[:0], y_train[:0]
 
-    n_opt, rmse_cv, rmse_train = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
         X_tr, y_tr,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -128,6 +156,10 @@ def build_pls_model(
     model.fit(X_fit, y_tr)
     y_pred_train = model.predict(X_fit).flatten()
 
+    rmsec = float(np.sqrt(mean_squared_error(y_tr, y_pred_train)))
+    r2c   = float(r2_score(y_tr, y_pred_train))
+    q2    = q2_cv_all[n_opt - 1]
+
     if len(y_te) >= 2:
         y_pred_test = model.predict(X_te[:, valid_features]).flatten()
         rmse_test   = float(np.sqrt(mean_squared_error(y_te, y_pred_test)))
@@ -141,10 +173,14 @@ def build_pls_model(
         "model":          model,
         "valid_features": valid_features,
         "n_components":   n_opt,
-        "rmse_train":     float(np.sqrt(mean_squared_error(y_tr, y_pred_train))),
-        "r2_train":       float(r2_score(y_tr, y_pred_train)),
-        "cv_rmse":        float(rmse_cv[n_opt - 1]),
-        "rmse_test":      rmse_test,
+        "rmsec":          rmsec,
+        "rmse_train":     rmsec,       # backward-compat alias
+        "r2_train":       r2c,
+        "rmsecv":         float(rmse_cv[n_opt - 1]),
+        "cv_rmse":        float(rmse_cv[n_opt - 1]),  # backward-compat alias
+        "q2_cv":          q2,
+        "rmsep":          rmse_test,
+        "rmse_test":      rmse_test,   # backward-compat alias
         "r2_test":        r2_test,
         "rmse_cv_all":    rmse_cv,
         "rmse_train_all": rmse_train,
@@ -189,7 +225,7 @@ def build_dual_pls_model(
     y_train_peg     = np.concatenate([np.zeros(len(y_prot_tr)), y_peg_tr])
     Y_train         = np.column_stack([y_train_protein, y_train_peg])
 
-    n_opt, rmse_cv, rmse_train = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -206,6 +242,19 @@ def build_dual_pls_model(
     model  = PLSRegression(n_components=n_opt, scale=False)
     model.fit(X_fit, Y_train)
     Y_pred = model.predict(X_fit)
+
+    # RMSEC on each component's own training standards (excludes zero-padded rows)
+    _ypp = model.predict(X_prot_tr[:, valid_features])[:, 0]
+    _ypg = model.predict(X_peg_tr[:,  valid_features])[:, 1]
+    rmsec_protein = float(np.sqrt(mean_squared_error(y_prot_tr, _ypp)))
+    rmsec_peg     = float(np.sqrt(mean_squared_error(y_peg_tr,  _ypg)))
+    r2c_protein   = float(r2_score(y_prot_tr, _ypp))
+    r2c_peg       = float(r2_score(y_peg_tr,  _ypg))
+
+    # Q² per component from CV (non-zero rows, computed in _find_optimal_components)
+    _q2 = q2_cv_all[n_opt - 1]
+    q2_protein = _q2[0] if isinstance(_q2, list) and len(_q2) > 0 else float("nan")
+    q2_peg     = _q2[1] if isinstance(_q2, list) and len(_q2) > 1 else float("nan")
 
     rmse_protein = float(np.sqrt(mean_squared_error(y_train_protein, Y_pred[:, 0])))
     r2_protein   = float(r2_score(y_train_protein, Y_pred[:, 0]))
@@ -229,13 +278,20 @@ def build_dual_pls_model(
         "model":                 model,
         "valid_features":        valid_features,
         "n_components":          n_opt,
-        "rmse_protein_train":    rmse_protein,
-        "r2_protein_train":      r2_protein,
-        "rmse_peg_train":        rmse_peg,
-        "r2_peg_train":          r2_peg,
-        "cv_rmse":               float(rmse_cv[n_opt - 1]),
-        "cv_rmse_protein":       rmsep_protein,   # test RMSEP for protein
-        "cv_rmse_peg":           rmsep_peg,        # test RMSEP for crowder
+        "rmsec_protein":         rmsec_protein,
+        "rmsec_peg":             rmsec_peg,
+        "r2_protein_train":      r2c_protein,
+        "r2_peg_train":          r2c_peg,
+        "rmsecv":                float(rmse_cv[n_opt - 1]),
+        "cv_rmse":               float(rmse_cv[n_opt - 1]),  # backward-compat
+        "q2_cv_protein":         q2_protein,
+        "q2_cv_peg":             q2_peg,
+        "rmsep_protein":         rmsep_protein,
+        "rmsep_peg":             rmsep_peg,
+        "cv_rmse_protein":       rmsep_protein,   # backward-compat
+        "cv_rmse_peg":           rmsep_peg,        # backward-compat
+        "rmse_protein_train":    rmsec_protein,   # backward-compat
+        "rmse_peg_train":        rmsec_peg,        # backward-compat
         "rmse_cv_all":           rmse_cv,
         "rmse_train_all":        rmse_train,
         "y_protein_train":       y_train_protein,
@@ -289,7 +345,7 @@ def build_triple_pls_model(
     y_t_peg  = np.concatenate([np.zeros(n1),      np.zeros(n2),   y_peg_tr     ])
     Y_train  = np.column_stack([y_t_p1, y_t_p2, y_t_peg])
 
-    n_opt, rmse_cv, rmse_train = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -307,12 +363,22 @@ def build_triple_pls_model(
     model.fit(X_fit, Y_train)
     Y_pred = model.predict(X_fit)
 
-    rmse_p1  = float(np.sqrt(mean_squared_error(y_t_p1,  Y_pred[:, 0])))
-    r2_p1    = float(r2_score(y_t_p1,  Y_pred[:, 0]))
-    rmse_p2  = float(np.sqrt(mean_squared_error(y_t_p2,  Y_pred[:, 1])))
-    r2_p2    = float(r2_score(y_t_p2,  Y_pred[:, 1]))
-    rmse_peg = float(np.sqrt(mean_squared_error(y_t_peg, Y_pred[:, 2])))
-    r2_peg   = float(r2_score(y_t_peg, Y_pred[:, 2]))
+    # RMSEC / R² on each component's own training standards
+    _yp1  = model.predict(X_p1_tr[:,  valid_features])[:, 0]
+    _yp2  = model.predict(X_p2_tr[:,  valid_features])[:, 1]
+    _ypeg = model.predict(X_peg_tr[:, valid_features])[:, 2]
+    rmsec_p1  = float(np.sqrt(mean_squared_error(y_p1_tr,  _yp1)))
+    rmsec_p2  = float(np.sqrt(mean_squared_error(y_p2_tr,  _yp2)))
+    rmsec_peg = float(np.sqrt(mean_squared_error(y_peg_tr, _ypeg)))
+    r2c_p1    = float(r2_score(y_p1_tr,  _yp1))
+    r2c_p2    = float(r2_score(y_p2_tr,  _yp2))
+    r2c_peg   = float(r2_score(y_peg_tr, _ypeg))
+
+    # Q² per component from CV
+    _q2 = q2_cv_all[n_opt - 1]
+    q2_p1  = _q2[0] if isinstance(_q2, list) and len(_q2) > 0 else float("nan")
+    q2_p2  = _q2[1] if isinstance(_q2, list) and len(_q2) > 1 else float("nan")
+    q2_peg = _q2[2] if isinstance(_q2, list) and len(_q2) > 2 else float("nan")
 
     # Per-output RMSEP on the held-out test sets
     def _rmsep(X_te, y_te, col):
@@ -333,20 +399,29 @@ def build_triple_pls_model(
         "model":                model,
         "valid_features":       valid_features,
         "n_components":         n_opt,
-        "rmse_p1_train":        rmse_p1,
-        "r2_p1_train":          r2_p1,
-        "rmse_p2_train":        rmse_p2,
-        "r2_p2_train":          r2_p2,
-        "rmse_peg_train":       rmse_peg,
-        "r2_peg_train":         r2_peg,
-        "cv_rmse":              float(rmse_cv[n_opt - 1]),
-        "cv_rmse_p1":           rmsep_p1,    # test RMSEP for protein 1
-        "cv_rmse_p2":           rmsep_p2,    # test RMSEP for protein 2
-        "cv_rmse_peg":          rmsep_peg,   # test RMSEP for crowder
-        # backward-compat aliases so dual code paths don't KeyError on triple
-        "cv_rmse_protein":      rmsep_p1,
-        "r2_protein_train":     r2_p1,
-        "rmse_protein_train":   rmse_p1,
+        "rmsec_p1":             rmsec_p1,
+        "rmsec_p2":             rmsec_p2,
+        "rmsec_peg":            rmsec_peg,
+        "r2_p1_train":          r2c_p1,
+        "r2_p2_train":          r2c_p2,
+        "r2_peg_train":         r2c_peg,
+        "rmsecv":               float(rmse_cv[n_opt - 1]),
+        "cv_rmse":              float(rmse_cv[n_opt - 1]),  # backward-compat
+        "q2_cv_p1":             q2_p1,
+        "q2_cv_p2":             q2_p2,
+        "q2_cv_peg":            q2_peg,
+        "rmsep_p1":             rmsep_p1,
+        "rmsep_p2":             rmsep_p2,
+        "rmsep_peg":            rmsep_peg,
+        "cv_rmse_p1":           rmsep_p1,    # backward-compat
+        "cv_rmse_p2":           rmsep_p2,    # backward-compat
+        "cv_rmse_peg":          rmsep_peg,   # backward-compat
+        "cv_rmse_protein":      rmsep_p1,    # backward-compat
+        "r2_protein_train":     r2c_p1,      # backward-compat
+        "rmse_protein_train":   rmsec_p1,    # backward-compat
+        "rmse_p1_train":        rmsec_p1,    # backward-compat
+        "rmse_p2_train":        rmsec_p2,    # backward-compat
+        "rmse_peg_train":       rmsec_peg,   # backward-compat
         "rmse_cv_all":          rmse_cv,
         "rmse_train_all":       rmse_train,
         "y_p1_train":           y_t_p1,

@@ -1269,13 +1269,24 @@ with tab_calib:
             # ── Triple protein1 + protein2 + molecular crowder calibration ──
             _p2name = st.session_state.get("protein2_name", "Protein 2")
             st.subheader(f"Triple PLS2: Protein 1 + {_p2name} + Molecular Crowder")
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
-            m1.metric("Components",          pls_p["n_components"])
-            m2.metric("Protein 1 RMSEP",    f"{pls_p['cv_rmse_p1']:.4f} {unit}")
-            m3.metric("Protein 1 Train R²", f"{pls_p['r2_p1_train']:.4f}")
-            m4.metric(f"{_p2name} RMSEP",   f"{pls_p['cv_rmse_p2']:.4f} {unit}")
-            m5.metric("Crowder RMSEP",      f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
-            m6.metric("Crowder Train R²",   f"{pls_p['r2_peg_train']:.4f}")
+            _fmt_nan = lambda v, s="": f"{v:.4f}{s}" if not np.isnan(v) else "n/a"
+            _mc = st.columns(6)
+            _mc[0].metric("Components", pls_p["n_components"])
+            _mc[1].metric("RMSECV", f"{pls_p['rmsecv']:.4f}")
+            _mc[2].metric("", "")  # spacer
+            _mc[3].metric("", "")
+            _mc[4].metric("", "")
+            _mc[5].metric("", "")
+            import pandas as _pd_m
+            _mdf = _pd_m.DataFrame({
+                "":        [f"Protein 1 ({unit})", f"{_p2name} ({unit})", f"Crowder ({_crowder_unit})"],
+                "RMSEC":   [_fmt_nan(pls_p["rmsec_p1"]),  _fmt_nan(pls_p["rmsec_p2"]),  _fmt_nan(pls_p["rmsec_peg"])],
+                "RMSECV":  [_fmt_nan(pls_p["cv_rmse_p1"]), _fmt_nan(pls_p["cv_rmse_p2"]), _fmt_nan(pls_p["cv_rmse_peg"])],
+                "RMSEP":   [_fmt_nan(pls_p["rmsep_p1"]),   _fmt_nan(pls_p["rmsep_p2"]),   _fmt_nan(pls_p["rmsep_peg"])],
+                "R²":      [_fmt_nan(pls_p["r2_p1_train"]),_fmt_nan(pls_p["r2_p2_train"]),_fmt_nan(pls_p["r2_peg_train"])],
+                "Q²":      [_fmt_nan(pls_p.get("q2_cv_p1", float("nan"))), _fmt_nan(pls_p.get("q2_cv_p2", float("nan"))), _fmt_nan(pls_p.get("q2_cv_peg", float("nan")))],
+            }).set_index("")
+            st.dataframe(_mdf, use_container_width=True)
 
             wn_p   = pls_p["wn"]
             y_p1tr = pls_p["y_p1_train"];   y_p1pr = pls_p["y_pred_p1_train"]
@@ -1419,12 +1430,18 @@ with tab_calib:
         elif pls_p is not None and dual:
             # ── Dual protein + molecular crowder calibration ────────────────
             st.subheader("Dual Protein + Molecular Crowder PLS regression")
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Components",       pls_p["n_components"])
-            m2.metric("Protein RMSEP",    f"{pls_p['cv_rmse_protein']:.4f} {unit}")
-            m3.metric("Protein Train R²", f"{pls_p['r2_protein_train']:.4f}")
-            m4.metric("Crowder RMSEP",    f"{pls_p['cv_rmse_peg']:.4f} {_crowder_unit}")
-            m5.metric("Crowder Train R²", f"{pls_p['r2_peg_train']:.4f}")
+            _fmt_nan = lambda v, s="": f"{v:.4f}{s}" if not np.isnan(v) else "n/a"
+            st.metric("Components", pls_p["n_components"])
+            import pandas as _pd_m
+            _mdf = _pd_m.DataFrame({
+                "":        [f"Protein ({unit})", f"Crowder ({_crowder_unit})"],
+                "RMSEC":   [_fmt_nan(pls_p["rmsec_protein"]),  _fmt_nan(pls_p["rmsec_peg"])],
+                "RMSECV":  [_fmt_nan(pls_p["rmsecv"]),         _fmt_nan(pls_p["rmsecv"])],
+                "RMSEP":   [_fmt_nan(pls_p["rmsep_protein"]),  _fmt_nan(pls_p["rmsep_peg"])],
+                "R²":      [_fmt_nan(pls_p["r2_protein_train"]),_fmt_nan(pls_p["r2_peg_train"])],
+                "Q²":      [_fmt_nan(pls_p.get("q2_cv_protein", float("nan"))), _fmt_nan(pls_p.get("q2_cv_peg", float("nan")))],
+            }).set_index("")
+            st.dataframe(_mdf, use_container_width=True)
 
             fig_d = make_subplots(
                 rows=2, cols=2,
@@ -1658,10 +1675,14 @@ with tab_calib:
         elif pls_p is not None:
             # ── Single-output protein PLS calibration ─────────
             st.subheader("Protein PLS regression")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Optimal components", pls_p["n_components"])
-            m2.metric("RMSEP",     f"{pls_p.get('rmse_test', pls_p['cv_rmse']):.4f} {unit}")
-            m3.metric("Train R²", f"{pls_p['r2_train']:.4f}")
+            _fmt_nan = lambda v, s="": f"{v:.4f}{s}" if not np.isnan(float(v)) else "n/a"
+            _mc = st.columns(6)
+            _mc[0].metric("Components", pls_p["n_components"])
+            _mc[1].metric("RMSEC",  _fmt_nan(pls_p["rmsec"],  f" {unit}"))
+            _mc[2].metric("RMSECV", _fmt_nan(pls_p["rmsecv"], f" {unit}"))
+            _mc[3].metric("RMSEP",  _fmt_nan(pls_p.get("rmsep", pls_p.get("rmse_test", float("nan"))), f" {unit}"))
+            _mc[4].metric("R²",     _fmt_nan(pls_p["r2_train"]))
+            _mc[5].metric("Q²",     _fmt_nan(pls_p.get("q2_cv", float("nan"))))
 
             fig_p = make_subplots(
                 rows=2, cols=2,
@@ -1811,10 +1832,14 @@ with tab_calib:
         if pls_s:
             st.divider()
             st.subheader("Salt PLS regression")
-            s1, s2, s3 = st.columns(3)
-            s1.metric("Optimal components", pls_s["n_components"])
-            s2.metric("RMSEP",     f"{pls_s.get('rmse_test', pls_s['cv_rmse']):.4f}")
-            s3.metric("Train R²", f"{pls_s['r2_train']:.4f}")
+            _fmt_nan = lambda v, s="": f"{v:.4f}{s}" if not np.isnan(float(v)) else "n/a"
+            _sc = st.columns(6)
+            _sc[0].metric("Components", pls_s["n_components"])
+            _sc[1].metric("RMSEC",  _fmt_nan(pls_s["rmsec"],  f" {_salt_unit}"))
+            _sc[2].metric("RMSECV", _fmt_nan(pls_s["rmsecv"], f" {_salt_unit}"))
+            _sc[3].metric("RMSEP",  _fmt_nan(pls_s.get("rmsep", pls_s.get("rmse_test", float("nan"))), f" {_salt_unit}"))
+            _sc[4].metric("R²",     _fmt_nan(pls_s["r2_train"]))
+            _sc[5].metric("Q²",     _fmt_nan(pls_s.get("q2_cv", float("nan"))))
 
             fig_s = make_subplots(rows=1, cols=3, subplot_titles=[
                 "a)  Preprocessed standards", "b)  Calibration (actual vs predicted)", "c)  CV vs Training RMSE"
