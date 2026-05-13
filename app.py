@@ -2875,24 +2875,26 @@ with tab_cls:
     if not _cls_results:
         st.info("Load a reference CSV, then click ▶ Run CLS to see results here.")
     else:
-        for _fi, (_fn, _cr) in enumerate(_cls_results.items()):
-            _dist_cls    = _cr.get("distance", np.arange(_cr["C"].shape[0]))
-            _wn_c        = _cr.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
-            _sm_cls      = _cr.get("scan_mode", "xy")
-            _n_spec_cls  = _cr["C"].shape[0]
-            _mR2         = float(_cr["R2"].mean())
-            _mRMSE       = float(_cr["RMSE"].mean())
-            _dist_lbl    = "Depth (µm)" if _sm_cls == "z" else "Distance (µm)"
+        _cls_sel = st.selectbox("Select linescan", list(_cls_results.keys()), key="cls_linescan_sel")
+        _fn = _cls_sel
+        _cr = _cls_results[_cls_sel]
 
-            with st.expander(
-                f"**{_fn}** — mean R² = {_mR2:.4f},  mean RMSE = {_mRMSE:.4e}",
-                expanded=True,
-            ):
+        _dist_cls    = _cr.get("distance", np.arange(_cr["C"].shape[0]))
+        _wn_c        = _cr.get("wn_proc",  np.arange(_cr["ST"].shape[1]))
+        _sm_cls      = _cr.get("scan_mode", "xy")
+        _n_spec_cls  = _cr["C"].shape[0]
+        _mR2         = float(_cr["R2"].mean())
+        _mRMSE       = float(_cr["RMSE"].mean())
+        _dist_lbl    = "Depth (µm)" if _sm_cls == "z" else "Distance (µm)"
+
+        st.caption(f"Mean R² = {_mR2:.4f} · Mean RMSE = {_mRMSE:.4e}")
+
+        if True:  # kept for indentation compatibility
                 # ── Slider (above all panels) ──────────────────────────────
                 _pos_cls = st.slider(
                     "Linescan position",
                     0, _n_spec_cls - 1, _n_spec_cls // 2,
-                    key=f"cls_slider_{_fi}",
+                    key="cls_slider",
                 )
                 _vline_x = float(_dist_cls[_pos_cls])
 
