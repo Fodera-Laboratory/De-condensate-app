@@ -24,6 +24,7 @@ def _find_optimal_components(
     y: np.ndarray,
     max_components: int = 20,
     cv_folds: int = 5,
+    random_state: int = 42,
 ):
     """
     Cross-validate PLSRegression over 1..max_components and return the optimal
@@ -36,7 +37,7 @@ def _find_optimal_components(
     rmse_cv     : list[float]  mean CV RMSE per component count
     rmse_train  : list[float]  training RMSE per component count
     """
-    kfold = RepeatedKFold(n_splits=min(cv_folds, X.shape[0]), n_repeats=3, random_state=42)
+    kfold = RepeatedKFold(n_splits=min(cv_folds, X.shape[0]), n_repeats=3, random_state=random_state)
     rmse_cv, rmse_train = [], []
     fold_errors_all = []
     max_comp = min(max_components, X.shape[0] - 1, X.shape[1])
@@ -89,6 +90,7 @@ def build_pls_model(
     max_components: int = 20,
     cv_folds: int = 5,
     test_size: float = 0.2,
+    random_state: int = 42,
 ) -> dict:
     """
     Train a single-output PLS model with automatic component selection.
@@ -102,7 +104,7 @@ def build_pls_model(
     """
     if test_size > 0 and len(y_train) >= max(5, int(1 / test_size) + 1):
         X_tr, X_te, y_tr, y_te = train_test_split(
-            X_train, y_train, test_size=test_size, random_state=42
+            X_train, y_train, test_size=test_size, random_state=random_state
         )
     else:
         X_tr, y_tr = X_train, y_train
@@ -112,6 +114,7 @@ def build_pls_model(
         X_tr, y_tr,
         max_components=max_components,
         cv_folds=cv_folds,
+        random_state=random_state,
     )
 
     feat_std       = np.std(X_tr, axis=0)
@@ -162,6 +165,7 @@ def build_dual_pls_model(
     max_components: int = 20,
     cv_folds: int = 5,
     test_size: float = 0.2,
+    random_state: int = 42,
 ) -> dict:
     """
     Train a multi-output PLS2 model predicting protein and molecular crowder simultaneously.
@@ -174,7 +178,7 @@ def build_dual_pls_model(
     """
     def _split(X, y):
         if test_size > 0 and len(y) >= max(5, int(1 / test_size) + 1):
-            return train_test_split(X, y, test_size=test_size, random_state=42)
+            return train_test_split(X, y, test_size=test_size, random_state=random_state)
         return X, X[:0], y, y[:0]
 
     X_prot_tr, X_prot_te, y_prot_tr, y_prot_te = _split(X_protein, y_protein)
@@ -189,6 +193,7 @@ def build_dual_pls_model(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
+        random_state=random_state,
     )
 
     feat_std       = np.std(X_train, axis=0)
@@ -257,6 +262,7 @@ def build_triple_pls_model(
     max_components: int = 20,
     cv_folds: int = 5,
     test_size: float = 0.2,
+    random_state: int = 42,
 ) -> dict:
     """
     Train a multi-output PLS2 model predicting two proteins and a molecular crowder
@@ -269,7 +275,7 @@ def build_triple_pls_model(
     """
     def _split(X, y):
         if test_size > 0 and len(y) >= max(5, int(1 / test_size) + 1):
-            return train_test_split(X, y, test_size=test_size, random_state=42)
+            return train_test_split(X, y, test_size=test_size, random_state=random_state)
         return X, X[:0], y, y[:0]
 
     X_p1_tr, X_p1_te, y_p1_tr, y_p1_te = _split(X_p1,  y_p1)
@@ -287,6 +293,7 @@ def build_triple_pls_model(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
+        random_state=random_state,
     )
 
     feat_std       = np.std(X_train, axis=0)
