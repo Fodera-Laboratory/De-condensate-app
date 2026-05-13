@@ -33,16 +33,21 @@ def _find_optimal_components(
 
     Returns
     -------
-    optimal_n   : int
-    rmse_cv     : list[float]       mean RMSECV per component count
-    rmse_train  : list[float]       training RMSE per component count
-    q2_cv_all   : list[float|list]  Q² from CV per component count;
-                                    scalar for single-output, list-per-column
-                                    for multi-output (non-zero rows only)
+    optimal_n          : int
+    rmse_cv            : list[float]   combined RMSECV per component count
+                                       (used for 1-SE component selection)
+    rmse_train         : list[float]   training RMSE per component count
+    rmsecv_per_output  : list[float]   per-output RMSECV at optimal_n;
+                                       single float in a list for single-output,
+                                       one float per column for multi-output
+                                       (only non-zero rows used per column so
+                                       zero-padded dual/triple Y_train does not
+                                       inflate the error)
     """
     kfold = RepeatedKFold(n_splits=min(cv_folds, X.shape[0]), n_repeats=3, random_state=random_state)
-    rmse_cv, rmse_train, q2_cv_all = [], [], []
+    rmse_cv, rmse_train = [], []
     fold_errors_all = []
+    cv_val_pred = []   # (Y_v_concat, Y_p_concat) per n_comp — used for per-output RMSECV
     max_comp = min(max_components, X.shape[0] - 1, X.shape[1])
     multiout = np.ndim(y) == 2 and y.shape[1] > 1
 
@@ -64,29 +69,13 @@ def _find_optimal_components(
         fold_errors_all.append(errors)
         rmse_cv.append(float(np.mean(errors)) if errors else float("inf"))
 
-        # Q² = 1 − PRESS / SS_tot computed across all CV folds
         if y_val_parts:
-            Y_v = np.concatenate(y_val_parts, axis=0)
-            Y_p = np.vstack(y_pred_parts)
-            if not multiout:
-                Y_v = Y_v.flatten(); Y_p = Y_p.flatten()
-                ss_res = float(np.sum((Y_v - Y_p) ** 2))
-                ss_tot = float(np.sum((Y_v - Y_v.mean()) ** 2))
-                q2_cv_all.append(float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0)
-            else:
-                q2_cols = []
-                for col in range(Y_v.shape[1]):
-                    mask = Y_v[:, col] != 0   # exclude zero-padded rows
-                    if mask.sum() < 2:
-                        q2_cols.append(float("nan"))
-                        continue
-                    yv = Y_v[mask, col]; yp = Y_p[mask, col]
-                    ss_res = float(np.sum((yv - yp) ** 2))
-                    ss_tot = float(np.sum((yv - yv.mean()) ** 2))
-                    q2_cols.append(float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0)
-                q2_cv_all.append(q2_cols)
+            cv_val_pred.append((
+                np.concatenate(y_val_parts, axis=0),
+                np.vstack(y_pred_parts),
+            ))
         else:
-            q2_cv_all.append(float("nan"))
+            cv_val_pred.append(None)
 
         feat_std = np.std(X, axis=0)
         valid    = feat_std > 1e-10
@@ -105,7 +94,28 @@ def _find_optimal_components(
         (i + 1 for i, v in enumerate(rmse_cv) if v <= threshold),
         best_idx + 1,
     )
-    return optimal_n, rmse_cv, rmse_train, q2_cv_all
+
+    # Per-output RMSECV at the optimal component count.
+    vp = cv_val_pred[optimal_n - 1]
+    if vp is not None:
+        Y_v, Y_p = vp
+        if not multiout:
+            rmsecv_per_output = [float(np.sqrt(mean_squared_error(
+                Y_v.flatten(), Y_p.flatten())))]
+        else:
+            rmsecv_per_output = []
+            for col in range(Y_v.shape[1]):
+                mask = Y_v[:, col] != 0   # skip zero-padded rows
+                if mask.sum() < 1:
+                    rmsecv_per_output.append(float("nan"))
+                    continue
+                rmsecv_per_output.append(float(np.sqrt(mean_squared_error(
+                    Y_v[mask, col], Y_p[mask, col]))))
+    else:
+        n_out = y.shape[1] if multiout else 1
+        rmsecv_per_output = [float("nan")] * n_out
+
+    return optimal_n, rmse_cv, rmse_train, rmsecv_per_output
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +148,7 @@ def build_pls_model(
         X_tr, y_tr = X_train, y_train
         X_te, y_te = X_train[:0], y_train[:0]
 
-    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, rmsecv_per_output = _find_optimal_components(
         X_tr, y_tr,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -158,7 +168,6 @@ def build_pls_model(
 
     rmsec = float(np.sqrt(mean_squared_error(y_tr, y_pred_train)))
     r2c   = float(r2_score(y_tr, y_pred_train))
-    q2    = q2_cv_all[n_opt - 1]
 
     if len(y_te) >= 2:
         y_pred_test = model.predict(X_te[:, valid_features]).flatten()
@@ -176,9 +185,9 @@ def build_pls_model(
         "rmsec":          rmsec,
         "rmse_train":     rmsec,       # backward-compat alias
         "r2_train":       r2c,
-        "rmsecv":         float(rmse_cv[n_opt - 1]),
-        "cv_rmse":        float(rmse_cv[n_opt - 1]),  # backward-compat alias
-        "q2_cv":          q2,
+        "rmsecv":         rmsecv_per_output[0],
+        "cv_rmse":        rmsecv_per_output[0],   # backward-compat alias
+        "q2_cv":          r2_test,     # Q² = R² on held-out test set (Massei et al. 2026)
         "rmsep":          rmse_test,
         "rmse_test":      rmse_test,   # backward-compat alias
         "r2_test":        r2_test,
@@ -225,7 +234,7 @@ def build_dual_pls_model(
     y_train_peg     = np.concatenate([np.zeros(len(y_prot_tr)), y_peg_tr])
     Y_train         = np.column_stack([y_train_protein, y_train_peg])
 
-    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, rmsecv_per_output = _find_optimal_components(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -250,11 +259,6 @@ def build_dual_pls_model(
     rmsec_peg     = float(np.sqrt(mean_squared_error(y_peg_tr,  _ypg)))
     r2c_protein   = float(r2_score(y_prot_tr, _ypp))
     r2c_peg       = float(r2_score(y_peg_tr,  _ypg))
-
-    # Q² per component from CV (non-zero rows, computed in _find_optimal_components)
-    _q2 = q2_cv_all[n_opt - 1]
-    q2_protein = _q2[0] if isinstance(_q2, list) and len(_q2) > 0 else float("nan")
-    q2_peg     = _q2[1] if isinstance(_q2, list) and len(_q2) > 1 else float("nan")
 
     rmse_protein = float(np.sqrt(mean_squared_error(y_train_protein, Y_pred[:, 0])))
     r2_protein   = float(r2_score(y_train_protein, Y_pred[:, 0]))
@@ -282,10 +286,12 @@ def build_dual_pls_model(
         "rmsec_peg":             rmsec_peg,
         "r2_protein_train":      r2c_protein,
         "r2_peg_train":          r2c_peg,
-        "rmsecv":                float(rmse_cv[n_opt - 1]),
+        "rmsecv":                float(rmse_cv[n_opt - 1]),  # combined (1-SE rule)
         "cv_rmse":               float(rmse_cv[n_opt - 1]),  # backward-compat
-        "q2_cv_protein":         q2_protein,
-        "q2_cv_peg":             q2_peg,
+        "rmsecv_protein":        rmsecv_per_output[0] if len(rmsecv_per_output) > 0 else float("nan"),
+        "rmsecv_peg":            rmsecv_per_output[1] if len(rmsecv_per_output) > 1 else float("nan"),
+        "q2_cv_protein":         r2_test_protein,  # Q² = R² on held-out test set
+        "q2_cv_peg":             r2_test_peg,       # Q² = R² on held-out test set
         "rmsep_protein":         rmsep_protein,
         "rmsep_peg":             rmsep_peg,
         "cv_rmse_protein":       rmsep_protein,   # backward-compat
@@ -345,7 +351,7 @@ def build_triple_pls_model(
     y_t_peg  = np.concatenate([np.zeros(n1),      np.zeros(n2),   y_peg_tr     ])
     Y_train  = np.column_stack([y_t_p1, y_t_p2, y_t_peg])
 
-    n_opt, rmse_cv, rmse_train, q2_cv_all = _find_optimal_components(
+    n_opt, rmse_cv, rmse_train, rmsecv_per_output = _find_optimal_components(
         X_train, Y_train,
         max_components=max_components,
         cv_folds=cv_folds,
@@ -374,12 +380,6 @@ def build_triple_pls_model(
     r2c_p2    = float(r2_score(y_p2_tr,  _yp2))
     r2c_peg   = float(r2_score(y_peg_tr, _ypeg))
 
-    # Q² per component from CV
-    _q2 = q2_cv_all[n_opt - 1]
-    q2_p1  = _q2[0] if isinstance(_q2, list) and len(_q2) > 0 else float("nan")
-    q2_p2  = _q2[1] if isinstance(_q2, list) and len(_q2) > 1 else float("nan")
-    q2_peg = _q2[2] if isinstance(_q2, list) and len(_q2) > 2 else float("nan")
-
     # Per-output RMSEP on the held-out test sets
     def _rmsep(X_te, y_te, col):
         if len(y_te) < 1:
@@ -405,11 +405,14 @@ def build_triple_pls_model(
         "r2_p1_train":          r2c_p1,
         "r2_p2_train":          r2c_p2,
         "r2_peg_train":         r2c_peg,
-        "rmsecv":               float(rmse_cv[n_opt - 1]),
+        "rmsecv":               float(rmse_cv[n_opt - 1]),  # combined (1-SE rule)
         "cv_rmse":              float(rmse_cv[n_opt - 1]),  # backward-compat
-        "q2_cv_p1":             q2_p1,
-        "q2_cv_p2":             q2_p2,
-        "q2_cv_peg":            q2_peg,
+        "rmsecv_p1":            rmsecv_per_output[0] if len(rmsecv_per_output) > 0 else float("nan"),
+        "rmsecv_p2":            rmsecv_per_output[1] if len(rmsecv_per_output) > 1 else float("nan"),
+        "rmsecv_peg":           rmsecv_per_output[2] if len(rmsecv_per_output) > 2 else float("nan"),
+        "q2_cv_p1":             r2_test_p1,   # Q² = R² on held-out test set
+        "q2_cv_p2":             r2_test_p2,   # Q² = R² on held-out test set
+        "q2_cv_peg":            r2_test_peg,  # Q² = R² on held-out test set
         "rmsep_p1":             rmsep_p1,
         "rmsep_p2":             rmsep_p2,
         "rmsep_peg":            rmsep_peg,

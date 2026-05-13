@@ -1272,8 +1272,8 @@ with tab_calib:
             _fmt_nan = lambda v, s="": f"{v:.4f}{s}" if not np.isnan(v) else "n/a"
             _mc = st.columns(6)
             _mc[0].metric("Components", pls_p["n_components"])
-            _mc[1].metric("RMSECV", f"{pls_p['rmsecv']:.4f}")
-            _mc[2].metric("", "")  # spacer
+            _mc[1].metric("", "")
+            _mc[2].metric("", "")
             _mc[3].metric("", "")
             _mc[4].metric("", "")
             _mc[5].metric("", "")
@@ -1281,7 +1281,7 @@ with tab_calib:
             _mdf = _pd_m.DataFrame({
                 "":        [f"Protein 1 ({unit})", f"{_p2name} ({unit})", f"Crowder ({_crowder_unit})"],
                 "RMSEC":   [_fmt_nan(pls_p["rmsec_p1"]),  _fmt_nan(pls_p["rmsec_p2"]),  _fmt_nan(pls_p["rmsec_peg"])],
-                "RMSECV":  [_fmt_nan(pls_p["cv_rmse_p1"]), _fmt_nan(pls_p["cv_rmse_p2"]), _fmt_nan(pls_p["cv_rmse_peg"])],
+                "RMSECV":  [_fmt_nan(pls_p.get("rmsecv_p1", float("nan"))), _fmt_nan(pls_p.get("rmsecv_p2", float("nan"))), _fmt_nan(pls_p.get("rmsecv_peg", float("nan")))],
                 "RMSEP":   [_fmt_nan(pls_p["rmsep_p1"]),   _fmt_nan(pls_p["rmsep_p2"]),   _fmt_nan(pls_p["rmsep_peg"])],
                 "R²":      [_fmt_nan(pls_p["r2_p1_train"]),_fmt_nan(pls_p["r2_p2_train"]),_fmt_nan(pls_p["r2_peg_train"])],
                 "Q²":      [_fmt_nan(pls_p.get("q2_cv_p1", float("nan"))), _fmt_nan(pls_p.get("q2_cv_p2", float("nan"))), _fmt_nan(pls_p.get("q2_cv_peg", float("nan")))],
@@ -1436,7 +1436,7 @@ with tab_calib:
             _mdf = _pd_m.DataFrame({
                 "":        [f"Protein ({unit})", f"Crowder ({_crowder_unit})"],
                 "RMSEC":   [_fmt_nan(pls_p["rmsec_protein"]),  _fmt_nan(pls_p["rmsec_peg"])],
-                "RMSECV":  [_fmt_nan(pls_p["rmsecv"]),         _fmt_nan(pls_p["rmsecv"])],
+                "RMSECV":  [_fmt_nan(pls_p.get("rmsecv_protein", pls_p["rmsecv"])), _fmt_nan(pls_p.get("rmsecv_peg", pls_p["rmsecv"]))],
                 "RMSEP":   [_fmt_nan(pls_p["rmsep_protein"]),  _fmt_nan(pls_p["rmsep_peg"])],
                 "R²":      [_fmt_nan(pls_p["r2_protein_train"]),_fmt_nan(pls_p["r2_peg_train"])],
                 "Q²":      [_fmt_nan(pls_p.get("q2_cv_protein", float("nan"))), _fmt_nan(pls_p.get("q2_cv_peg", float("nan")))],
