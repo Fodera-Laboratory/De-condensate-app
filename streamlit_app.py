@@ -2308,9 +2308,27 @@ with tab_calib:
                             _sm_v   = an.detect_scan_mode(_pos_v)
                             _dist_v = an.compute_cumulative_distance(_pos_v, _sm_v)
 
+                            def _align_to_train(_X_proc, _wn_proc, _wn_train):
+                                """Resample preprocessed spectra to the model's training
+                                wavenumber axis when the lengths or values differ. Linear
+                                interpolation per row; returns _X_proc unchanged when the
+                                axes already match within 0.5 cm⁻¹.
+                                """
+                                _wn_proc  = np.asarray(_wn_proc,  dtype=float)
+                                _wn_train = np.asarray(_wn_train, dtype=float)
+                                if (len(_wn_proc) == len(_wn_train)
+                                        and np.allclose(_wn_proc, _wn_train, atol=0.5)):
+                                    return _X_proc
+                                return np.vstack([
+                                    np.interp(_wn_train, _wn_proc, _row) for _row in _X_proc
+                                ])
+
                             _preds = {}
                             if _vpls_p is not None:
-                                _Xp, _, _ = an.preprocess_matrix(_X_v, _wn_v, _vsettings)
+                                _Xp, _wn_p_proc, _ = an.preprocess_matrix(
+                                    _X_v, _wn_v, _vsettings,
+                                )
+                                _Xp = _align_to_train(_Xp, _wn_p_proc, _vpls_p["wn"])
                                 _Xp_sel = _Xp[:, _vpls_p["valid_features"]]
                                 _Yp = _vpls_p["model"].predict(_Xp_sel)
                                 if _vtriple:
@@ -2323,9 +2341,10 @@ with tab_calib:
                                 else:
                                     _preds["protein"] = _Yp.flatten()
                             if _vpls_s is not None:
-                                _Xs, _, _ = an.preprocess_matrix(
+                                _Xs, _wn_s_proc, _ = an.preprocess_matrix(
                                     _X_v, _wn_v, _vsettings, is_salt=True,
                                 )
+                                _Xs = _align_to_train(_Xs, _wn_s_proc, _vpls_s["wn"])
                                 _Xs_sel = _Xs[:, _vpls_s["valid_features"]]
                                 _preds["salt"] = _vpls_s["model"].predict(_Xs_sel).flatten()
 
