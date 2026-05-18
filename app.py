@@ -740,7 +740,7 @@ with tab_pls:
         on_click=_goto_pls,
     )
     st.divider()
-    st.markdown("### Results")
+    st.markdown("### PLS regression model data")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2189,10 +2189,183 @@ with tab_results:
 
 
 
+# ── Optional validation: known-concentration linescan ────────────────────────
+with tab_calib:
+    st.divider()
+    st.markdown("### Optional validation — known-concentration linescan")
+    st.caption(
+        "Upload a Raman linescan recorded on a sample of known composition to "
+        "test the PLS model's predictive accuracy. Predictions are computed "
+        "per spectrum and compared against the values you enter below."
+    )
+
+    _vmodels = st.session_state.get("models")
+    if not _vmodels:
+        st.info("Build a PLS model first.")
+    else:
+        _vunit   = st.session_state.get("unit",         "mg/mL")
+        _vcunit  = st.session_state.get("crowder_unit", "wt%")
+        _vsunit  = st.session_state.get("salt_unit",    "mM")
+        _vp2name = st.session_state.get("protein2_name", "Protein 2") or "Protein 2"
+        _vpls_p    = _vmodels.get("pls_protein")
+        _vpls_s    = _vmodels.get("pls_salt")
+        _vsettings = _vmodels.get("pls_settings", {})
+        _vdual   = _vpls_p.get("dual",   False) if _vpls_p else False
+        _vtriple = _vpls_p.get("triple", False) if _vpls_p else False
+
+        if _vpls_p is None and _vpls_s is None:
+            st.info("Build at least one PLS model first.")
+        else:
+            # Component list reflects whichever models are currently trained
+            _val_comps = []  # (key, label, unit)
+            if _vpls_p is not None:
+                _val_comps.append(("protein", "Protein", _vunit))
+                if _vtriple:
+                    _val_comps.append(("protein2", _vp2name, _vunit))
+                if _vdual or _vtriple:
+                    _val_comps.append(("peg", "Crowder", _vcunit))
+            if _vpls_s is not None:
+                _val_comps.append(("salt", "Salt", _vsunit))
+
+            _val_file = st.file_uploader(
+                "Validation linescan (.txt)",
+                type=["txt"], key="pls_val_linescan",
+                help="A single Raman linescan recorded on a sample of known composition.",
+            )
+
+            st.markdown("**Known concentrations**")
+            _val_known = {}
+            _vcols = st.columns(len(_val_comps))
+            for _i, (_key, _lbl, _u) in enumerate(_val_comps):
+                _val_known[_key] = float(_vcols[_i].number_input(
+                    f"{_lbl} ({_u})", min_value=0.0, value=0.0, step=0.1,
+                    key=f"pls_val_known_{_key}", format="%.4f",
+                ))
+
+            _run_val = st.button("▶ Run validation", key="pls_val_run", type="primary")
+
+            if _run_val:
+                if _val_file is None:
+                    st.toast("Upload a validation linescan first.", icon="❌")
+                else:
+                    try:
+                        with st.spinner("Running PLS prediction on validation linescan…"):
+                            _vbytes = _val_file.read()
+                            _val_file.seek(0)
+                            _wn_v, _X_v, _ = an.load_linescan_bytes(_vbytes, _val_file.name)
+
+                            _preds = {}
+                            if _vpls_p is not None:
+                                _Xp, _, _ = an.preprocess_matrix(_X_v, _wn_v, _vsettings)
+                                _Xp_sel = _Xp[:, _vpls_p["valid_features"]]
+                                _Yp = _vpls_p["model"].predict(_Xp_sel)
+                                if _vtriple:
+                                    _preds["protein"]  = _Yp[:, 0].flatten()
+                                    _preds["protein2"] = _Yp[:, 1].flatten()
+                                    _preds["peg"]      = _Yp[:, 2].flatten()
+                                elif _vdual:
+                                    _preds["protein"] = _Yp[:, 0].flatten()
+                                    _preds["peg"]     = _Yp[:, 1].flatten()
+                                else:
+                                    _preds["protein"] = _Yp.flatten()
+                            if _vpls_s is not None:
+                                _Xs, _, _ = an.preprocess_matrix(
+                                    _X_v, _wn_v, _vsettings, is_salt=True,
+                                )
+                                _Xs_sel = _Xs[:, _vpls_s["valid_features"]]
+                                _preds["salt"] = _vpls_s["model"].predict(_Xs_sel).flatten()
+
+                            st.session_state["pls_val_preds"] = _preds
+                            st.session_state["pls_val_known"] = dict(_val_known)
+                            st.session_state["pls_val_comps"] = list(_val_comps)
+                            st.session_state["pls_val_fname"] = _val_file.name
+                    except Exception as _e:
+                        st.error(f"Validation failed: {_e}")
+
+            _vp = st.session_state.get("pls_val_preds")
+            _vk = st.session_state.get("pls_val_known")
+            _vc = st.session_state.get("pls_val_comps")
+            if _vp and _vk and _vc:
+                from scipy import stats as _stats
+                _rows  = []
+                _plots = []  # (label, unit, predictions array, known)
+                for _key, _lbl, _u in _vc:
+                    _y = _vp.get(_key)
+                    if _y is None:
+                        continue
+                    _y = np.asarray(_y, dtype=float)
+                    _y = _y[np.isfinite(_y)]
+                    if _y.size == 0:
+                        continue
+                    _known = float(_vk.get(_key, 0.0))
+                    _mean  = float(np.mean(_y))
+                    _sd    = float(np.std(_y, ddof=1)) if _y.size > 1 else 0.0
+                    _bias  = _mean - _known
+                    _rmsep = float(np.sqrt(np.mean((_y - _known) ** 2)))
+                    _rel   = (_rmsep / _known * 100.0) if _known != 0 else float("nan")
+                    if _y.size > 1:
+                        _, _pval = _stats.ttest_1samp(_y, _known)
+                        _pval = float(_pval)
+                    else:
+                        _pval = float("nan")
+                    _rows.append({
+                        "Component":          _lbl,
+                        f"Known ({_u})":      f"{_known:.3g}",
+                        f"Mean ± SD ({_u})":  f"{_mean:.3g} ± {_sd:.3g}",
+                        f"Bias ({_u})":       f"{_bias:+.3g}",
+                        f"RMSEP ({_u})":      f"{_rmsep:.3g}",
+                        "Relative RMSEP (%)": f"{_rel:.1f}" if np.isfinite(_rel) else "—",
+                        "p-value (t-test)":   f"{_pval:.3g}" if np.isfinite(_pval) else "—",
+                    })
+                    _plots.append((_lbl, _u, _y, _known))
+
+                if _rows:
+                    st.markdown(
+                        f"**Validation results** — *{st.session_state.get('pls_val_fname', '')}* "
+                        f"({len(_plots[0][2])} spectra)"
+                    )
+                    st.dataframe(_rows, use_container_width=True, hide_index=True)
+
+                    _spfig = make_subplots(
+                        rows=1, cols=len(_plots),
+                        subplot_titles=[p[0] for p in _plots],
+                        horizontal_spacing=0.08,
+                    )
+                    _rng = np.random.default_rng(0)
+                    for _i, (_lbl, _u, _y, _known) in enumerate(_plots, start=1):
+                        _xj = _rng.uniform(-0.15, 0.15, size=_y.size)
+                        _color = COLORS[(_i - 1) % len(COLORS)]
+                        _spfig.add_trace(go.Scatter(
+                            x=_xj, y=_y, mode="markers",
+                            marker=dict(color=_color, size=6, opacity=0.7),
+                            showlegend=False, name=_lbl,
+                        ), row=1, col=_i)
+                        _spfig.add_trace(go.Scatter(
+                            x=[-0.35, 0.35], y=[_known, _known], mode="lines",
+                            line=dict(color="#555", width=2, dash="dash"),
+                            showlegend=False, hoverinfo="skip",
+                        ), row=1, col=_i)
+                        _spfig.update_xaxes(
+                            showticklabels=False, range=[-0.4, 0.4],
+                            zeroline=False, row=1, col=_i,
+                        )
+                        _spfig.update_yaxes(title_text=_u, row=1, col=_i)
+                    _spfig.update_layout(
+                        height=360, margin=dict(t=40, b=20, l=20, r=20),
+                    )
+                    st.plotly_chart(_spfig, use_container_width=True)
+                    st.caption(
+                        "Each point is a single-spectrum PLS prediction; the dashed line marks "
+                        "the known concentration. p-value is from a one-sample t-test of the "
+                        "predictions against the known value (null hypothesis: predictions are "
+                        "unbiased)."
+                    )
+
+
 # ── PLS linescan results (bottom of PLS tab) ──────────────────────────────────
 with tab_calib:
     st.divider()
-    st.markdown("### Results")
+    st.markdown("### PLS results linescan")
     if "results" not in st.session_state or not st.session_state["results"]:
         st.info("Run analysis first — configure preprocessing above and click ▶ Run MCR Analysis.")
     else:
