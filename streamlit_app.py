@@ -516,7 +516,7 @@ st.markdown(
     """
     <div style="text-align:center; margin: 0 0 18px 0;">
         <div style="font-family:Arial,sans-serif; font-size:54px; font-weight:700;
-                    letter-spacing:2px; color:#1b85b8; line-height:1.05;">PEARL</div>
+                    letter-spacing:2px; color:#0A0A0A; line-height:1.05;">PEARL</div>
         <div style="font-family:Arial,sans-serif; font-size:18px; font-weight:400;
                     color:#5a5255; margin-top:2px;">
             Protein Evaluation and Analysis via Raman Linescans
