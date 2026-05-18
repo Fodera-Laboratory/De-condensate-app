@@ -2589,8 +2589,58 @@ with tab_calib:
 with tab_calib:
     st.divider()
     st.markdown("### PLS results linescan")
+
+    _apply_models  = st.session_state.get("models") or {}
+    _apply_pls_p   = _apply_models.get("pls_protein")
+    _apply_pls_s   = _apply_models.get("pls_salt")
+    _apply_pls_set = _apply_models.get("pls_settings", {})
+    _apply_n_comp  = _apply_models.get("n_components", 2)
+    _has_pls       = (_apply_pls_p is not None) or (_apply_pls_s is not None)
+    _apply_btn = st.button(
+        "▶ Apply PLS Model",
+        type="primary",
+        disabled=not (_has_pls and bool(linescan_files)),
+        help=(
+            "Build a PLS model first and upload at least one linescan in the "
+            "Linescan files tab to enable. Runs the trained PLS models on every "
+            "uploaded linescan; MCR is not run."
+        ),
+        key="pls_apply_btn",
+    )
+    if _apply_btn:
+        try:
+            _ap_results = {}
+            _ap_sm = "xy"
+            _ap_prog = st.progress(0, text="Applying PLS to linescans…")
+            _ap_renames = st.session_state.get("file_renames", {})
+            for _ai, _af in enumerate(linescan_files):
+                _adname = _ap_renames.get(_af.name, _af.name)
+                _ap_prog.progress(_ai / len(linescan_files), text=f"Processing {_adname}…")
+                _awn, _aX, _apos = an.load_linescan_bytes(_af.read(), _af.name)
+                _af.seek(0)
+                _ap_sm = an.detect_scan_mode(_apos)
+                _ap_results[_adname] = an.process_linescan(
+                    _awn, _aX, _apos,
+                    scan_mode=_ap_sm,
+                    pls_protein_info=_apply_pls_p,
+                    pls_salt_info=_apply_pls_s,
+                    ST_init=None,
+                    n_components=int(_apply_n_comp),
+                    settings=_apply_pls_set,
+                    pls_settings=_apply_pls_set,
+                )
+            _ap_prog.progress(1.0, text="Done!")
+            st.session_state["results"]   = _ap_results
+            st.session_state["scan_mode"] = _ap_sm
+            st.toast(f"PLS applied to {len(_ap_results)} linescan(s).", icon="✅")
+        except Exception as _ae:
+            st.error(f"Applying PLS model failed: {_ae}")
+
     if "results" not in st.session_state or not st.session_state["results"]:
-        st.info("Run analysis first — configure preprocessing above and click ▶ Run MCR Analysis.")
+        st.info(
+            "Build a PLS model first — upload a linescan in the **Linescan files** "
+            "tab and click **▶ Apply PLS Model**."
+        )
     else:
         _r_all    = st.session_state["results"]
         _models   = st.session_state.get("models", {})
@@ -5117,7 +5167,7 @@ with tab_image:
         "and stage position, then choose a score to visualise as a colour-coded overlay along the linescan path."
     )
 
-    if "results" not in st.session_state:
+    if "results" not in st.session_state or not st.session_state["results"]:
         st.info("Run the analysis first to generate scores for overlay.")
     else:
         _ov_results        = st.session_state["results"]
