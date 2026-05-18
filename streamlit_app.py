@@ -516,7 +516,8 @@ st.markdown(
     """
     <div style="text-align:center; margin: 0 0 18px 0;">
         <div style="font-family:Arial,sans-serif; font-size:54px; font-weight:700;
-                    letter-spacing:2px; color:#0A0A0A; line-height:1.05;">PEARL</div>
+                    letter-spacing:2px; color:
+                    #0A0A0A; line-height:1.05;">PEARL</div>
         <div style="font-family:Arial,sans-serif; font-size:18px; font-weight:400;
                     color:#5a5255; margin-top:2px;">
             Protein Evaluation and Analysis via Raman Linescans
@@ -2940,6 +2941,18 @@ with tab_calib:
         if not _can_reconstruct:
             st.info("Re-run MCR Analysis to enable spectral reconstruction (requires PLS results).")
         else:
+            # Align linescan spectra to the model's training wn axis if they differ —
+            # downstream code uses _pls_p["valid_features"] which is sized to the
+            # training axis. Mirrors the fix in process_linescan / validation.
+            _wn_train_rec = np.asarray(_pls_p.get("wn", _wn_pls_rec), dtype=float)
+            _wn_pls_rec   = np.asarray(_wn_pls_rec, dtype=float)
+            if (len(_wn_pls_rec) != len(_wn_train_rec)
+                    or not np.allclose(_wn_pls_rec, _wn_train_rec, atol=0.5)):
+                _X_pls_rec = np.vstack([
+                    np.interp(_wn_train_rec, _wn_pls_rec, _row) for _row in _X_pls_rec
+                ])
+                _wn_pls_rec = _wn_train_rec
+
             # ── Solvent reference selection ────────────────────────────────────
             import glob as _glob
 
