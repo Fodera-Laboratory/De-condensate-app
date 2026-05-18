@@ -75,36 +75,52 @@ def process_linescan(
                 where=C_mcr[:, 1] != 0,
             )
 
+    def _align_to_train(X_proc, wn_proc, wn_train):
+        """Resample preprocessed spectra to the model's training wavenumber axis.
+
+        Returns X_proc unchanged when axes already match within 0.5 cm⁻¹;
+        otherwise interpolates linearly per row onto wn_train. Lets a PLS
+        model trained on one axis (e.g. derived from standards CSV headers)
+        be applied to linescans recorded on a slightly different axis.
+        """
+        wn_proc  = np.asarray(wn_proc,  dtype=float)
+        wn_train = np.asarray(wn_train, dtype=float)
+        if len(wn_proc) == len(wn_train) and np.allclose(wn_proc, wn_train, atol=0.5):
+            return X_proc
+        return np.vstack([np.interp(wn_train, wn_proc, row) for row in X_proc])
+
     # Protein (and optionally molecular crowder) PLS (optional)
     # Preprocess with pls_settings to match the normalization used during training
     pls_protein = pls_protein2 = pls_peg = None
     X_pls = wn_pls = None
     if pls_protein_info is not None:
         X_pls, wn_pls, _ = preprocess_matrix(X, wn_original, pls_settings)
+        X_pls_aligned = _align_to_train(X_pls, wn_pls, pls_protein_info["wn"])
         if pls_protein_info.get("triple"):
             Y_triple     = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
+                X_pls_aligned[:, pls_protein_info["valid_features"]]
             )
             pls_protein  = Y_triple[:, 0].flatten()
             pls_protein2 = Y_triple[:, 1].flatten()
             pls_peg      = Y_triple[:, 2].flatten()
         elif pls_protein_info.get("dual"):
             Y_dual      = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
+                X_pls_aligned[:, pls_protein_info["valid_features"]]
             )
             pls_protein = Y_dual[:, 0].flatten()
             pls_peg     = Y_dual[:, 1].flatten()
         else:
             pls_protein = pls_protein_info["model"].predict(
-                X_pls[:, pls_protein_info["valid_features"]]
+                X_pls_aligned[:, pls_protein_info["valid_features"]]
             ).flatten()
 
     # Salt PLS (optional, separate model on fingerprint region)
     pls_salt = None
     if pls_salt_info is not None:
-        X_salt, _, _ = preprocess_matrix(X, wn_original, pls_settings, is_salt=True)
+        X_salt, wn_salt, _ = preprocess_matrix(X, wn_original, pls_settings, is_salt=True)
+        X_salt_aligned = _align_to_train(X_salt, wn_salt, pls_salt_info["wn"])
         pls_salt = pls_salt_info["model"].predict(
-            X_salt[:, pls_salt_info["valid_features"]]
+            X_salt_aligned[:, pls_salt_info["valid_features"]]
         ).flatten()
 
     return {
