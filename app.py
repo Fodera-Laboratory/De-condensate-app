@@ -2252,7 +2252,9 @@ with tab_calib:
                         with st.spinner("Running PLS prediction on validation linescan…"):
                             _vbytes = _val_file.read()
                             _val_file.seek(0)
-                            _wn_v, _X_v, _ = an.load_linescan_bytes(_vbytes, _val_file.name)
+                            _wn_v, _X_v, _pos_v = an.load_linescan_bytes(_vbytes, _val_file.name)
+                            _sm_v   = an.detect_scan_mode(_pos_v)
+                            _dist_v = an.compute_cumulative_distance(_pos_v, _sm_v)
 
                             _preds = {}
                             if _vpls_p is not None:
@@ -2275,73 +2277,193 @@ with tab_calib:
                                 _Xs_sel = _Xs[:, _vpls_s["valid_features"]]
                                 _preds["salt"] = _vpls_s["model"].predict(_Xs_sel).flatten()
 
-                            st.session_state["pls_val_preds"] = _preds
-                            st.session_state["pls_val_known"] = dict(_val_known)
-                            st.session_state["pls_val_comps"] = list(_val_comps)
-                            st.session_state["pls_val_fname"] = _val_file.name
+                            st.session_state["pls_val_preds"]    = _preds
+                            st.session_state["pls_val_known"]    = dict(_val_known)
+                            st.session_state["pls_val_comps"]    = list(_val_comps)
+                            st.session_state["pls_val_fname"]    = _val_file.name
+                            st.session_state["pls_val_distance"] = _dist_v
+                            st.session_state["pls_val_scanmode"] = _sm_v
                     except Exception as _e:
                         st.error(f"Validation failed: {_e}")
 
-            _vp = st.session_state.get("pls_val_preds")
-            _vk = st.session_state.get("pls_val_known")
-            _vc = st.session_state.get("pls_val_comps")
+            _vp  = st.session_state.get("pls_val_preds")
+            _vk  = st.session_state.get("pls_val_known")
+            _vc  = st.session_state.get("pls_val_comps")
+            _vd  = st.session_state.get("pls_val_distance")
+            _vsm = st.session_state.get("pls_val_scanmode", "xy")
             if _vp and _vk and _vc:
                 from scipy import stats as _stats
-                _rows  = []
-                _plots = []  # (label, unit, predictions array, known)
+
+                _vcol_a, _vcol_b = st.columns([1, 1])
+                _excl_on = _vcol_a.checkbox(
+                    "Exclude outliers from validation metrics",
+                    value=False, key="pls_val_excl_on",
+                    help="Points whose absolute z-score (per component, against the predictions' "
+                         "own mean and SD) exceeds the threshold are excluded from the metrics "
+                         "and t-test. Excluded points are shown as hollow markers on the plots.",
+                )
+                _excl_z = float(_vcol_b.number_input(
+                    "Z-score threshold (× SD)",
+                    min_value=0.5, max_value=10.0, value=3.0, step=0.5,
+                    key="pls_val_excl_z", disabled=not _excl_on,
+                ))
+
+                _x_label = "Depth (µm)" if _vsm == "z" else "Distance (µm)"
+
+                _per_comp = []
                 for _key, _lbl, _u in _vc:
-                    _y = _vp.get(_key)
-                    if _y is None:
+                    _y_full = _vp.get(_key)
+                    if _y_full is None:
                         continue
-                    _y = np.asarray(_y, dtype=float)
-                    _y = _y[np.isfinite(_y)]
-                    if _y.size == 0:
+                    _y_full = np.asarray(_y_full, dtype=float)
+                    _finite = np.isfinite(_y_full)
+                    if not np.any(_finite):
                         continue
                     _known = float(_vk.get(_key, 0.0))
-                    _mean  = float(np.mean(_y))
-                    _sd    = float(np.std(_y, ddof=1)) if _y.size > 1 else 0.0
-                    _bias  = _mean - _known
-                    _rmsep = float(np.sqrt(np.mean((_y - _known) ** 2)))
-                    _rel   = (_rmsep / _known * 100.0) if _known != 0 else float("nan")
-                    if _y.size > 1:
-                        _, _pval = _stats.ttest_1samp(_y, _known)
-                        _pval = float(_pval)
-                    else:
-                        _pval = float("nan")
-                    _rows.append({
-                        "Component":          _lbl,
-                        f"Known ({_u})":      f"{_known:.3g}",
-                        f"Mean ± SD ({_u})":  f"{_mean:.3g} ± {_sd:.3g}",
-                        f"Bias ({_u})":       f"{_bias:+.3g}",
-                        f"RMSEP ({_u})":      f"{_rmsep:.3g}",
-                        "Relative RMSEP (%)": f"{_rel:.1f}" if np.isfinite(_rel) else "—",
-                        "p-value (t-test)":   f"{_pval:.3g}" if np.isfinite(_pval) else "—",
-                    })
-                    _plots.append((_lbl, _u, _y, _known))
 
-                if _rows:
+                    _mask_ex = np.zeros_like(_y_full, dtype=bool)
+                    if _excl_on:
+                        _y_fin = _y_full[_finite]
+                        _m  = float(np.mean(_y_fin))
+                        _s  = float(np.std(_y_fin, ddof=1)) if _y_fin.size > 1 else 0.0
+                        if _s > 0:
+                            _z = np.abs(_y_full - _m) / _s
+                            _mask_ex = (_z > _excl_z) & _finite
+
+                    _mask_keep = _finite & (~_mask_ex)
+                    _y_kept    = _y_full[_mask_keep]
+
+                    if _y_kept.size == 0:
+                        _mean = _sd = _bias = _rmsep = _pval = float("nan")
+                    else:
+                        _mean  = float(np.mean(_y_kept))
+                        _sd    = float(np.std(_y_kept, ddof=1)) if _y_kept.size > 1 else 0.0
+                        _bias  = _mean - _known
+                        _rmsep = float(np.sqrt(np.mean((_y_kept - _known) ** 2)))
+                        if _y_kept.size > 1:
+                            _, _pval = _stats.ttest_1samp(_y_kept, _known)
+                            _pval = float(_pval)
+                        else:
+                            _pval = float("nan")
+                    _rel = (_rmsep / _known * 100.0) if _known != 0 else float("nan")
+
+                    _per_comp.append(dict(
+                        label=_lbl, unit=_u, known=_known,
+                        y=_y_full, keep=_mask_keep, excl=_mask_ex,
+                        n_total=int(_finite.sum()), n_ex=int(_mask_ex.sum()),
+                        mean=_mean, sd=_sd, bias=_bias, rmsep=_rmsep,
+                        rel=_rel, pval=_pval,
+                    ))
+
+                if _per_comp:
+                    _fname = st.session_state.get("pls_val_fname", "")
+                    _ntot  = _per_comp[0]["n_total"]
                     st.markdown(
-                        f"**Validation results** — *{st.session_state.get('pls_val_fname', '')}* "
-                        f"({len(_plots[0][2])} spectra)"
+                        f"**Validation results** — *{_fname}* ({_ntot} spectra)"
                     )
+
+                    # Use position axis if available and length-matched, else spectrum index
+                    _use_pos = _vd is not None and len(_vd) == len(_per_comp[0]["y"])
+                    _x_all = np.asarray(_vd) if _use_pos else np.arange(len(_per_comp[0]["y"]))
+                    _x_axis_title = _x_label if _use_pos else "Spectrum index"
+
+                    _linefig = make_subplots(
+                        rows=len(_per_comp), cols=1, shared_xaxes=True,
+                        subplot_titles=[c["label"] for c in _per_comp],
+                        vertical_spacing=0.06,
+                    )
+                    for _i, _c in enumerate(_per_comp, start=1):
+                        _color    = COLORS[(_i - 1) % len(COLORS)]
+                        _idx_keep = np.where(_c["keep"])[0]
+                        _idx_ex   = np.where(_c["excl"])[0]
+                        if _idx_keep.size > 0:
+                            _linefig.add_trace(go.Scatter(
+                                x=_x_all[_idx_keep], y=_c["y"][_idx_keep],
+                                mode="lines+markers",
+                                line=dict(color=_color, width=1.5),
+                                marker=dict(color=_color, size=5),
+                                showlegend=False, name="kept",
+                            ), row=_i, col=1)
+                        if _idx_ex.size > 0:
+                            _linefig.add_trace(go.Scatter(
+                                x=_x_all[_idx_ex], y=_c["y"][_idx_ex],
+                                mode="markers",
+                                marker=dict(
+                                    color="rgba(0,0,0,0)", size=9,
+                                    line=dict(color=_color, width=1.5),
+                                ),
+                                showlegend=False, name="excluded",
+                            ), row=_i, col=1)
+                        _linefig.add_trace(go.Scatter(
+                            x=[float(_x_all.min()), float(_x_all.max())],
+                            y=[_c["known"], _c["known"]], mode="lines",
+                            line=dict(color="#555", width=1.5, dash="dash"),
+                            showlegend=False, hoverinfo="skip",
+                        ), row=_i, col=1)
+                        _linefig.update_yaxes(title_text=_c["unit"], row=_i, col=1)
+                    _linefig.update_xaxes(
+                        title_text=_x_axis_title, row=len(_per_comp), col=1,
+                    )
+                    _linefig.update_layout(
+                        height=180 * len(_per_comp) + 60,
+                        margin=dict(t=40, b=40, l=40, r=20),
+                    )
+                    st.plotly_chart(_linefig, use_container_width=True)
+
+                    _rows = []
+                    for _c in _per_comp:
+                        _rows.append({
+                            "Component":                 _c["label"],
+                            f"Known ({_c['unit']})":     f"{_c['known']:.3g}",
+                            f"Mean ± SD ({_c['unit']})": (
+                                f"{_c['mean']:.3g} ± {_c['sd']:.3g}"
+                                if np.isfinite(_c['mean']) else "—"
+                            ),
+                            f"Bias ({_c['unit']})": (
+                                f"{_c['bias']:+.3g}" if np.isfinite(_c['bias']) else "—"
+                            ),
+                            f"RMSEP ({_c['unit']})": (
+                                f"{_c['rmsep']:.3g}" if np.isfinite(_c['rmsep']) else "—"
+                            ),
+                            "Relative RMSEP (%)": (
+                                f"{_c['rel']:.1f}" if np.isfinite(_c['rel']) else "—"
+                            ),
+                            "p-value (t-test)": (
+                                f"{_c['pval']:.3g}" if np.isfinite(_c['pval']) else "—"
+                            ),
+                            "Excluded": f"{_c['n_ex']}/{_c['n_total']}",
+                        })
                     st.dataframe(_rows, use_container_width=True, hide_index=True)
 
                     _spfig = make_subplots(
-                        rows=1, cols=len(_plots),
-                        subplot_titles=[p[0] for p in _plots],
+                        rows=1, cols=len(_per_comp),
+                        subplot_titles=[c["label"] for c in _per_comp],
                         horizontal_spacing=0.08,
                     )
                     _rng = np.random.default_rng(0)
-                    for _i, (_lbl, _u, _y, _known) in enumerate(_plots, start=1):
-                        _xj = _rng.uniform(-0.15, 0.15, size=_y.size)
-                        _color = COLORS[(_i - 1) % len(COLORS)]
+                    for _i, _c in enumerate(_per_comp, start=1):
+                        _color    = COLORS[(_i - 1) % len(COLORS)]
+                        _idx_keep = np.where(_c["keep"])[0]
+                        _idx_ex   = np.where(_c["excl"])[0]
+                        if _idx_keep.size > 0:
+                            _xj = _rng.uniform(-0.15, 0.15, size=_idx_keep.size)
+                            _spfig.add_trace(go.Scatter(
+                                x=_xj, y=_c["y"][_idx_keep], mode="markers",
+                                marker=dict(color=_color, size=6, opacity=0.7),
+                                showlegend=False, name="kept",
+                            ), row=1, col=_i)
+                        if _idx_ex.size > 0:
+                            _xje = _rng.uniform(-0.15, 0.15, size=_idx_ex.size)
+                            _spfig.add_trace(go.Scatter(
+                                x=_xje, y=_c["y"][_idx_ex], mode="markers",
+                                marker=dict(
+                                    color="rgba(0,0,0,0)", size=8,
+                                    line=dict(color=_color, width=1.5),
+                                ),
+                                showlegend=False, name="excluded",
+                            ), row=1, col=_i)
                         _spfig.add_trace(go.Scatter(
-                            x=_xj, y=_y, mode="markers",
-                            marker=dict(color=_color, size=6, opacity=0.7),
-                            showlegend=False, name=_lbl,
-                        ), row=1, col=_i)
-                        _spfig.add_trace(go.Scatter(
-                            x=[-0.35, 0.35], y=[_known, _known], mode="lines",
+                            x=[-0.35, 0.35], y=[_c["known"], _c["known"]], mode="lines",
                             line=dict(color="#555", width=2, dash="dash"),
                             showlegend=False, hoverinfo="skip",
                         ), row=1, col=_i)
@@ -2349,16 +2471,18 @@ with tab_calib:
                             showticklabels=False, range=[-0.4, 0.4],
                             zeroline=False, row=1, col=_i,
                         )
-                        _spfig.update_yaxes(title_text=_u, row=1, col=_i)
+                        _spfig.update_yaxes(title_text=_c["unit"], row=1, col=_i)
                     _spfig.update_layout(
                         height=360, margin=dict(t=40, b=20, l=20, r=20),
                     )
                     st.plotly_chart(_spfig, use_container_width=True)
                     st.caption(
-                        "Each point is a single-spectrum PLS prediction; the dashed line marks "
-                        "the known concentration. p-value is from a one-sample t-test of the "
-                        "predictions against the known value (null hypothesis: predictions are "
-                        "unbiased)."
+                        "Top plot: predicted concentration along the linescan position, one "
+                        "panel per component. Bottom plot: same predictions as a strip plot. "
+                        "Filled markers are kept; hollow markers are excluded by the outlier "
+                        "filter (when enabled). Dashed line marks the known concentration. "
+                        "p-value is from a one-sample t-test of the kept predictions against "
+                        "the known value (null hypothesis: predictions are unbiased)."
                     )
 
 
