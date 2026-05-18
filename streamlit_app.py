@@ -731,12 +731,20 @@ with tab_pls:
         salt_smooth    = st.session_state.get("salt_smooth",    "none")
         salt_normalize = st.session_state.get("salt_normalize", "none")
 
+    _can_build = bool(
+        linescan_files
+        or protein_std_src or peg_std_src or protein2_std_src or salt_std_src
+    )
     build_btn = st.button(
         "▶ Build PLS Model",
         use_container_width=True,
         type="primary",
-        disabled=not linescan_files,
-        help="Upload linescan files first (Files tab) to enable.",
+        disabled=not _can_build,
+        help=(
+            "Upload at least one standards CSV above, or a linescan in the Files "
+            "tab, to enable. Standards CSVs encode the wavenumber axis as their "
+            "column headers, so a linescan is not required."
+        ),
         on_click=_goto_pls,
     )
     st.divider()
