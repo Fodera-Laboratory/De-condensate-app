@@ -6026,9 +6026,27 @@ with tab_download:
             import matplotlib.ticker as _mticker
             import io as _mio
 
+            # Font fallback chain: try the user's pick first, then Liberation
+            # (Arial/Times/Courier metric-equivalent, installed via packages.txt
+            # on Streamlit Cloud), then DejaVu (matplotlib's bundled default).
+            _serif_picked = _ui_font in ("Times New Roman", "Georgia")
+            _mono_picked  = _ui_font == "Courier New"
+            if _serif_picked:
+                _family   = "serif"
+                _fallback = [_ui_font, "Liberation Serif", "DejaVu Serif"]
+                _rc_key   = "font.serif"
+            elif _mono_picked:
+                _family   = "monospace"
+                _fallback = [_ui_font, "Liberation Mono", "DejaVu Sans Mono"]
+                _rc_key   = "font.monospace"
+            else:
+                _family   = "sans-serif"
+                _fallback = [_ui_font, "Liberation Sans", "DejaVu Sans"]
+                _rc_key   = "font.sans-serif"
             plt.rcParams.update({
                 "svg.fonttype":    "none",
-                "font.family":     _ui_font,
+                "font.family":     _family,
+                _rc_key:           _fallback,
                 "text.color":      "black",
                 "axes.labelcolor": "black",
                 "xtick.color":     "black",
