@@ -894,15 +894,59 @@ pls_settings = dict(
 # ─────────────────────────────────────────────────────────────────────────────
 # Build Models
 # ─────────────────────────────────────────────────────────────────────────────
+def _wn_from_standards_csv(src):
+    """Extract a wavenumber axis from a standards CSV's column headers.
+
+    Standards CSVs have format: SampleID, wn_1, wn_2, ..., wn_n  (one row per standard).
+    The first column is the SampleID/concentration; the remaining column headers
+    are the wavenumbers at which the spectra were recorded. Returns a float array
+    or None if the headers are not all numeric.
+    """
+    if src is None:
+        return None
+    try:
+        _df = _read_csv_src(src)
+        _wn = pd.to_numeric(_df.columns[1:], errors="coerce").to_numpy(dtype=float)
+        if np.all(np.isfinite(_wn)) and _wn.size > 0:
+            return _wn
+    except Exception:
+        pass
+    return None
+
 if build_btn:
-    if not linescan_files:
-        st.toast("Upload at least one linescan file to derive the wavenumber axis.", icon="❌")
-    else:
+    _wn_ref_src = None  # "linescan" or "standards" — used for the user-facing message
+    wn_ref = None
+    if linescan_files:
         try:
             with st.spinner("Deriving wavenumber axis from first linescan…"):
                 first = linescan_files[0]
                 wn_ref, _, _ = an.load_linescan_bytes(first.read(), first.name)
                 first.seek(0)
+                _wn_ref_src = "linescan"
+        except Exception as _e:
+            st.toast(f"Could not read linescan for wavenumber axis: {_e}", icon="❌")
+            wn_ref = None
+    if wn_ref is None:
+        # Fall back to any uploaded standards CSV (column headers are wavenumbers).
+        for _src in (protein_std_src, peg_std_src, protein2_std_src, salt_std_src):
+            wn_ref = _wn_from_standards_csv(_src)
+            if wn_ref is not None:
+                _wn_ref_src = "standards"
+                break
+    if wn_ref is None:
+        st.toast(
+            "Upload at least one linescan file or a standards CSV (with numeric "
+            "wavenumber column headers) so the wavenumber axis can be derived.",
+            icon="❌",
+        )
+    else:
+        if _wn_ref_src == "standards":
+            st.caption(
+                f"Wavenumber axis derived from standards CSV column headers "
+                f"({len(wn_ref)} points, {wn_ref[0]:.0f}–{wn_ref[-1]:.0f} cm⁻¹). "
+                "Upload a linescan to use its axis instead."
+            )
+        try:
 
             # ── Protein PLS (optional) ───────────────────────────────────────
             pls_protein = None
@@ -2453,34 +2497,30 @@ with tab_calib:
                     )
                     st.plotly_chart(_linefig, use_container_width=True)
 
-                    _rows = []
-                    for _c in _per_comp:
-                        _rows.append({
-                            "Component":                 _c["label"],
-                            f"Known ({_c['unit']})":     f"{_c['known']:.3g}",
-                            f"Mean ± SD ({_c['unit']})": (
-                                f"{_c['mean']:.3g} ± {_c['sd']:.3g}"
-                                if np.isfinite(_c['mean']) else "—"
-                            ),
-                            f"Bias ({_c['unit']})": (
-                                f"{_c['bias']:+.3g}" if np.isfinite(_c['bias']) else "—"
-                            ),
-                            f"RMSEP — validation ({_c['unit']})": (
-                                f"{_c['rmsep']:.3g}" if np.isfinite(_c['rmsep']) else "—"
-                            ),
-                            f"RMSEP — model ({_c['unit']})": (
-                                f"{_c['model_rmsep']:.3g}"
-                                if np.isfinite(_c['model_rmsep']) else "—"
-                            ),
-                            "Relative RMSEP (%)": (
-                                f"{_c['rel']:.1f}" if np.isfinite(_c['rel']) else "—"
-                            ),
-                            "p-value (t-test)": (
-                                f"{_c['pval']:.3g}" if np.isfinite(_c['pval']) else "—"
-                            ),
-                            "Excluded": f"{_c['n_ex']}/{_c['n_total']}",
-                        })
-                    st.dataframe(_rows, use_container_width=True, hide_index=True)
+                    import pandas as _pd_v
+                    _fmt_v = lambda v: f"{v:.4f}" if np.isfinite(v) else "n/a"
+                    _vdf = _pd_v.DataFrame({
+                        "":                   [f"{c['label']} ({c['unit']})" for c in _per_comp],
+                        "Known":              [_fmt_v(c["known"])           for c in _per_comp],
+                        "Mean ± SD":          [
+                            f"{_fmt_v(c['mean'])} ± {_fmt_v(c['sd'])}"
+                            if np.isfinite(c["mean"]) else "n/a"
+                            for c in _per_comp
+                        ],
+                        "Bias":               [
+                            f"{c['bias']:+.4f}" if np.isfinite(c["bias"]) else "n/a"
+                            for c in _per_comp
+                        ],
+                        "RMSEP (validation)": [_fmt_v(c["rmsep"])           for c in _per_comp],
+                        "RMSEP (model)":      [_fmt_v(c["model_rmsep"])     for c in _per_comp],
+                        "Relative RMSEP (%)": [
+                            f"{c['rel']:.2f}" if np.isfinite(c["rel"]) else "n/a"
+                            for c in _per_comp
+                        ],
+                        "p-value (t-test)":   [_fmt_v(c["pval"])            for c in _per_comp],
+                        "Excluded":           [f"{c['n_ex']}/{c['n_total']}" for c in _per_comp],
+                    }).set_index("")
+                    st.dataframe(_vdf, use_container_width=True)
 
                     _spfig = make_subplots(
                         rows=1, cols=len(_per_comp),
