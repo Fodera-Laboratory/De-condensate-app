@@ -2752,11 +2752,23 @@ with tab_calib:
                 + (f"crowder (wt%) is divided by 100." if _mb_crowder_unit == "wt%"
                    else f"crowder ({_mb_crowder_unit}) is converted via solution density.")
             )
-            _wc_mb_rho = st.number_input(
+            _mb_rho_cols = st.columns([2, 1])
+            _wc_mb_rho = _mb_rho_cols[0].number_input(
                 "Solution density (g/mL)", 0.5, 2.0, 1.3, 0.01,
                 key="pls_mb_density",
                 help="Converts protein mg/mL to mass fraction: f = c / (ρ × 1000). "
                      "Also used for crowder if unit is mg/mL or mM.",
+            )
+            _mb_mw_kda = _mb_rho_cols[1].number_input(
+                "Protein MW (kDa) — density estimate",
+                min_value=1.0, max_value=10000.0, value=66.0, step=1.0,
+                key="pls_mb_mw_kda",
+                help="Estimates protein density using Fischer et al. (2004): "
+                     "ρ = 1.410 + 0.145·exp(−MW/13) g/cm³.",
+            )
+            _mb_fischer_rho = 1.410 + 0.145 * np.exp(-_mb_mw_kda / 13.0)
+            _mb_rho_cols[1].caption(
+                f"Fischer et al. estimate: **{_mb_fischer_rho:.3f} g/cm³**"
             )
             _prot_frac_mb = np.clip(np.array(_r["pls_protein"], dtype=float), 0, None) / (_wc_mb_rho * 1000)
             def _peg_to_frac(arr, unit, mw, rho):
@@ -3101,6 +3113,15 @@ with tab_cls:
             help="Converts protein concentration (mg/mL) to mass fraction: φ = c / (ρ × 1000). "
                  f"Crowder ({_crowder_unit_wc}): for wt% φ = wt%/100; for mg/mL φ = c/(ρ×1000); for mM φ = c×MW/(ρ×1e6).",
         )
+        _wc_mw_kda = _wcd.number_input(
+            "Protein MW (kDa) — density estimate",
+            min_value=1.0, max_value=10000.0, value=66.0, step=1.0,
+            key="wc_mw_kda",
+            help="Estimates protein density using Fischer et al. (2004): "
+                 "ρ = 1.410 + 0.145·exp(−MW/13) g/cm³.",
+        )
+        _wc_fischer_rho = 1.410 + 0.145 * np.exp(-_wc_mw_kda / 13.0)
+        _wcd.caption(f"Fischer et al. estimate: **{_wc_fischer_rho:.3f} g/cm³**")
 
         _wc_ready = (
             _wc_w_lbl != "— none —" and _wc_p_lbl != "— none —"
