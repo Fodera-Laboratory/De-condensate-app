@@ -2310,6 +2310,40 @@ with tab_calib:
 
                 _x_label = "Depth (µm)" if _vsm == "z" else "Distance (µm)"
 
+                def _model_rmsep(_key):
+                    """Return per-component RMSEP from the training model.
+
+                    Falls back to RMSECV if RMSEP is NaN (e.g., no test split).
+                    Returns NaN if neither metric is available.
+                    """
+                    if _key == "salt":
+                        _m = _vpls_s
+                        if _m is None:
+                            return float("nan")
+                        _r = float(_m.get("rmsep",   float("nan")))
+                        if not np.isfinite(_r):
+                            _r = float(_m.get("rmsecv", float("nan")))
+                        return _r
+                    _m = _vpls_p
+                    if _m is None:
+                        return float("nan")
+                    if _vtriple:
+                        _rkey = {"protein": "p1", "protein2": "p2", "peg": "peg"}.get(_key)
+                    elif _vdual:
+                        _rkey = {"protein": "protein", "peg": "peg"}.get(_key)
+                    else:
+                        # Single-output PLS: combined rmsep/rmsecv
+                        _r = float(_m.get("rmsep",  float("nan")))
+                        if not np.isfinite(_r):
+                            _r = float(_m.get("rmsecv", float("nan")))
+                        return _r
+                    if _rkey is None:
+                        return float("nan")
+                    _r = float(_m.get(f"rmsep_{_rkey}",  float("nan")))
+                    if not np.isfinite(_r):
+                        _r = float(_m.get(f"rmsecv_{_rkey}", float("nan")))
+                    return _r
+
                 _per_comp = []
                 for _key, _lbl, _u in _vc:
                     _y_full = _vp.get(_key)
@@ -2348,11 +2382,12 @@ with tab_calib:
                     _rel = (_rmsep / _known * 100.0) if _known != 0 else float("nan")
 
                     _per_comp.append(dict(
-                        label=_lbl, unit=_u, known=_known,
+                        key=_key, label=_lbl, unit=_u, known=_known,
                         y=_y_full, keep=_mask_keep, excl=_mask_ex,
                         n_total=int(_finite.sum()), n_ex=int(_mask_ex.sum()),
                         mean=_mean, sd=_sd, bias=_bias, rmsep=_rmsep,
                         rel=_rel, pval=_pval,
+                        model_rmsep=_model_rmsep(_key),
                     ))
 
                 if _per_comp:
@@ -2377,11 +2412,19 @@ with tab_calib:
                         _idx_keep = np.where(_c["keep"])[0]
                         _idx_ex   = np.where(_c["excl"])[0]
                         if _idx_keep.size > 0:
+                            _ey = None
+                            if np.isfinite(_c["model_rmsep"]) and _c["model_rmsep"] > 0:
+                                _ey = dict(
+                                    type="data",
+                                    array=np.full(_idx_keep.size, _c["model_rmsep"]),
+                                    visible=True, color=_color, thickness=1, width=2,
+                                )
                             _linefig.add_trace(go.Scatter(
                                 x=_x_all[_idx_keep], y=_c["y"][_idx_keep],
                                 mode="lines+markers",
                                 line=dict(color=_color, width=1.5),
                                 marker=dict(color=_color, size=5),
+                                error_y=_ey,
                                 showlegend=False, name="kept",
                             ), row=_i, col=1)
                         if _idx_ex.size > 0:
@@ -2422,8 +2465,12 @@ with tab_calib:
                             f"Bias ({_c['unit']})": (
                                 f"{_c['bias']:+.3g}" if np.isfinite(_c['bias']) else "—"
                             ),
-                            f"RMSEP ({_c['unit']})": (
+                            f"RMSEP — validation ({_c['unit']})": (
                                 f"{_c['rmsep']:.3g}" if np.isfinite(_c['rmsep']) else "—"
+                            ),
+                            f"RMSEP — model ({_c['unit']})": (
+                                f"{_c['model_rmsep']:.3g}"
+                                if np.isfinite(_c['model_rmsep']) else "—"
                             ),
                             "Relative RMSEP (%)": (
                                 f"{_c['rel']:.1f}" if np.isfinite(_c['rel']) else "—"
@@ -2478,11 +2525,15 @@ with tab_calib:
                     st.plotly_chart(_spfig, use_container_width=True)
                     st.caption(
                         "Top plot: predicted concentration along the linescan position, one "
-                        "panel per component. Bottom plot: same predictions as a strip plot. "
-                        "Filled markers are kept; hollow markers are excluded by the outlier "
-                        "filter (when enabled). Dashed line marks the known concentration. "
-                        "p-value is from a one-sample t-test of the kept predictions against "
-                        "the known value (null hypothesis: predictions are unbiased)."
+                        "panel per component. Error bars are ± the per-component model RMSEP "
+                        "from training (RMSECV used as fallback when RMSEP is unavailable). "
+                        "Bottom plot: same predictions as a strip plot. Filled markers are "
+                        "kept; hollow markers are excluded by the outlier filter (when "
+                        "enabled). Dashed line marks the known concentration. The table "
+                        "reports the validation RMSEP (RMSE of kept predictions vs the known "
+                        "value) alongside the model RMSEP for comparison. p-value is from a "
+                        "one-sample t-test of the kept predictions against the known value "
+                        "(null hypothesis: predictions are unbiased)."
                     )
 
 
