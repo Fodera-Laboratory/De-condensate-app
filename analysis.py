@@ -1,7 +1,7 @@
 """
 analysis.py — Top-level pipeline for the PEARL app.
 
-Re-exports all public functions from the sub-modules so that app.py can
+Re-exports all public functions from the sub-modules so that streamlit_app.py can
 continue to use `import analysis as an` without changes.
 
 Sub-modules

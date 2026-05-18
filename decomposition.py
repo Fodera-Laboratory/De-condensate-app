@@ -309,7 +309,7 @@ def build_dual_pls_model(
         "y_test_peg":            y_test_peg,
         "y_pred_test_peg":       y_pred_test_peg,
         "X_train_proc":          X_train,
-        "wn":                    None,   # filled by app.py after training
+        "wn":                    None,   # filled by streamlit_app.py after training
         "x_mean":                x_mean,
         "y_mean":                y_mean,
         "x_loadings":            model.x_loadings_.copy(),

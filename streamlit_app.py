@@ -1,6 +1,6 @@
 """
 PEARL — Protein Evaluation and Analysis via Raman Linescans
-Run with:  streamlit run app.py
+Run with:  streamlit run streamlit_app.py
 """
 
 import base64
